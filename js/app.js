@@ -14,6 +14,7 @@ import { mulberry32 } from './rng.js';
 import { clamp } from './rng.js';
 import { createNoise, fbm, ridged, duneNoise, windStreaks, voronoi } from './noise.js';
 import { generateWorld, getBuildingTemplate, getSpeedMod } from './world.js';
+import { createTerrain } from './terrain.js';
 import { createEnemyFromRoster } from './data/enemies.js';
 import { createContractBoard, getDifficulty as getDifficultyProfile, getScenario, getStyle } from './contracts.js';
 import { createUpgradeChoices } from './upgrades.js';
@@ -43,6 +44,7 @@ function loop(now) {
     const dt = Math.min(rawDt, 0.1);
     input.tick();
     if (input.pause) toggleSettings();
+    if (settingsOpen && input.abandon && currentScreen === screens.sortie) abandonSortie();
     accumulator += dt;
     let safety = 0;
     while (accumulator >= SIM_DT && safety < 4) {
@@ -59,10 +61,7 @@ function loop(now) {
     }
     input.draw(camera.ctx);
     const fps = rawDt > 0 ? Math.round(1 / rawDt) : 0;
-    camera.ctx.save();
-    camera.ctx.scale(camera.dpr, camera.dpr);
-    drawTextShadow(camera.ctx, `FPS: ${fps}`, 8, 8, '#446633', 11, 'left');
-    camera.ctx.restore();
+    lastFps = fps;
 
     // ── Settings overlay ──
     if (settingsOpen) {
@@ -77,6 +76,114 @@ function loop(now) {
 function lerp(a, b, t) { return a + (b - a) * t; }
 
 let settingsOpen = false;
+// Sortie start timestamp — used to fade the on-screen controls hint.
+let sortieStartedAt = performance.now();
+let lastFps = 0;
+
+// Position of the player's most recent gunshot — civilians panic only
+// when gunfire happens near them (or their site's defenders open up).
+let lastShotX = 0, lastShotY = 0, lastShotT = -999;
+
+// ── Road network queries (vehicles prefer driving on roads) ──
+let _roadSegsCache = null;
+let _miniRoadsCache = null;
+
+function getRoadSegs() {
+  if (_roadSegsCache || !world) return _roadSegsCache;
+  const segs = [];
+  for (const road of world.roads) {
+    for (let i = 0; i < road.points.length - 1; i++) {
+      segs.push({ ax: road.points[i].x, ay: road.points[i].y, bx: road.points[i + 1].x, by: road.points[i + 1].y });
+    }
+  }
+  _roadSegsCache = segs;
+  return segs;
+}
+
+/** Nearest point on the road network within maxDist, else null.
+ *  Returns { x, y, ang, dist } where ang is the segment direction. */
+function nearestRoadPoint(x, y, maxDist) {
+  const segs = getRoadSegs();
+  if (!segs || segs.length === 0) return null;
+  let bd = maxDist * maxDist;
+  let best = null;
+  for (const s of segs) {
+    const dx = s.bx - s.ax, dy = s.by - s.ay;
+    const l2 = dx * dx + dy * dy || 1e-6;
+    let t = ((x - s.ax) * dx + (y - s.ay) * dy) / l2;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const px = s.ax + t * dx, py = s.ay + t * dy;
+    const ddx = x - px, ddy = y - py;
+    const d2 = ddx * ddx + ddy * ddy;
+    if (d2 < bd) {
+      bd = d2;
+      best = { x: px, y: py, ang: Math.atan2(dy, dx), dist: Math.sqrt(d2) };
+    }
+  }
+  return best;
+}
+
+/** Blend a desired heading toward the nearest road so ground vehicles
+ *  naturally flow onto and follow the road network. */
+function steerAlongRoads(desiredAngle, x, y) {
+  const rp = nearestRoadPoint(x, y, 260);
+  if (!rp) return desiredAngle;
+  // Pick whichever way along the segment best matches our intent…
+  let roadAng = rp.ang;
+  const diffA = Math.abs(Math.atan2(Math.sin(rp.ang - desiredAngle), Math.cos(rp.ang - desiredAngle)));
+  const diffB = Math.abs(Math.atan2(Math.sin(rp.ang + Math.PI - desiredAngle), Math.cos(rp.ang + Math.PI - desiredAngle)));
+  if (diffB < diffA) roadAng = rp.ang + Math.PI;
+  // …then blend by proximity (full grip within 120u of the centreline).
+  const w = Math.max(0, 1 - rp.dist / 260) * 0.85;
+  let diff = roadAng - desiredAngle;
+  while (diff > Math.PI) diff -= Math.PI * 2;
+  while (diff < -Math.PI) diff += Math.PI * 2;
+  return desiredAngle + diff * w;
+}
+
+// ── Convoy path mechanics ─────────────────────────────────────────────────
+// Convoys are arc-length bound to their route polyline: every member sits at
+// its own distance along the SAME path, so rear trucks trace corners exactly
+// like the lead instead of whipping around its pivot.
+
+/** Position + tangent direction at distance s along a convoy's route. */
+function pointAlongRoute(convoy, s) {
+  const pts = convoy.route, cum = convoy.routeCum;
+  const total = cum[cum.length - 1];
+  s = ((s % total) + total) % total; // wrap
+  // Binary search the segment
+  let lo = 0, hi = cum.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (cum[mid] < s) lo = mid + 1; else hi = mid;
+  }
+  const i = Math.max(0, lo - 1);
+  const segLen = cum[i + 1] - cum[i] || 1e-6;
+  const t = (s - cum[i]) / segLen;
+  const a = pts[i], b = pts[Math.min(i + 1, pts.length - 1)];
+  return {
+    x: a.x + (b.x - a.x) * t,
+    y: a.y + (b.y - a.y) * t,
+    ang: Math.atan2(b.y - a.y, b.x - a.x),
+  };
+}
+
+/** All members of a convoy in world space (lead first). Shared by
+ *  rendering, bullet collision and escort fire. */
+const CONVOY_GAP_VEH = 30, CONVOY_GAP_INF = 17;
+function getConvoyMembers(convoy) {
+  const out = [];
+  let offset = 0;
+  for (let i = 0; i < (convoy.composition || []).length; i++) {
+    const cls = convoy.composition[i];
+    const isVeh = cls === 'technical' || cls === 'apc' || cls === 'shilka' || cls === 'sam';
+    offset += isVeh ? CONVOY_GAP_VEH : CONVOY_GAP_INF;
+    const dirSign = convoy.direction >= 0 ? 1 : -1;
+    const p = pointAlongRoute(convoy, convoy.s - offset * dirSign);
+    out.push({ x: p.x, y: p.y, angle: p.ang + (dirSign < 0 ? Math.PI : 0), isVeh, cls });
+  }
+  return out;
+}
 
 function toggleSettings() {
   settingsOpen = !settingsOpen;
@@ -87,6 +194,7 @@ function toggleSettings() {
 // ══════════════════════════════════════════════════════════════
 
 let world = null;
+let sharedTerrain = null;
 let terrainNoise = null;
 let moistureNoise = null;
 let detailNoise = null;
@@ -131,9 +239,35 @@ const sortieState = {
   endTimer: 0,
 };
 
+/** Pre-rendered minimap road layer at a given size (cached per world). */
+function getMiniRoads(S) {
+  if (_miniRoadsCache && _miniRoadsCache.S === S) return _miniRoadsCache.c;
+  const c = document.createElement('canvas');
+  c.width = S; c.height = S;
+  const g = c.getContext('2d');
+  const half = world.worldSize / 2;
+  const k = S / world.worldSize;
+  g.strokeStyle = 'rgba(170,150,95,0.5)';
+  g.lineWidth = 1;
+  for (const road of world.roads) {
+    if (road.points.length < 2) continue;
+    g.beginPath();
+    g.moveTo((road.points[0].x + half) * k, (road.points[0].y + half) * k);
+    for (let i = 1; i < road.points.length; i++) {
+      g.lineTo((road.points[i].x + half) * k, (road.points[i].y + half) * k);
+    }
+    g.stroke();
+  }
+  _miniRoadsCache = { S, c };
+  return c;
+}
+
 function initWorld(contract = null) {
   const seed = contract?.seed ?? 42;
-  world = generateWorld({ seed, contract });
+  sharedTerrain = createTerrain(seed, WORLD_SIZE);
+  world = generateWorld({ seed, contract, terrain: sharedTerrain });
+  _roadSegsCache = null;
+  _miniRoadsCache = null;
   terrainNoise = createNoise(seed);
   moistureNoise = createNoise(seed + 777);
   detailNoise = createNoise(seed + 333);
@@ -179,102 +313,78 @@ const BIOME = {
   gravel:    { r: 155, g: 140, b: 105 },  // grey gravel
   wetSand:   { r: 165, g: 140, b: 100 },  // damp, muted
   brightSand:{ r: 235, g: 215, b: 160 },  // sunlit crests
+  oasisGreen:{ r: 84,  g: 128, b: 74  },  // vegetated wet ground
 };
 
 function sampleTerrain(wx, wy) {
-  const scale = 0.0006;
   const detail = 0.005;
   const windAngle = 0.6; // prevailing wind direction
 
-  // Domain warping for organic shapes
-  const warped = { x: wx, y: wy };
-  const warpStrength = 40;
-  warped.x += fbm(terrainNoise, wx * 0.0003, wy * 0.0003, 2) * warpStrength;
-  warped.y += fbm(moistureNoise, wx * 0.0003 + 100, wy * 0.0003 + 100, 2) * warpStrength;
-
-  // Large-scale elevation
-  const elev = fbm(terrainNoise, warped.x * scale, warped.y * scale, 5, 2.0, 0.5);
-
-  // Dune shapes — crescent/barchan dunes aligned with wind
-  const dunes = duneNoise(terrainNoise, warped.x * 0.0005, warped.y * 0.0005, windAngle, 1.0);
-
-  // Moisture (determines wet/dry areas)
-  const moist = fbm(moistureNoise, warped.x * scale * 1.2, warped.y * scale * 1.2, 3, 2.0, 0.5);
-
-  // Wind streaks — long parallel lines
-  const streaks = windStreaks(detailNoise, wx, wy, windAngle, 0.015);
-
-  // Fine texture — pebbles, grain
-  const grain = fbm(detailNoise, wx * detail, wy * detail, 3, 2.2, 0.45);
-
-  // Rocky outcrop detection (voronoi edges)
-  const rocky = voronoi(terrainNoise, wx, wy, 0.008);
-
-  // ── Color blending ──
+  // ── Base colour from the shared terrain model (same source as world-gen)
   let r, g, b;
+  if (sharedTerrain) {
+    const ty = sharedTerrain.type(wx, wy);
+    const e = sharedTerrain.elevation(wx, wy);
+    const shade = clamp(e / 1600, -0.5, 0.5) * 26; // gentle relief shading
 
-  // Base layer: elevation-driven
-  if (elev < -0.15) {
-    // Low flat areas: wet sand or gravel
-    const t = (elev + 0.4) / 0.25;
-    const wetMix = Math.max(0, moist) * 0.4;
-    r = lerp(BIOME.gravel.r, BIOME.wetSand.r, wetMix);
-    g = lerp(BIOME.gravel.g, BIOME.wetSand.g, wetMix);
-    b = lerp(BIOME.gravel.b, BIOME.wetSand.b, wetMix);
-    r = lerp(r, BIOME.sand.r, clamp(t, 0, 1));
-    g = lerp(g, BIOME.sand.g, clamp(t, 0, 1));
-    b = lerp(b, BIOME.sand.b, clamp(t, 0, 1));
-  } else if (elev < 0.1) {
-    // Flat desert: sand with moisture variation
-    const moisture = (moist + 1) * 0.5;
-    if (moisture < 0.35) {
-      // Dry sand
-      r = BIOME.sand.r; g = BIOME.sand.g; b = BIOME.sand.b;
-    } else if (moisture < 0.55) {
-      // Hardpack
-      r = BIOME.hardpack.r; g = BIOME.hardpack.g; b = BIOME.hardpack.b;
-    } else {
-      // Wet sand near wadis
-      r = BIOME.wetSand.r; g = BIOME.wetSand.g; b = BIOME.wetSand.b;
+    switch (ty) {
+      case 'wadi': {
+        const t = clamp((e + 120) / 240, 0, 1);
+        r = lerp(BIOME.wetSand.r, BIOME.gravel.r, 1 - t * 0.6) - 8 + shade * 0.4;
+        g = lerp(BIOME.wetSand.g, BIOME.gravel.g, 1 - t * 0.6) - 8 + shade * 0.4;
+        b = lerp(BIOME.wetSand.b, BIOME.gravel.b, 1 - t * 0.6) - 6 + shade * 0.4;
+        break;
+      }
+      case 'oasis': {
+        r = BIOME.oasisGreen.r; g = BIOME.oasisGreen.g; b = BIOME.oasisGreen.b;
+        break;
+      }
+      case 'hardpack': {
+        r = BIOME.hardpack.r + shade * 0.5; g = BIOME.hardpack.g + shade * 0.5; b = BIOME.hardpack.b + shade * 0.5;
+        break;
+      }
+      case 'gravel': {
+        r = BIOME.gravel.r + shade * 0.6; g = BIOME.gravel.g + shade * 0.6; b = BIOME.gravel.b + shade * 0.6;
+        break;
+      }
+      case 'dunes': {
+        const dn = duneNoise(terrainNoise, wx * 0.0005, wy * 0.0005, windAngle, 1.0);
+        const crest = Math.max(0, dn - 0.35) * 2.2;
+        r = lerp(BIOME.dunes.r, BIOME.brightSand.r, crest) + shade * 0.3;
+        g = lerp(BIOME.dunes.g, BIOME.brightSand.g, crest) + shade * 0.3;
+        b = lerp(BIOME.dunes.b, BIOME.brightSand.b, crest) + shade * 0.3;
+        if (dn < -0.15) { const sh = -dn * 40; r -= sh; g -= sh; b -= sh; } // slipface shadow
+        break;
+      }
+      case 'rock': {
+        const rocky = voronoi(terrainNoise, wx, wy, 0.008);
+        const edge = clamp(rocky * 4, 0, 1);
+        r = lerp(BIOME.rock.r, BIOME.rock.r * 0.78, edge) + shade;
+        g = lerp(BIOME.rock.g, BIOME.rock.g * 0.78, edge) + shade;
+        b = lerp(BIOME.rock.b, BIOME.rock.b * 0.78, edge) + shade;
+        break;
+      }
+      default: { // sand — with subtle moisture patches
+        const moist = fbm(moistureNoise, wx * 0.0007, wy * 0.0007, 3, 2.0, 0.5);
+        const m = clamp((moist + 1) / 2, 0, 1);
+        r = lerp(BIOME.sand.r, BIOME.hardpack.r, m * 0.7) + shade * 0.4;
+        g = lerp(BIOME.sand.g, BIOME.hardpack.g, m * 0.7) + shade * 0.4;
+        b = lerp(BIOME.sand.b, BIOME.hardpack.b, m * 0.7) + shade * 0.4;
+      }
     }
-  } else if (elev < 0.3) {
-    // Rising terrain: hardpack to dunes
-    const t = (elev - 0.1) / 0.2;
-    const duneFactor = Math.max(0, dunes) * t;
-    r = lerp(BIOME.hardpack.r, BIOME.dunes.r, duneFactor);
-    g = lerp(BIOME.hardpack.g, BIOME.dunes.g, duneFactor);
-    b = lerp(BIOME.hardpack.b, BIOME.dunes.b, duneFactor);
-    // Bright sand on dune crests
-    const crest = Math.max(0, dunes - 0.4) * 2.5;
-    r = lerp(r, BIOME.brightSand.r, crest);
-    g = lerp(g, BIOME.brightSand.g, crest);
-    b = lerp(b, BIOME.brightSand.b, crest);
   } else {
-    // High terrain: rocky with dune ridges
-    const rockMix = clamp((elev - 0.3) * 3, 0, 1);
-    r = lerp(BIOME.hardpack.r, BIOME.rock.r, rockMix);
-    g = lerp(BIOME.hardpack.g, BIOME.rock.g, rockMix);
-    b = lerp(BIOME.hardpack.b, BIOME.rock.b, rockMix);
-    // Rocky outcrops from voronoi
-    const rockEdge = clamp(rocky * 4, 0, 1);
-    r = lerp(r, BIOME.rock.r * 0.8, rockEdge);
-    g = lerp(g, BIOME.rock.g * 0.8, rockEdge);
-    b = lerp(b, BIOME.rock.b * 0.8, rockEdge);
+    // No terrain yet (menu screens never sample this, but stay safe).
+    r = BIOME.sand.r; g = BIOME.sand.g; b = BIOME.sand.b;
   }
 
-  // ── Wind streaks — long parallel lines ──
-  const streakEffect = streaks * 18;
+  // ── Detail overlays (unchanged): wind streaks + grain
+  const streaks = windStreaks(detailNoise, wx, wy, windAngle, 0.015);
+  const streakEffect = streaks * 14;
   r += streakEffect; g += streakEffect * 0.8; b += streakEffect * 0.5;
 
-  // ── Grain/texture — fine pebble detail ──
-  const grainVar = grain * 10;
+  const grain = fbm(detailNoise, wx * detail, wy * detail, 3, 2.2, 0.45);
+  const grainVar = grain * 9;
   r += grainVar; g += grainVar; b += grainVar;
-
-  // ── Dune shadow (leeward side darker) ──
-  if (dunes > 0.1) {
-    const shadow = Math.max(0, -dunes) * 15;
-    r -= shadow; g -= shadow; b -= shadow;
-  }
 
   return {
     r: Math.max(0, Math.min(255, Math.round(r))),
@@ -283,12 +393,14 @@ function sampleTerrain(wx, wy) {
   };
 }
 
+
 // ── Smooth terrain rendering ──
 // Terrain is sampled on a coarse grid, then bilinearly blended across the
 // display tiles, so the ground reads as continuous desert instead of blocks.
 
-const TERRAIN_GRID_STEP = 96;   // world units between terrain samples
-let tgX0 = 0, tgY0 = 0, tgCols = 0, tgRows = 0, tgData = null;
+const TERRAIN_GRID_STEP = 72;   // world units between terrain samples
+let tgX0 = 0, tgY0 = 0, tgCols = 0, tgRows = 0;
+let tgCanvas = null, tgCtx = null;
 
 function updateTerrainGrid(cam) {
   const b = cam.getVisibleBounds();
@@ -297,122 +409,258 @@ function updateTerrainGrid(cam) {
   const cols = Math.ceil((b.right - x0) / TERRAIN_GRID_STEP) + 2;
   const rows = Math.ceil((b.bottom - y0) / TERRAIN_GRID_STEP) + 2;
 
-  if (!tgData || cols !== tgCols || rows !== tgRows || x0 !== tgX0 || y0 !== tgY0) {
+  if (!tgCanvas || cols !== tgCols || rows !== tgRows || x0 !== tgX0 || y0 !== tgY0) {
     tgX0 = x0; tgY0 = y0; tgCols = cols; tgRows = rows;
-    tgData = new Float32Array(cols * rows * 3);
+    if (!tgCanvas) {
+      tgCanvas = document.createElement('canvas');
+      tgCtx = tgCanvas.getContext('2d');
+    }
+    if (tgCanvas.width !== cols || tgCanvas.height !== rows) {
+      tgCanvas.width = cols; tgCanvas.height = rows;
+    }
+    const img = tgCtx.createImageData(cols, rows);
+    const d = img.data;
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
         const col = sampleTerrain(x0 + c * TERRAIN_GRID_STEP, y0 + r * TERRAIN_GRID_STEP);
-        const i = (r * cols + c) * 3;
-        tgData[i] = col.r; tgData[i + 1] = col.g; tgData[i + 2] = col.b;
+        const i = (r * cols + c) * 4;
+        d[i] = col.r; d[i + 1] = col.g; d[i + 2] = col.b; d[i + 3] = 255;
       }
+    }
+    tgCtx.putImageData(img, 0, 0);
+  }
+}
+
+// ── Static world-anchored detail overlays ─────────────────────────────────
+// Procedural tiles generated once per page load. They restore the fine
+// grain and large-scale mottling that sparse terrain sampling smooths
+// away, at zero per-sample cost. Patterns repeat in world space so they
+// never "swim" while scrolling.
+
+/** Draw `fn` nine times on a 3x3 grid so primitives wrap seamlessly
+ *  across tile edges — no more clipped blobs / straight seams. */
+function drawTileWrapped(g, S, fn) {
+  for (let ox = -1; ox <= 1; ox++) {
+    for (let oy = -1; oy <= 1; oy++) {
+      g.save();
+      g.translate(ox * S, oy * S);
+      fn();
+      g.restore();
     }
   }
 }
 
-/** Bilinear blend of the coarse terrain grid at a world position. */
-function terrainColorAt(wx, wy, out) {
-  const gx = clamp((wx - tgX0) / TERRAIN_GRID_STEP, 0, tgCols - 1.001);
-  const gy = clamp((wy - tgY0) / TERRAIN_GRID_STEP, 0, tgRows - 1.001);
-  const cx = Math.floor(gx), cy = Math.floor(gy);
-  const fx = gx - cx, fy = gy - cy;
-  const i00 = (cy * tgCols + cx) * 3;
-  const i10 = i00 + 3;
-  const i01 = i00 + tgCols * 3;
-  const i11 = i01 + 3;
-  const w00 = (1 - fx) * (1 - fy), w10 = fx * (1 - fy), w01 = (1 - fx) * fy, w11 = fx * fy;
-  out[0] = tgData[i00] * w00 + tgData[i10] * w10 + tgData[i01] * w01 + tgData[i11] * w11;
-  out[1] = tgData[i00 + 1] * w00 + tgData[i10 + 1] * w10 + tgData[i01 + 1] * w01 + tgData[i11 + 1] * w11;
-  out[2] = tgData[i00 + 2] * w00 + tgData[i10 + 2] * w10 + tgData[i01 + 2] * w01 + tgData[i11 + 2] * w11;
+let _grainPattern = null;
+function getGrainPattern(ctx) {
+  if (_grainPattern) return _grainPattern;
+  const rng = mulberry32(0x5eed1234);
+  const S = 192;
+  const c = document.createElement('canvas');
+  c.width = c.height = S;
+  const g = c.getContext('2d');
+  // Fine speckle: light and dark grains (edge-wrapped)
+  for (let i = 0; i < 1400; i++) {
+    const x = rng() * S, y = rng() * S;
+    const light = rng() > 0.5;
+    const style = light ? `rgba(255,244,214,${(0.04 + rng() * 0.06).toFixed(3)})`
+                        : `rgba(30,22,10,${(0.05 + rng() * 0.07).toFixed(3)})`;
+    const w = 1 + (rng() > 0.9 ? 1 : 0);
+    drawTileWrapped(g, S, () => { g.fillStyle = style; g.fillRect(x, y, w, 1); });
+  }
+  // Sparse short scratches (wind alignment)
+  g.lineWidth = 1;
+  for (let i = 0; i < 16; i++) {
+    const x = rng() * S, y = rng() * S, l = 6 + rng() * 16, a = 0.55 + (rng() - 0.5) * 0.2;
+    drawTileWrapped(g, S, () => {
+      g.strokeStyle = 'rgba(40,30,15,0.05)';
+      g.beginPath();
+      g.moveTo(x, y);
+      g.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l);
+      g.stroke();
+    });
+  }
+  _grainPattern = ctx.createPattern(c, 'repeat');
+  return _grainPattern;
 }
 
-const _terrainCol = [0, 0, 0];
+let _mottlePattern = null;
+function getMottlePattern(ctx) {
+  if (_mottlePattern) return _mottlePattern;
+  const rng = mulberry32(0xB10B8807);
+  const S = 512;
+  const c = document.createElement('canvas');
+  c.width = c.height = S;
+  const g = c.getContext('2d');
+  // Soft tonal blobs — drawn edge-wrapped so gradients cross seams cleanly
+  for (let i = 0; i < 34; i++) {
+    const x = rng() * S, y = rng() * S, r = 40 + rng() * 110;
+    const light = rng() > 0.5;
+    const a = 0.03 + rng() * 0.045;
+    const c0 = light ? `rgba(255,236,190,${a})` : `rgba(60,45,25,${a})`;
+    drawTileWrapped(g, S, () => {
+      const grad = g.createRadialGradient(x, y, 0, x, y, r);
+      grad.addColorStop(0, c0);
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      g.fillStyle = grad;
+      g.fillRect(x - r, y - r, r * 2, r * 2);
+    });
+  }
+  _mottlePattern = ctx.createPattern(c, 'repeat');
+  return _mottlePattern;
+}
+
+let _macroPattern = null;
+function getMacroPattern(ctx) {
+  if (_macroPattern) return _macroPattern;
+  const rng = mulberry32(0x4D414352); // 'MACR'
+  const S = 1536;
+  const c = document.createElement('canvas');
+  c.width = c.height = S;
+  const g = c.getContext('2d');
+  // Very large, very faint ground masses — breaks tile repetition
+  for (let i = 0; i < 22; i++) {
+    const x = rng() * S, y = rng() * S, r = 220 + rng() * 420;
+    const light = rng() > 0.5;
+    const a = 0.02 + rng() * 0.03;
+    const c0 = light ? `rgba(255,238,196,${a})` : `rgba(55,42,24,${a})`;
+    drawTileWrapped(g, S, () => {
+      const grad = g.createRadialGradient(x, y, 0, x, y, r);
+      grad.addColorStop(0, c0);
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      g.fillStyle = grad;
+      g.fillRect(x - r, y - r, r * 2, r * 2);
+    });
+  }
+  _macroPattern = ctx.createPattern(c, 'repeat');
+  return _macroPattern;
+}
 
 function drawSmoothTerrain(ctx, cam) {
   updateTerrainGrid(cam);
-  const step = 32;
-  const bounds = cam.getVisibleBounds();
-  const startX = Math.floor(bounds.left / step) * step;
-  const startY = Math.floor(bounds.top / step) * step;
-  const endX = Math.ceil(bounds.right / step) * step;
-  const endY = Math.ceil(bounds.bottom / step) * step;
-  for (let x = startX; x < endX; x += step) {
-    for (let y = startY; y < endY; y += step) {
-      terrainColorAt(x + step / 2, y + step / 2, _terrainCol);
-      ctx.fillStyle = `rgb(${_terrainCol[0] | 0},${_terrainCol[1] | 0},${_terrainCol[2] | 0})`;
-      ctx.fillRect(x, y, step + 1, step + 1);
+
+  // One GPU-scaled blit replaces the per-tile fillRect loop: hardware
+  // bilinear filtering interpolates every screen pixel, eliminating the
+  // block seams entirely.
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(tgCanvas, tgX0, tgY0, tgCols * TERRAIN_GRID_STEP, tgRows * TERRAIN_GRID_STEP);
+
+  // World-anchored detail overlays (seamlessly tileable)
+  const b = cam.getVisibleBounds();
+  const bw = b.right - b.left, bh = b.bottom - b.top;
+  ctx.fillStyle = getMacroPattern(ctx);
+  ctx.fillRect(b.left, b.top, bw, bh);
+  ctx.fillStyle = getMottlePattern(ctx);
+  ctx.fillRect(b.left, b.top, bw, bh);
+  ctx.fillStyle = getGrainPattern(ctx);
+  ctx.fillRect(b.left, b.top, bw, bh);
+}
+
+const ROAD_STYLE = {
+  paved:     { fill: '#7a6a4a', edge: '#5a4a2a', shoulder: 5 },
+  dirt:      { fill: '#9a8a5a', edge: '#6f6038', shoulder: 4 },
+  track:     { fill: '#a89868', edge: '#83744c', shoulder: 3 },
+};
+
+function drawRoads(ctx, cam) {
+  if (!world || world.roads.length === 0) return;
+
+  // Draw small roads first so highways visually own their intersections:
+  // pass order (shoulders → fills → detail) means no dark border ever
+  // cuts across another road's surface.
+  const HIER = { local: 0, secondary: 1, highway: 2 };
+  const vb = cam.getVisibleBounds();
+  const roads = [];
+  for (let i = 0; i < world.roads.length; i++) {
+    const road = world.roads[i];
+    if (road.points.length < 2) continue;
+    // Cheap bbox cull
+    let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
+    for (const p of road.points) {
+      if (p.x < minx) minx = p.x; if (p.x > maxx) maxx = p.x;
+      if (p.y < miny) miny = p.y; if (p.y > maxy) maxy = p.y;
+    }
+    if (maxx < vb.left - 80 || minx > vb.right + 80 || maxy < vb.top - 80 || miny > vb.bottom + 80) continue;
+    roads.push({ road, idx: i, minx, miny, maxx, maxy });
+  }
+  roads.sort((a, b) => (HIER[a.road.hierarchy] || 0) - (HIER[b.road.hierarchy] || 0));
+  if (roads.length === 0) return;
+
+  const tracePoly = (pts) => {
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.stroke();
+  };
+
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  // PASS 1 — shoulders / borders (everything)
+  for (const { road, idx } of roads) {
+    const st = ROAD_STYLE[road.surface] || ROAD_STYLE.dirt;
+    ctx.strokeStyle = st.edge;
+    ctx.lineWidth = road.width + st.shoulder;
+    tracePoly(road.points);
+  }
+
+  // PASS 2 — running surfaces (cover every shoulder crossing)
+  for (const { road, idx } of roads) {
+    const st = ROAD_STYLE[road.surface] || ROAD_STYLE.dirt;
+    // Deterministic per-road tone shift so parallel roads don't look cloned
+    const tone = ((idx * 137) % 11) - 5;
+    ctx.strokeStyle = shadeHex(st.fill, tone);
+    ctx.lineWidth = road.width;
+    tracePoly(road.points);
+  }
+
+  // PASS 3 — surface detail
+  for (const { road } of roads) {
+    const surface = road.surface || 'dirt';
+    if (surface === 'dirt') {
+      // Wheel-worn centre strip
+      ctx.strokeStyle = withAlpha('#000000', 0.05);
+      ctx.lineWidth = road.width * 0.45;
+      ctx.setLineDash([4, 10]);
+      tracePoly(road.points);
+      ctx.setLineDash([]);
+    } else if (surface === 'track') {
+      // Tyre ruts — offset perpendicular to local direction
+      const off = Math.max(1.5, road.width * 0.22);
+      ctx.strokeStyle = withAlpha('#000000', 0.09);
+      ctx.lineWidth = 1.2;
+      for (const side of [-1, 1]) {
+        ctx.beginPath();
+        for (let i = 0; i < road.points.length; i++) {
+          const p = road.points[i];
+          const q = road.points[Math.min(i + 1, road.points.length - 1)];
+          const r = road.points[Math.max(i - 1, 0)];
+          let nx = -(q.y - r.y), ny = q.x - r.x;
+          const l = Math.hypot(nx, ny) || 1;
+          nx = nx / l * off * side; ny = ny / l * off * side;
+          if (i === 0) ctx.moveTo(p.x + nx, p.y + ny);
+          else ctx.lineTo(p.x + nx, p.y + ny);
+        }
+        ctx.stroke();
+      }
+    } else {
+      // Paved centre line
+      ctx.strokeStyle = withAlpha('#ccaa66', 0.32);
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([14, 22]);
+      tracePoly(road.points);
+      ctx.setLineDash([]);
     }
   }
 }
 
-function drawRoads(ctx, cam) {
-  if (!world) return;
-  for (const road of world.roads) {
-    if (road.points.length < 2) continue;
-    const surface = road.surface || 'dirt';
-
-    // Road shoulder/edge (wider, darker)
-    const edgeColor = surface === 'paved' ? '#5a4a2a' : surface === 'dirt' ? '#7a6a3a' : '#8a7a4a';
-    ctx.strokeStyle = edgeColor;
-    ctx.lineWidth = road.width + 4;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.beginPath();
-    ctx.moveTo(road.points[0].x, road.points[0].y);
-    for (let i = 1; i < road.points.length; i++) ctx.lineTo(road.points[i].x, road.points[i].y);
-    ctx.stroke();
-
-    // Main road surface
-    const roadColor = surface === 'paved' ? '#7a6a4a' : surface === 'dirt' ? '#9a8a5a' : '#a89868';
-    ctx.strokeStyle = roadColor;
-    ctx.lineWidth = road.width;
-    ctx.beginPath();
-    ctx.moveTo(road.points[0].x, road.points[0].y);
-    for (let i = 1; i < road.points.length; i++) ctx.lineTo(road.points[i].x, road.points[i].y);
-    ctx.stroke();
-
-    // Road grain texture (subtle noise)
-    if (surface !== 'paved') {
-      ctx.strokeStyle = withAlpha('#000000', 0.06);
-      ctx.lineWidth = road.width * 0.5;
-      ctx.setLineDash([3, 8]);
-      ctx.beginPath();
-      ctx.moveTo(road.points[0].x, road.points[0].y);
-      for (let i = 1; i < road.points.length; i++) ctx.lineTo(road.points[i].x, road.points[i].y);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
-
-    // Paved road center line (dashed yellow)
-    if (surface === 'paved') {
-      ctx.strokeStyle = withAlpha('#ccaa66', 0.35);
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([14, 20]);
-      ctx.beginPath();
-      ctx.moveTo(road.points[0].x, road.points[0].y);
-      for (let i = 1; i < road.points.length; i++) ctx.lineTo(road.points[i].x, road.points[i].y);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
-
-    // Track roads: subtle tire ruts
-    if (surface === 'track') {
-      ctx.strokeStyle = withAlpha('#000000', 0.08);
-      ctx.lineWidth = 1;
-      ctx.setLineDash([6, 10]);
-      // Left rut
-      ctx.beginPath();
-      ctx.moveTo(road.points[0].x, road.points[0].y);
-      for (let i = 1; i < road.points.length; i++) ctx.lineTo(road.points[i].x - 3, road.points[i].y);
-      ctx.stroke();
-      // Right rut
-      ctx.beginPath();
-      ctx.moveTo(road.points[0].x, road.points[0].y);
-      for (let i = 1; i < road.points.length; i++) ctx.lineTo(road.points[i].x + 3, road.points[i].y);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
-  }
+/** Lighten/darken a hex colour by amount (-255..255). */
+function shadeHex(hex, amt) {
+  const n = parseInt(hex.slice(1), 16);
+  const r = clamp((n >> 16) + amt, 0, 255);
+  const g = clamp(((n >> 8) & 0xff) + amt, 0, 255);
+  const b = clamp((n & 0xff) + amt, 0, 255);
+  return `rgb(${r},${g},${b})`;
 }
 
 function drawSites(ctx, cam) {
@@ -1053,6 +1301,7 @@ const HEAT_LABELS = ['QUIET', 'SUSPICIOUS', 'CONTACT', 'COORDINATED', 'CRITICAL'
 
 function resetSortieState() {
   const difficulty = getDifficultyProfile(activeContract?.difficultyId);
+  sortieStartedAt = performance.now();
   sortieState.status = 'active';
   sortieState.objectiveComplete = false;
   sortieState.fearLevel = 0;
@@ -1160,8 +1409,127 @@ function isTargetAlive(target) {
   return target.hp === undefined || target.hp > 0;
 }
 
+/** Semi-transparent backing plate for a HUD cluster, with corner ticks. */
+function hudPlate(ctx, x, y, w, h, accent = 'rgba(90,140,80,0.55)') {
+  ctx.fillStyle = 'rgba(6,12,6,0.62)';
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+  drawCornerBrackets(ctx, x, y, w, h, accent, 7, 1.5);
+}
+
+/** Off-screen direction marker: pulsing chevron clamped to the screen edge,
+ *  pointing at a world position, with distance (+optional tag) readout. */
+function drawOffscreenMarker(ctx, cam, w, h, wx, wy, color, textColor, tag, uiScale = 1) {
+  const s = cam.worldToScreen(wx, wy);
+  // worldToScreen returns unscaled screen px; convert to HUD-logical space.
+  s.x /= uiScale;
+  s.y /= uiScale;
+  const marginX = 46, marginTop = 70;
+  if (s.x >= marginX && s.x <= w - marginX && s.y >= marginTop && s.y <= h - 60) return false;
+
+  const cx = w / 2, cyy = h / 2;
+  let dx = s.x - cx, dy = s.y - cyy;
+  if (dx === 0 && dy === 0) dy = -1;
+  const scale = Math.min(
+    (w / 2 - marginX) / Math.abs(dx || 1e-6),
+    (h / 2 - marginTop) / Math.abs(dy || 1e-6)
+  );
+  const ax = cx + dx * scale;
+  const ay = cyy + dy * scale;
+  const ang = Math.atan2(dy, dx);
+  const pulse = 1 + Math.sin(performance.now() / 200) * 0.1;
+  ctx.save();
+  ctx.translate(ax, ay);
+  ctx.rotate(ang);
+  ctx.scale(pulse, pulse);
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(15, 0);
+  ctx.lineTo(-9, -10);
+  ctx.lineTo(-4, 0);
+  ctx.lineTo(-9, 10);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+
+  const distKm = (Math.hypot(cam.x - wx, cam.y - wy) / 1000).toFixed(1);
+  const label = tag ? `${tag} · ${distKm} km` : `${distKm} km`;
+  ctx.fillStyle = textColor;
+  ctx.font = 'bold 10px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, ax - Math.cos(ang) * 30, ay - Math.sin(ang) * 30);
+  return true;
+}
+
+/** World-space position the player should navigate to for the active
+ *  contract. Covers every scenario type:
+ *    strike/sabotage/recovery -> objective building/crate
+ *    intercept               -> live convoy position
+ *    suppression             -> nearest surviving air-defense unit        */
+function getObjectiveFocus() {
+  const obj = world?.objective;
+  if (!obj) return null;
+  if (obj.type === 'suppression') {
+    let best = null, bestD = Infinity;
+    for (const e of enemies) {
+      if (!e.objectiveTarget || e.state === 'dead') continue;
+      const d = Math.hypot(e.x - heli.x, e.y - heli.y);
+      if (d < bestD) { bestD = d; best = e; }
+    }
+    return best ? { x: best.x, y: best.y } : null;
+  }
+  const t = obj.target;
+  if (!t || !isTargetAlive(t) || t === boss) return null;
+  // Moving targets (convoys) update their x/y as they drive.
+  return { x: t.x, y: t.y };
+}
 function damageWorldTarget(target, damage, x, y) {
   if (!isTargetAlive(target) || target.hp === undefined) return false;
+
+  // ── Convoys: shared HP pool, distinct rewards, wreck + supply drop ──
+  if (Array.isArray(target.route)) {
+    target.hp -= damage;
+    target.flashTimer = 0.1;
+    spawnExplosion(x, y, 0.3);
+    if (target.hp > 0) return true;
+    target.hp = 0;
+    target.destroyed = true;
+    // Wreckage explosions along the column
+    const members = getConvoyMembers(target);
+    spawnExplosion(target.x, target.y, 1.6);
+    for (const m of members) {
+      if (m.isVeh && Math.random() < 0.7) spawnExplosion(m.x, m.y, 0.8);
+    }
+    addHeat(3, 'supply convoy destroyed');
+    reduceHeat(10, 'supply line severed');
+    if (target === world?.objective?.target) {
+      heli.score += 300;
+      addFear(6, 'high-value convoy');
+      spawnFloatingText(target.x, target.y - 30, '+300 BOUNTY', '#ffcc44');
+      completeObjective();
+    } else {
+      // Different reward track from buildings: bounty + fear, and the
+      // burning tailings drop salvage.
+      heli.score += 150;
+      addFear(3, 'convoy ambushed');
+      spawnFloatingText(target.x, target.y - 30, 'CONVOY DESTROYED', '#aaff88');
+      spawnFloatingText(target.x, target.y - 48, '+150', '#ffcc44');
+    }
+    world.supplyCrates.push({
+      id: `crate-wreck-${target.id}`,
+      x: target.x + (Math.random() - 0.5) * 30,
+      y: target.y + (Math.random() - 0.5) * 30,
+      siteId: null,
+      collected: false,
+      objective: false,
+      rewardType: pick(['repair', 'damage', 'speed', 'fear'], mulberry32((Date.now() & 0xffff))),
+    });
+    return true;
+  }
+
   target.hp -= damage;
   target.flashTimer = 0.1;
   spawnExplosion(x, y, 0.3);
@@ -1198,9 +1566,13 @@ function hitDestructibleWorldTarget(projectile) {
     }
   }
   for (const convoy of world.convoys) {
-    if (!convoy.objectiveTarget || convoy.destroyed) continue;
-    if (Math.hypot(convoy.x - projectile.x, convoy.y - projectile.y) < 14) {
-      return damageWorldTarget(convoy, projectile.damage, projectile.x, projectile.y);
+    if (!convoy.active || convoy.destroyed) continue;
+    // Test every member of the column, not just the lead vehicle.
+    for (const m of getConvoyMembers(convoy)) {
+      const r = m.isVeh ? 12 : 6;
+      if (Math.hypot(m.x - projectile.x, m.y - projectile.y) < r) {
+        return damageWorldTarget(convoy, projectile.damage, projectile.x, projectile.y);
+      }
     }
   }
   return false;
@@ -1301,6 +1673,19 @@ function finishSortie(status) {
   spawnFloatingText(heli.x, heli.y - 45, status === 'complete' ? 'SORTIE COMPLETE' : 'PILOT KIA', status === 'complete' ? '#aaff88' : '#ff4444');
 }
 
+/** Pilot aborts the sortie and returns to base alive. No rewards secured. */
+function abandonSortie() {
+  if (sortieState.status !== 'active') return;
+  sortieState.status = 'abandoned';
+  bossState.active = false;
+  sortieState.rewards.secured = 0;
+  projectiles.length = 0;
+  heli.target = null;
+  heli.manualTarget = null;
+  settingsOpen = false;
+  switchScreen('debrief');
+}
+
 function updateHeat(dt) {
   if (sortieState.status !== 'active') return;
   const inContact = enemies.some((enemy) => enemy.state === 'attack') || boss.spawned;
@@ -1335,24 +1720,71 @@ registerScreen('title', {
     ctx.save(); ctx.scale(dpr, dpr);
     const grad = ctx.createLinearGradient(0, 0, 0, h);
     grad.addColorStop(0, '#0a120a');
-    grad.addColorStop(1, '#1a2a1a');
+    grad.addColorStop(1, '#16240f');
     ctx.fillStyle = grad; ctx.fillRect(0, 0, w, h);
-    const cx = w / 2, cy = h * 0.3;
-    ctx.font = 'bold 36px "Courier New", monospace';
+    drawTacticalGrid(ctx, w, h);
+
+    const cx = w / 2;
+    const t = performance.now() / 1000;
+
+    // Radar sweep backdrop behind the wordmark
+    const sweepR = Math.min(w, h) * 0.34;
+    ctx.globalAlpha = 0.5;
+    drawRadarSweep(ctx, cx, h * 0.34, sweepR, t);
+    ctx.globalAlpha = 1;
+
+    // ── Wordmark ──
+    const cy = h * 0.32;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillStyle = '#000000'; ctx.fillText('GUNSHIP', cx + 2, cy + 2);
-    ctx.fillStyle = P.ui.textBright; ctx.fillText('GUNSHIP', cx, cy);
-    ctx.font = 'bold 16px "Courier New", monospace';
-    ctx.fillStyle = P.ui.infamy; ctx.fillText('FREEDOM PROTOCOL', cx, cy + 40);
-    ctx.strokeStyle = P.ui.border; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(cx - 120, cy + 60); ctx.lineTo(cx + 120, cy + 60); ctx.stroke();
-    ctx.font = '14px "Courier New", monospace';
-    ctx.fillStyle = P.ui.text;
-    if (Math.sin(performance.now() / 500) > 0) ctx.fillText('[ CLICK FOR OPERATIONS ]', cx, cy + 100);
+    const titleSize = Math.min(64, Math.max(40, Math.floor(w / 9)));
+    ctx.font = `bold ${titleSize}px "Courier New", monospace`;
+    // Layered shadow for depth
+    ctx.fillStyle = 'rgba(0,0,0,0.85)';
+    ctx.fillText('GUNSHIP', cx + 4, cy + 4);
+    ctx.fillStyle = P.ui.borderHi;
+    ctx.fillText('GUNSHIP', cx + 2, cy + 2);
+    ctx.fillStyle = P.ui.textBright;
+    ctx.fillText('GUNSHIP', cx, cy);
+
+    // Subtitle bar
+    const subY = cy + titleSize * 0.62;
+    ctx.font = 'bold 15px "Courier New", monospace';
+    const sub = 'FREEDOM PROTOCOL';
+    const subW = ctx.measureText(sub).width + 44;
+    ctx.fillStyle = 'rgba(10,20,8,0.8)';
+    ctx.fillRect(cx - subW / 2, subY - 13, subW, 26);
+    ctx.strokeStyle = P.ui.infamy;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(cx - subW / 2, subY - 13, subW, 26);
+    drawCornerBrackets(ctx, cx - subW / 2, subY - 13, subW, 26, 'rgba(204,136,51,0.6)', 7, 1.5);
+    ctx.fillStyle = P.ui.infamy;
+    ctx.fillText(sub, cx, subY);
+
+    // Prompt box
+    const pY = h * 0.62;
+    if (Math.sin(t * 3.4) > -0.25) {
+      const label = '[ CLICK FOR OPERATIONS ]';
+      ctx.font = 'bold 14px "Courier New", monospace';
+      const pw = ctx.measureText(label).width + 36;
+      const ph = 34;
+      ctx.fillStyle = 'rgba(20,40,16,0.65)';
+      ctx.fillRect(cx - pw / 2, pY - ph / 2, pw, ph);
+      ctx.strokeStyle = P.ui.textBright;
+      ctx.lineWidth = 1.2;
+      ctx.strokeRect(cx - pw / 2, pY - ph / 2, pw, ph);
+      ctx.fillStyle = P.ui.textBright;
+      ctx.fillText(label, cx, pY);
+    }
+
+    // Footer
+    ctx.textBaseline = 'bottom';
     ctx.font = '10px "Courier New", monospace';
     ctx.fillStyle = P.ui.textDim;
-    ctx.fillText('A 90s Gulf War Action Movie Helicopter Roguelite', cx, cy + 150);
-    ctx.fillText('Inspired by Desert Strike + Vampire Survivors', cx, cy + 170);
+    ctx.fillText('A 90s GULF WAR ACTION-MOVIE HELICOPTER ROGUELITE', cx, h - 40);
+    ctx.fillText('MOUSE STEER · CLICK FIRE · SHIFT TARGET · P PAUSE', cx, h - 24);
+
+    drawCornerBrackets(ctx, 8, 8, w - 16, h - 16, 'rgba(90,140,80,0.5)', 22, 2);
+    drawScanlines(ctx, w, h);
     ctx.restore();
   },
 });
@@ -1411,19 +1843,24 @@ registerScreen('debrief', {
     const w = cam.screenW;
     const h = cam.screenH;
     const success = sortieState.status === 'complete';
-    drawScreenBackground(ctx, cam, success ? 'SORTIE COMPLETE' : 'PILOT KIA', success ? 'OPERATIONAL REPORT' : 'SIGNAL LOST');
+    const aborted = sortieState.status === 'abandoned';
+    drawScreenBackground(ctx, cam,
+      success ? 'SORTIE COMPLETE' : aborted ? 'SORTIE ABORTED' : 'PILOT KIA',
+      success ? 'OPERATIONAL REPORT' : aborted ? 'PILOT RECOVERED' : 'SIGNAL LOST');
     ctx.save(); ctx.scale(cam.dpr, cam.dpr);
     const panelW = Math.min(420, w - 32);
     const panelH = Math.min(320, h - 120);
     const x = (w - panelW) / 2;
     const y = 84;
     ctx.fillStyle = '#0d210f'; ctx.fillRect(x, y, panelW, panelH);
-    ctx.strokeStyle = success ? P.ui.border : '#883333';
+    ctx.strokeStyle = success ? P.ui.border : aborted ? '#aa8844' : '#883333';
     ctx.lineWidth = 1.5; ctx.strokeRect(x, y, panelW, panelH);
+    drawCornerBrackets(ctx, x, y, panelW, panelH,
+      success ? P.ui.borderHi : aborted ? '#cc9944' : '#aa4444', 16, 2);
     ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-    ctx.fillStyle = success ? '#aaff88' : '#ff6666';
+    ctx.fillStyle = success ? '#aaff88' : aborted ? '#ffcc44' : '#ff6666';
     ctx.font = 'bold 16px "Courier New", monospace';
-    ctx.fillText(success ? 'MISSION SUCCESS' : 'MISSION FAILURE', x + 18, y + 18);
+    ctx.fillText(success ? 'MISSION SUCCESS' : aborted ? 'MISSION ABORTED' : 'MISSION FAILURE', x + 18, y + 18);
     ctx.fillStyle = P.ui.text;
     ctx.font = '11px "Courier New", monospace';
     const rows = [
@@ -1450,6 +1887,81 @@ registerScreen('debrief', {
   },
 });
 
+// ── Shared UI decoration helpers ──────────────────────────────────────────
+
+/** Military frame: corner brackets around a rect. */
+function drawCornerBrackets(ctx, x, y, w, h, color, len = 14, lw = 2) {
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lw;
+  ctx.beginPath();
+  // TL
+  ctx.moveTo(x, y + len); ctx.lineTo(x, y); ctx.lineTo(x + len, y);
+  // TR
+  ctx.moveTo(x + w - len, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w, y + len);
+  // BR
+  ctx.moveTo(x + w, y + h - len); ctx.lineTo(x + w, y + h); ctx.lineTo(x + w - len, y + h);
+  // BL
+  ctx.moveTo(x + len, y + h); ctx.lineTo(x, y + h); ctx.lineTo(x, y + h - len);
+  ctx.stroke();
+}
+
+/** Subtle CRT scanlines + edge vignette over a full-screen UI. */
+function drawScanlines(ctx, w, h) {
+  ctx.fillStyle = 'rgba(0,0,0,0.10)';
+  for (let y = 0; y < h; y += 4) ctx.fillRect(0, y, w, 1);
+  const vg = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.35, w / 2, h / 2, Math.max(w, h) * 0.75);
+  vg.addColorStop(0, 'rgba(0,0,0,0)');
+  vg.addColorStop(1, 'rgba(0,0,0,0.42)');
+  ctx.fillStyle = vg;
+  ctx.fillRect(0, 0, w, h);
+}
+
+/** Faint tactical grid backdrop for menu screens. */
+function drawTacticalGrid(ctx, w, h) {
+  ctx.strokeStyle = 'rgba(90,140,80,0.07)';
+  ctx.lineWidth = 1;
+  const step = 48;
+  ctx.beginPath();
+  for (let x = (w % step) / 2; x < w; x += step) { ctx.moveTo(x, 0); ctx.lineTo(x, h); }
+  for (let y = (h % step) / 2; y < h; y += step) { ctx.moveTo(0, y); ctx.lineTo(w, y); }
+  ctx.stroke();
+}
+
+/** Rotating radar sweep disc — returns nothing, animated by time. */
+function drawRadarSweep(ctx, cx, cy, radius, tSec) {
+  ctx.save();
+  // Range rings
+  ctx.strokeStyle = 'rgba(90,160,80,0.16)';
+  ctx.lineWidth = 1;
+  for (const rr of [0.33, 0.66, 1]) {
+    ctx.beginPath(); ctx.arc(cx, cy, radius * rr, 0, Math.PI * 2); ctx.stroke();
+  }
+  ctx.beginPath(); ctx.moveTo(cx - radius, cy); ctx.lineTo(cx + radius, cy);
+  ctx.moveTo(cx, cy - radius); ctx.lineTo(cx, cy + radius); ctx.stroke();
+  // Sweep wedge with trailing fade
+  const ang = (tSec * 1.1) % (Math.PI * 2);
+  for (let i = 0; i < 24; i++) {
+    const a = ang - i * 0.05;
+    ctx.strokeStyle = `rgba(110,220,100,${0.30 * (1 - i / 24)})`;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.cos(a) * radius, cy + Math.sin(a) * radius);
+    ctx.stroke();
+  }
+  // Blips
+  const blips = [[0.55, 0.8], [0.72, 2.6], [0.85, 4.9], [0.4, 3.7]];
+  for (const [rr, ba] of blips) {
+    const bAng = ba + Math.sin(tSec * 0.23) * 0.2;
+    const fade = 0.25 + 0.55 * Math.max(0, Math.cos(ang - ba));
+    ctx.fillStyle = `rgba(150,255,120,${fade})`;
+    ctx.beginPath();
+    ctx.arc(cx + Math.cos(bAng) * radius * rr, cy + Math.sin(bAng) * radius * rr, 2.4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
 function drawScreenBackground(ctx, cam, title, subtitle = '') {
   const dpr = cam.dpr;
   const w = cam.screenW;
@@ -1457,17 +1969,31 @@ function drawScreenBackground(ctx, cam, title, subtitle = '') {
   ctx.save(); ctx.scale(dpr, dpr);
   const grad = ctx.createLinearGradient(0, 0, 0, h);
   grad.addColorStop(0, '#0a120a');
-  grad.addColorStop(1, '#1a2a1a');
+  grad.addColorStop(1, '#16240f');
   ctx.fillStyle = grad; ctx.fillRect(0, 0, w, h);
+  drawTacticalGrid(ctx, w, h);
+
+  // Header rule under the title
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
   ctx.fillStyle = P.ui.textBright;
   ctx.font = 'bold 22px "Courier New", monospace';
-  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
   ctx.fillText(title, w / 2, 24);
+  const tw = ctx.measureText(title).width;
+  ctx.strokeStyle = P.ui.borderHi;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(w / 2 - tw / 2 - 18, 50);
+  ctx.lineTo(w / 2 + tw / 2 + 18, 50);
+  ctx.stroke();
   if (subtitle) {
     ctx.fillStyle = P.ui.textDim;
     ctx.font = '10px "Courier New", monospace';
-    ctx.fillText(subtitle, w / 2, 52);
+    ctx.fillText(subtitle, w / 2, 56);
   }
+
+  // Screen-corner brackets
+  drawCornerBrackets(ctx, 8, 8, w - 16, h - 16, 'rgba(90,140,80,0.5)', 22, 2);
+  drawScanlines(ctx, w, h);
   ctx.restore();
 }
 
@@ -1492,29 +2018,56 @@ function contractCardRect(index, w, h) {
 function drawContractCard(ctx, card, rect, selected = false) {
   ctx.fillStyle = selected ? '#1e3a1e' : '#0d210f';
   ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+
+  // Header strip
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  ctx.fillRect(rect.x, rect.y, rect.w, 28);
+  // Risk-colored accent stripe
+  const riskCol = card.difficultyRating >= 4 ? '#cc3333' : card.difficultyRating >= 3 ? '#ff8844' : '#88aa55';
+  ctx.fillStyle = riskCol;
+  ctx.fillRect(rect.x, rect.y, 4, rect.h);
   ctx.strokeStyle = selected ? P.ui.textBright : P.ui.border;
   ctx.lineWidth = selected ? 2 : 1;
   ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
+  drawCornerBrackets(ctx, rect.x, rect.y, rect.w, rect.h,
+    selected ? P.ui.textBright : 'rgba(90,140,80,0.45)', 10, 1.5);
 
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(rect.x + 6, rect.y, rect.w - 12, rect.h);
+  ctx.clip();
   ctx.textAlign = 'left'; ctx.textBaseline = 'top';
   ctx.fillStyle = P.ui.infamy;
   ctx.font = 'bold 14px "Courier New", monospace';
-  ctx.fillText(card.name, rect.x + 12, rect.y + 10);
+  ctx.fillText(card.name, rect.x + 16, rect.y + 8);
+  ctx.fillStyle = P.ui.textDim;
+  ctx.font = '9px "Courier New", monospace';
+  ctx.textAlign = 'right';
+  ctx.fillText(`NO.${String(card.seed % 97).padStart(2, '0')}`, rect.x + rect.w - 14, rect.y + 10);
+  ctx.textAlign = 'left';
   ctx.fillStyle = P.ui.textBright;
   ctx.font = 'bold 10px "Courier New", monospace';
-  ctx.fillText(card.objectiveLabel, rect.x + 12, rect.y + 32);
+  ctx.fillText(card.objectiveLabel, rect.x + 16, rect.y + 34);
   ctx.fillStyle = P.ui.text;
   ctx.font = '10px "Courier New", monospace';
-  const lines = wrapText(card.description, Math.max(24, Math.floor(rect.w / 7.2)));
+  const lines = wrapText(card.description, Math.max(24, Math.floor((rect.w - 24) / 7.2)));
   for (let i = 0; i < lines.length && i < 2; i++) {
-    ctx.fillText(lines[i], rect.x + 12, rect.y + 50 + i * 13);
+    ctx.fillText(lines[i], rect.x + 16, rect.y + 52 + i * 13);
   }
+  // Footer stats with divider rule
+  ctx.strokeStyle = 'rgba(90,140,80,0.35)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(rect.x + 16, rect.y + rect.h - 52);
+  ctx.lineTo(rect.x + rect.w - 14, rect.y + rect.h - 52);
+  ctx.stroke();
   ctx.fillStyle = P.ui.rocket;
-  ctx.fillText(`STYLE  ${card.styleName}`, rect.x + 12, rect.y + rect.h - 42);
-  ctx.fillStyle = card.difficultyRating >= 3 ? '#ff8844' : P.ui.text;
-  ctx.fillText(`RISK    ${'◆'.repeat(card.difficultyRating)}${'◇'.repeat(4 - card.difficultyRating)}  ${card.difficultyName}`, rect.x + 12, rect.y + rect.h - 28);
+  ctx.fillText(`STYLE  ${card.styleName}`, rect.x + 16, rect.y + rect.h - 42);
+  ctx.fillStyle = riskCol;
+  ctx.fillText(`RISK   ${'◆'.repeat(card.difficultyRating)}${'◇'.repeat(4 - card.difficultyRating)}  ${card.difficultyName}`, rect.x + 16, rect.y + rect.h - 28);
   ctx.fillStyle = '#ffcc44';
-  ctx.fillText(`PAY     $${card.reward}`, rect.x + 12, rect.y + rect.h - 14);
+  ctx.fillText(`PAY    $${card.reward}`, rect.x + 16, rect.y + rect.h - 14);
+  ctx.restore();
 }
 
 function wrapText(text, maxChars) {
@@ -1573,9 +2126,16 @@ registerScreen('briefing', {
     const y = 78;
     ctx.fillStyle = '#0d210f'; ctx.fillRect(x, y, panelW, panelH);
     ctx.strokeStyle = P.ui.border; ctx.lineWidth = 1; ctx.strokeRect(x, y, panelW, panelH);
+    drawCornerBrackets(ctx, x, y, panelW, panelH, P.ui.borderHi, 16, 2);
     ctx.textAlign = 'left'; ctx.textBaseline = 'top';
     ctx.fillStyle = P.ui.infamy; ctx.font = 'bold 18px "Courier New", monospace';
     ctx.fillText(activeContract?.name || 'NO CONTRACT', x + 18, y + 18);
+    const nameW = ctx.measureText(activeContract?.name || 'NO CONTRACT').width;
+    ctx.strokeStyle = 'rgba(204,136,51,0.5)';
+    ctx.beginPath();
+    ctx.moveTo(x + 18, y + 40);
+    ctx.lineTo(x + 18 + nameW, y + 40);
+    ctx.stroke();
     ctx.fillStyle = P.ui.textBright; ctx.font = 'bold 12px "Courier New", monospace';
     ctx.fillText(scenario.objectiveLabel, x + 18, y + 52);
     ctx.fillStyle = P.ui.text; ctx.font = '11px "Courier New", monospace';
@@ -1787,6 +2347,7 @@ registerScreen('sortie', {
         spawnProjectile(heli.x + Math.cos(heli.angle) * 20, heli.y + Math.sin(heli.angle) * 20, heli.angle, heli.bulletSpeed, heli.bulletDamage);
       }
       addHeat(0.08, 'gunfire reported');
+      lastShotX = heli.x; lastShotY = heli.y; lastShotT = performance.now() / 1000;
       heli.fireCooldown = heli.fireRate;
     }
 
@@ -1802,6 +2363,13 @@ registerScreen('sortie', {
     }
 
     // ── Update enemies ──
+    // Sites whose defenders opened fire last frame (civilians panic only
+    // once combat actually reaches them).
+    const sitesUnderAttack = new Set();
+    for (const e of enemies) {
+      if (e.state === 'attack' && e.siteId) sitesUnderAttack.add(e.siteId);
+    }
+
     for (const e of enemies) {
       if (e.state === 'dead') {
         e.deathTimer -= dt;
@@ -1809,38 +2377,64 @@ registerScreen('sortie', {
       }
       const dist = Math.hypot(e.x - heli.x, e.y - heli.y);
 
-      // Unarmed enemies flee from the helicopter
-      if (e.className === 'unarmed' && dist < 500) {
-        e.state = 'flee';
-        const fleeAngle = Math.atan2(e.y - heli.y, e.x - heli.x);
-        let adiff = fleeAngle - e.angle;
-        while (adiff > Math.PI) adiff -= Math.PI * 2;
-        while (adiff < -Math.PI) adiff += Math.PI * 2;
-        e.angle += adiff * Math.min(1, 3.0 * dt);
-        if (e.speed > 0) {
-          e.x += Math.cos(e.angle) * e.speed * dt;
-          e.y += Math.sin(e.angle) * e.speed * dt;
+      // ── Unarmed civilians: never fight. They panic only when combat
+      // reaches them — gunfire nearby, or their own defenders opening up —
+      // then run until they escape the area.
+      if (e.className === 'unarmed') {
+        const gunfireNear = (performance.now() / 1000 - lastShotT) < 4 &&
+          Math.hypot(e.x - lastShotX, e.y - lastShotY) < 900;
+        if ((gunfireNear || (e.siteId && sitesUnderAttack.has(e.siteId))) && dist < 500) {
+          e.state = 'flee';
         }
-        // Civilians who outrun the engagement area escape the site:
-        // they leave the battle and no longer block clearing it.
-        if (e.homeX !== undefined &&
-            Math.hypot(e.x - e.homeX, e.y - e.homeY) > CIVILIAN_ESCAPE_RADIUS) {
-          e.escaped = true;
+        if (e.state === 'flee') {
+          const fleeAngle = Math.atan2(e.y - heli.y, e.x - heli.x);
+          let adiff = fleeAngle - e.angle;
+          while (adiff > Math.PI) adiff -= Math.PI * 2;
+          while (adiff < -Math.PI) adiff += Math.PI * 2;
+          e.angle += adiff * Math.min(1, 3.0 * dt);
+          if (e.speed > 0) {
+            e.x += Math.cos(e.angle) * e.speed * dt;
+            e.y += Math.sin(e.angle) * e.speed * dt;
+          }
+          // Civilians who outrun the engagement area escape the site:
+          // they leave the battle and no longer block clearing it.
+          if (e.homeX !== undefined &&
+              Math.hypot(e.x - e.homeX, e.y - e.homeY) > CIVILIAN_ESCAPE_RADIUS) {
+            e.escaped = true;
+          }
+        } else {
+          e.state = 'idle';
+          if (e.speed > 0) {
+            e.wanderPhase = (e.wanderPhase || 0) + dt;
+            e.angle += Math.sin(e.wanderPhase * 1.7 + e.x * 0.01) * 0.5 * dt;
+            e.x += Math.cos(e.angle) * e.speed * 0.3 * dt;
+            e.y += Math.sin(e.angle) * e.speed * 0.3 * dt;
+          }
         }
         continue;
       }
 
-      const responseRange = 400 + sortieState.heat.tier * 35;
+      // ── Armed hostiles. Aggro range scales with Heat; a home leash keeps
+      // garrisons defending their post instead of swarming across the map.
+      const responseRange = 330 + sortieState.heat.tier * 25;
+      const homeDist = e.homeX !== undefined
+        ? Math.hypot(e.x - e.homeX, e.y - e.homeY)
+        : 0;
+      const leash = e.category === 'vehicle' ? 900 : 480;
       const wasAttacking = e.state === 'attack';
-      if (dist < responseRange) e.state = 'attack';
-      else if (dist < responseRange + 200) e.state = 'alert';
+      if (dist < responseRange && homeDist < leash) e.state = 'attack';
+      else if ((dist < responseRange + 200 || wasAttacking) && homeDist < leash + 120) e.state = 'alert';
       else e.state = 'idle';
 
       if (e.state === 'attack' && !wasAttacking) addHeat(1.2, 'hostile contact');
 
       if (e.state === 'attack') {
-        const targetAngle = Math.atan2(heli.y - e.y, heli.x - e.x);
-        let adiff = targetAngle - e.angle;
+        let moveAngle = Math.atan2(heli.y - e.y, heli.x - e.x);
+        // Ground vehicles flow onto the road network when pursuing.
+        if (e.category === 'vehicle' && e.speed > 0) {
+          moveAngle = steerAlongRoads(moveAngle, e.x, e.y);
+        }
+        let adiff = moveAngle - e.angle;
         while (adiff > Math.PI) adiff -= Math.PI * 2;
         while (adiff < -Math.PI) adiff += Math.PI * 2;
         e.angle += adiff * Math.min(1, 2.0 * dt);
@@ -1850,10 +2444,31 @@ registerScreen('sortie', {
         }
         e.fireCooldown -= dt;
         if (e.fireCooldown <= 0 && dist < e.range) {
-          const fireAngle = Math.atan2(heli.y - e.y, heli.x - e.x);
+          const fireAngle = Math.atan2(heli.y - e.y, heli.x - e.x) + (Math.random() - 0.5) * 0.09;
           spawnProjectile(e.x, e.y, fireAngle, 200, e.damage, true, e.bulletLife || 1.5);
           e.fireCooldown = e.fireRate;
         }
+      } else if (e.homeX !== undefined && homeDist > 130) {
+        // Lost contact: head back to post instead of drifting.
+        let homeAngle = Math.atan2(e.homeY - e.y, e.homeX - e.x);
+        if (e.category === 'vehicle' && e.speed > 0) {
+          homeAngle = steerAlongRoads(homeAngle, e.x, e.y);
+        }
+        let adiff = homeAngle - e.angle;
+        while (adiff > Math.PI) adiff -= Math.PI * 2;
+        while (adiff < -Math.PI) adiff += Math.PI * 2;
+        e.angle += adiff * Math.min(1, 1.5 * dt);
+        if (e.speed > 0 && homeDist > 40) {
+          e.x += Math.cos(e.angle) * e.speed * 0.55 * dt;
+          e.y += Math.sin(e.angle) * e.speed * 0.55 * dt;
+        }
+      } else if (e.state === 'alert') {
+        // Hold position and watch the player.
+        const faceAngle = Math.atan2(heli.y - e.y, heli.x - e.x);
+        let adiff = faceAngle - e.angle;
+        while (adiff > Math.PI) adiff -= Math.PI * 2;
+        while (adiff < -Math.PI) adiff += Math.PI * 2;
+        e.angle += adiff * Math.min(1, 1.0 * dt);
       } else if (e.state === 'idle' && e.speed > 0) {
         e.wanderPhase = (e.wanderPhase || 0) + dt;
         e.angle += Math.sin(e.wanderPhase * 1.7 + e.x * 0.01) * 0.5 * dt;
@@ -2019,24 +2634,36 @@ registerScreen('sortie', {
         // Activate convoy if player is nearby
         if (!convoy.active) {
           const dist = Math.hypot(convoy.x - heli.x, convoy.y - heli.y);
-          if (dist < 800) convoy.active = true;
+          if (dist < 1100) convoy.active = true;
           else continue;
         }
-        // Move along route
-        const target = convoy.route[convoy.routeIndex];
-        if (!target) {
-          convoy.routeIndex = 0;
-          continue;
+        if (convoy.destroyed) continue;
+
+        // Advance along the route by arc length; ping-pong at the ends.
+        const total = convoy.routeCum[convoy.routeCum.length - 1];
+        convoy.s += convoy.direction * convoy.speed * dt;
+        if (convoy.s >= total) { convoy.s = total; convoy.direction = -1; }
+        else if (convoy.s <= 0) { convoy.s = 0; convoy.direction = 1; }
+
+        // Lead position/heading come from the path itself.
+        const lead = pointAlongRoute(convoy, convoy.s);
+        const dirSign = convoy.direction >= 0 ? 1 : -1;
+        convoy.x = lead.x;
+        convoy.y = lead.y;
+        convoy.angle = lead.ang + (dirSign < 0 ? Math.PI : 0);
+
+        // Escort fire — the column shoots back when engaged.
+        if (!sortieState.levelUpOpen && sortieState.status === 'active') {
+          convoy.fireCooldown -= dt;
+          const d = Math.hypot(convoy.x - heli.x, convoy.y - heli.y);
+          if (d < 380 && convoy.fireCooldown <= 0) {
+            const fireAngle = Math.atan2(heli.y - convoy.y, heli.x - convoy.x) + (Math.random() - 0.5) * 0.12;
+            spawnProjectile(convoy.x, convoy.y, fireAngle, 200, 3, true, 1.2);
+            convoy.fireCooldown = 1.5;
+            addHeat(0.35, 'convoy escort engaging');
+          }
         }
-        const dx = target.x - convoy.x;
-        const dy = target.y - convoy.y;
-        const dist = Math.hypot(dx, dy);
-        if (dist < 20) {
-          convoy.routeIndex = (convoy.routeIndex + 1) % convoy.route.length;
-        } else {
-          convoy.x += (dx / dist) * convoy.speed * dt;
-          convoy.y += (dy / dist) * convoy.speed * dt;
-        }
+        if (convoy.flashTimer > 0) convoy.flashTimer -= dt;
       }
     }
 
@@ -2153,38 +2780,78 @@ registerScreen('sortie', {
     drawRoads(ctx, cam);
     drawDecorations(ctx, cam);
 
-    // Draw convoys (before helicopter so they appear underneath)
+    // Draw convoys as a path-bound vehicle column (before helicopter so
+    // they appear underneath). Every member sits ON the route polyline.
     if (world) {
+      const VEHICLE_CLASSES = { technical: '#7a6040', apc: '#7a7a5a', shilka: '#5a5a4a', sam: '#5a6a5a' };
       for (const convoy of world.convoys) {
-        if (!convoy.active || convoy.destroyed) continue;
-        if (!cam.isVisible(convoy.x, convoy.y, 50)) continue;
-        ctx.fillStyle = withAlpha('#8a8a5a', 0.8);
-        ctx.beginPath();
-        ctx.arc(convoy.x, convoy.y, 6, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = '#5a5a3a';
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
+        if (!convoy.active) continue;
+        // Cull by column bounding box
+        let colMinX = Infinity, colMinY = Infinity, colMaxX = -Infinity, colMaxY = -Infinity;
+        const members = getConvoyMembers(convoy);
+        for (const m of members) {
+          if (m.x < colMinX) colMinX = m.x; if (m.x > colMaxX) colMaxX = m.x;
+          if (m.y < colMinY) colMinY = m.y; if (m.y > colMaxY) colMaxY = m.y;
+        }
+        if (colMaxX < cam.x - 1200 || colMinX > cam.x + 1200 ||
+            colMaxY < cam.y - 1200 || colMinY > cam.y + 1200) continue;
+
+        if (convoy.destroyed) {
+          // Burnt-out wrecks scattered along the road
+          for (const m of members) {
+            if (!m.isVeh) continue;
+            ctx.save();
+            ctx.translate(m.x, m.y);
+            ctx.rotate(m.angle + ((m.x * 7 + m.y * 3) % 10) / 30 - 0.15);
+            ctx.fillStyle = 'rgba(20,16,12,0.55)';
+            ctx.beginPath(); ctx.ellipse(0, 0, 14, 8, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#2e2a24';
+            ctx.fillRect(-9, -5, 18, 10);
+            ctx.restore();
+          }
+          continue;
+        }
+
+        // Column: draw tail-first so lead sits on top.
+        for (let i = members.length - 1; i >= 0; i--) {
+          const m = members[i];
+          if (!cam.isVisible(m.x, m.y, 40)) continue;
+          ctx.save();
+          ctx.translate(m.x, m.y);
+          ctx.rotate(m.angle);
+          if (m.isVeh) {
+            const len = m.cls === 'shilka' ? 24 : 20, wid = m.cls === 'shilka' ? 12 : 10;
+            ctx.fillStyle = withAlpha('#000000', 0.18); // shadow
+            ctx.beginPath(); ctx.ellipse(2, 3, len * 0.55, wid * 0.5, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = VEHICLE_CLASSES[m.cls];
+            ctx.fillRect(-len / 2, -wid / 2, len, wid);
+            if (convoy.flashTimer > 0) { ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.fillRect(-len / 2, -wid / 2, len, wid); }
+            ctx.fillStyle = 'rgba(0,0,0,0.35)'; // cab / front block
+            ctx.fillRect(len / 2 - 6, -wid / 2 + 1.5, 5, wid - 3);
+            if (m.cls === 'shilka') { // gun barrels
+              ctx.strokeStyle = '#3a3a2a'; ctx.lineWidth = 1.5;
+              ctx.beginPath();
+              ctx.moveTo(len / 2 - 4, -3); ctx.lineTo(len / 2 + 8, -4);
+              ctx.moveTo(len / 2 - 4, 3); ctx.lineTo(len / 2 + 8, 4);
+              ctx.stroke();
+            }
+          } else {
+            ctx.fillStyle = '#8a6a4a';
+            ctx.beginPath(); ctx.arc(0, 0, 2.5, 0, Math.PI * 2); ctx.fill();
+          }
+          ctx.restore();
+        }
+
         if (convoy.objectiveTarget) {
           ctx.strokeStyle = '#ff4444';
           ctx.lineWidth = 1.2;
           ctx.beginPath();
-          ctx.arc(convoy.x, convoy.y, 14, 0, Math.PI * 2);
+          ctx.arc(convoy.x, convoy.y, 16, 0, Math.PI * 2);
           ctx.stroke();
           ctx.fillStyle = '#ff8844';
           ctx.font = 'bold 9px "Courier New", monospace';
           ctx.textAlign = 'center';
-          ctx.fillText('CONVOY TARGET', convoy.x, convoy.y - 18);
-        }
-        if (convoy.route.length > 1) {
-          ctx.strokeStyle = withAlpha('#5a5a3a', 0.2);
-          ctx.lineWidth = 1;
-          ctx.beginPath();
-          ctx.moveTo(convoy.route[0].x, convoy.route[0].y);
-          for (let i = 1; i < convoy.route.length; i++) {
-            ctx.lineTo(convoy.route[i].x, convoy.route[i].y);
-          }
-          ctx.stroke();
+          ctx.fillText('CONVOY TARGET', convoy.x, convoy.y - 22);
         }
       }
     }
@@ -2279,39 +2946,135 @@ registerScreen('sortie', {
     // ── HUD ──
     ctx.save(); ctx.scale(dpr, dpr);
 
-    // HP bar
-    const hpBarW = 120, hpBarH = 8, hpX = w / 2 - hpBarW / 2, hpY = 12;
-    ctx.fillStyle = P.ui.hpBar; ctx.fillRect(hpX, hpY, hpBarW, hpBarH);
-    const hpPct = heli.hp / heli.maxHp;
-    ctx.fillStyle = hpPct > 0.5 ? P.ui.hp : hpPct > 0.25 ? P.ui.hpMed : P.ui.hpLow;
-    ctx.fillRect(hpX, hpY, hpBarW * hpPct, hpBarH);
-    ctx.strokeStyle = P.ui.hpBorder; ctx.lineWidth = 1; ctx.strokeRect(hpX, hpY, hpBarW, hpBarH);
-    ctx.fillStyle = P.ui.text; ctx.font = 'bold 11px "Courier New", monospace';
-    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-    ctx.fillText(`HP ${heli.hp}/${heli.maxHp}`, hpX, hpY + hpBarH + 3);
+    // Scale the HUD with viewport size so it stays readable on big screens
+    // and still fits on small ones. All HUD code below uses W/H (logical).
+    const uiS = clamp(Math.min(w, h) / 720, 1, 1.7);
+    ctx.scale(uiS, uiS);
 
-    // Score + Fear progress
-    ctx.fillStyle = P.ui.infamy; ctx.fillText(`SCORE ${heli.score}`, w - 160, 12);
-    ctx.fillStyle = '#ff8844'; ctx.fillText(`FEAR LV ${sortieState.fearLevel || 0}`, w - 160, 26);
-    const fearBarW = 130;
-    const fearThreshold = getFearThreshold();
-    ctx.fillStyle = '#1a1a0a'; ctx.fillRect(w - 160, 42, fearBarW, 5);
-    ctx.fillStyle = '#cc8833'; ctx.fillRect(w - 160, 42, fearBarW * clamp(heli.fear / fearThreshold, 0, 1), 5);
-    ctx.strokeStyle = '#5a4a2a'; ctx.lineWidth = 1; ctx.strokeRect(w - 160, 42, fearBarW, 5);
+    // ── HUD layout metrics (responsive; no plate overlaps) ──
+    const W = w / uiS, H = h / uiS;
+    const narrow = W < 720;
+    const lpw = narrow ? 178 : 240;                 // left systems plate width
+    const rpw = narrow ? 152 : 188;                 // right status plate width
+    const rph = narrow ? 106 : 96;                  // right status plate height
+    const rpx = W - rpw - 8;
 
-    // Heat / response meter
-    const heatX = w - 160;
-    const heatY = 56;
-    ctx.fillStyle = '#ff8844';
-    ctx.fillText(`HEAT ${HEAT_LABELS[sortieState.heat.tier]}`, heatX, heatY);
-    ctx.fillStyle = '#1a0f0a'; ctx.fillRect(heatX, heatY + 15, fearBarW, 6);
-    ctx.fillStyle = sortieState.heat.tier >= 3 ? '#ff4444' : '#cc6633';
-    ctx.fillRect(heatX, heatY + 15, fearBarW * sortieState.heat.value / 100, 6);
-    ctx.strokeStyle = '#6a3a2a'; ctx.lineWidth = 1; ctx.strokeRect(heatX, heatY + 15, fearBarW, 6);
-    if (sortieState.heat.eventTimer > 0 && sortieState.heat.lastEvent) {
-      ctx.fillStyle = '#ffcc88';
-      ctx.font = '9px "Courier New", monospace';
-      ctx.fillText(sortieState.heat.lastEvent.toUpperCase(), heatX, heatY + 34);
+    const nToggles = (input.autofire ? 1 : 0) + (input.clickToTarget ? 1 : 0);
+    const objText = (world?.objective && !sortieState.objectiveComplete)
+      ? objectiveHudText()
+      : (sortieState.objectiveComplete ? 'BRT — REACH EXTRACTION' : null);
+    const objWrap = objText ? wrapText(objText, Math.max(16, Math.floor((lpw - 26) / 6))).slice(0, 2) : [];
+    const showProgress = !!(world?.objective && !sortieState.objectiveComplete && world.objective.type === 'suppression');
+    const sysH = 30 + nToggles * 15 + objWrap.length * 13 + (showProgress ? 13 : 0) + 4;
+
+    // Centre stack drops below the side plates on narrow screens.
+    const hpY0 = narrow ? 8 + Math.max(sysH, rph) + 12 : 8;
+    let hudEtaY = hpY0 + 36;
+
+    // Bottom row metrics (radar / compass / sortie stats)
+    const mmS = narrow ? 108 : 148;              // minimap size
+    const mmX = 12, mmY = H - mmS - 12;
+    const stW = narrow ? 138 : 172;              // stats plate width
+    const stH = narrow ? 52 : 60;
+    const stX = W - stW - 12, stY = H - stH - 12;
+    const cpW = Math.max(0, Math.min(W - (mmS + 48) * 2 - 24, 300));
+    const cpH = 34;
+
+    // ── Damage vignette — screen edges bleed red as the airframe fails ──
+    {
+      const hpPctV = heli.hp / heli.maxHp;
+      if (hpPctV < 0.35) {
+        const pulse = 0.75 + 0.25 * Math.sin(performance.now() / 160);
+        const a = (1 - hpPctV / 0.35) * 0.38 * pulse;
+        const vg = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.32, W / 2, H / 2, Math.max(W, H) * 0.72);
+        vg.addColorStop(0, 'rgba(180,20,20,0)');
+        vg.addColorStop(1, `rgba(180,20,20,${a.toFixed(3)})`);
+        ctx.fillStyle = vg;
+        ctx.fillRect(0, 0, W, H);
+      }
+    }
+
+    // Hull plate (centred — contents measured & centred as a group)
+    {
+      const hpBarW = 110, hpBarH = 8;
+      const plateW = 212, plateH = 30;
+      const px = W / 2 - plateW / 2, py = hpY0;
+      const hpPct = heli.hp / heli.maxHp;
+      hudPlate(ctx, px, py, plateW, plateH,
+        hpPct <= 0.25 ? 'rgba(255,68,68,0.7)' : hpPct <= 0.5 ? 'rgba(204,170,51,0.55)' : 'rgba(90,140,80,0.55)');
+      const lowPulse = hpPct <= 0.25 ? (0.55 + 0.45 * Math.sin(performance.now() / 120)) : 1;
+
+      // State-dependent label (short enough to keep the row compact)
+      let label = 'HULL', labelCol = P.ui.text;
+      if (hpPct <= 0.25) { label = 'CRIT'; labelCol = '#ff4444'; }
+      else if (hpPct <= 0.5) { label = 'DMGD'; labelCol = P.ui.hpMed; }
+
+      const num = `${Math.round(Math.max(0, heli.hp))}/${Math.round(heli.maxHp)}`;
+      ctx.font = 'bold 10px "Courier New", monospace';
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      const labelW = ctx.measureText(label).width;
+      const numW = ctx.measureText(num).width;
+      const gap = 9;
+      const total = labelW + gap + hpBarW + gap + numW;
+
+      const midY = py + plateH / 2 + 0.5;   // optical centre of the plate
+      let cx0 = px + (plateW - total) / 2;  // centre the whole row
+
+      // Label
+      ctx.fillStyle = labelCol;
+      ctx.globalAlpha = hpPct <= 0.25 ? lowPulse : 1;
+      ctx.fillText(label, cx0, midY);
+      ctx.globalAlpha = 1;
+      // Bar
+      const barX = cx0 + labelW + gap, barY = py + (plateH - hpBarH) / 2;
+      ctx.fillStyle = P.ui.hpBar; ctx.fillRect(barX, barY, hpBarW, hpBarH);
+      const hpCol = hpPct > 0.5 ? P.ui.hp : hpPct > 0.25 ? P.ui.hpMed : P.ui.hpLow;
+      if (hpPct > 0) {
+        ctx.globalAlpha = lowPulse;
+        ctx.fillStyle = hpCol; ctx.fillRect(barX, barY, hpBarW * hpPct, hpBarH);
+        ctx.globalAlpha = 1;
+      }
+      ctx.strokeStyle = P.ui.hpBorder; ctx.lineWidth = 1;
+      ctx.strokeRect(barX - 0.5, barY - 0.5, hpBarW + 1, hpBarH + 1);
+      // Numeric readout
+      ctx.fillStyle = P.ui.text;
+      ctx.fillText(num, barX + hpBarW + gap, midY);
+    }
+
+    // Score / Fear / Heat — right status plate
+    {
+      const px = rpx, py = 8, pw = rpw, ph = rph;
+      hudPlate(ctx, px, py, pw, ph, 'rgba(90,140,80,0.55)');
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+
+      // SCORE
+      ctx.font = 'bold 10px "Courier New", monospace';
+      ctx.fillStyle = P.ui.textDim; ctx.fillText('SCORE', px + 12, py + 8);
+      ctx.font = 'bold 14px "Courier New", monospace';
+      ctx.fillStyle = P.ui.infamy; ctx.fillText(`${heli.score}`, px + 58, py + 6);
+
+      // FEAR
+      const fearThreshold = getFearThreshold();
+      ctx.font = 'bold 10px "Courier New", monospace';
+      ctx.fillStyle = '#ff8844'; ctx.fillText(`FEAR LV ${sortieState.fearLevel || 0}`, px + 12, py + 26);
+      const fbW = pw - 24;
+      ctx.fillStyle = 'rgba(26,26,10,0.9)'; ctx.fillRect(px + 12, py + 39, fbW, 5);
+      ctx.fillStyle = '#cc8833'; ctx.fillRect(px + 12, py + 39, fbW * clamp(heli.fear / fearThreshold, 0, 1), 5);
+      ctx.strokeStyle = '#5a4a2a'; ctx.strokeRect(px + 11.5, py + 38.5, fbW + 1, 6);
+
+      // HEAT (tier-colored)
+      const heatCols = [P.ui.hp, P.ui.hpMed, '#ff8844', '#ff5533', '#ff2222'];
+      ctx.fillStyle = heatCols[Math.min(sortieState.heat.tier, heatCols.length - 1)];
+      ctx.fillText(`HEAT ${HEAT_LABELS[sortieState.heat.tier]}`, px + 12, py + 50);
+      ctx.fillStyle = 'rgba(26,15,10,0.9)'; ctx.fillRect(px + 12, py + 63, fbW, 6);
+      ctx.fillStyle = sortieState.heat.tier >= 3 ? '#ff4444' : '#cc6633';
+      ctx.fillRect(px + 12, py + 63, fbW * sortieState.heat.value / 100, 6);
+      ctx.strokeStyle = '#6a3a2a'; ctx.strokeRect(px + 11.5, py + 62.5, fbW + 1, 7);
+      if (sortieState.heat.eventTimer > 0 && sortieState.heat.lastEvent) {
+        ctx.fillStyle = '#ffcc88'; ctx.font = '8px "Courier New", monospace';
+        const ev = sortieState.heat.lastEvent.toUpperCase();
+        ctx.fillText(ev.length > 34 ? ev.slice(0, 33) + '…' : ev, px + 12, py + 74);
+      }
     }
 
     // ── Boss timer ──
@@ -2320,20 +3083,23 @@ registerScreen('sortie', {
       const mins = Math.floor(secs / 60);
       const rem = secs % 60;
       const timerStr = `${mins}:${rem.toString().padStart(2, '0')}`;
-      // Flash red when under 30s
       const urgent = bossState.timeRemaining < 30;
       const flash = urgent && Math.sin(performance.now() / 200) > 0;
+      const bw = 190, bx = W / 2 - bw / 2, by = hudEtaY;
+      hudPlate(ctx, bx, by, bw, 24, urgent ? 'rgba(255,68,68,0.7)' : 'rgba(90,140,80,0.55)');
       ctx.fillStyle = flash ? '#ff4444' : P.ui.textBright;
-      ctx.font = 'bold 14px "Courier New", monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText(`HUNTER ETA: ${timerStr}`, w / 2, 38);
+      ctx.font = 'bold 13px "Courier New", monospace';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+      ctx.fillText(`HUNTER ETA ${timerStr}`, W / 2, by + 5);
     }
 
-    // ── Boss HP bar (when spawned) ──
+    // ── Boss HP bar (when spawned) — sits clear of the ETA plate ──
     if (boss.spawned && boss.state !== 'dead') {
-      const bossBarW = 200, bossBarH = 10;
-      const bossBarX = w / 2 - bossBarW / 2;
-      const bossBarY = 50;
+      const bossBarW = 220, bossBarH = 9;
+      const bossBarX = W / 2 - bossBarW / 2;
+      const etaShowing = bossState.active && !bossState.defeated;
+      const bossBarY = etaShowing ? hudEtaY + 40 : hudEtaY;
+      hudPlate(ctx, bossBarX - 8, bossBarY - 16, bossBarW + 16, 30, 'rgba(255,68,68,0.55)');
       ctx.fillStyle = '#1a1a1a';
       ctx.fillRect(bossBarX, bossBarY, bossBarW, bossBarH);
       const bossHpPct = boss.hp / boss.maxHp;
@@ -2341,99 +3107,269 @@ registerScreen('sortie', {
       ctx.fillRect(bossBarX, bossBarY, bossBarW * bossHpPct, bossBarH);
       ctx.strokeStyle = '#880000';
       ctx.lineWidth = 1;
-      ctx.strokeRect(bossBarX, bossBarY, bossBarW, bossBarH);
-      ctx.fillStyle = '#ff4444';
+      ctx.strokeRect(bossBarX + 0.5, bossBarY + 0.5, bossBarW - 1, bossBarH - 1);
+      ctx.fillStyle = '#ff6666';
       ctx.font = 'bold 9px "Courier New", monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText('HIND PURSUIT GUNSHIP', w / 2, bossBarY - 3);
+      ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+      ctx.fillText('HIND PURSUIT GUNSHIP', W / 2, bossBarY - 12);
     }
 
     // Target indicator + mode
     if (heli.target) {
       const ts = cam.worldToScreen(heli.target.x, heli.target.y);
+      ts.x /= uiS; ts.y /= uiS; // convert to HUD-logical space
+      ctx.save();
+      ctx.translate(ts.x, ts.y);
+      ctx.rotate(performance.now() / 2400); // slow instrument rotation
       ctx.strokeStyle = P.ui.enemy;
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.arc(ts.x, ts.y, 16, 0, Math.PI * 2);
+      ctx.arc(0, 0, 16, 0, Math.PI * 2);
       ctx.stroke();
-      // Crosshair lines
-      ctx.beginPath();
-      ctx.moveTo(ts.x - 22, ts.y); ctx.lineTo(ts.x - 9, ts.y);
-      ctx.moveTo(ts.x + 9, ts.y); ctx.lineTo(ts.x + 22, ts.y);
-      ctx.moveTo(ts.x, ts.y - 22); ctx.lineTo(ts.x, ts.y - 9);
-      ctx.moveTo(ts.x, ts.y + 9); ctx.lineTo(ts.x, ts.y + 22);
-      ctx.stroke();
+      // Crosshair ticks (rotate with the ring)
+      for (let i = 0; i < 4; i++) {
+        ctx.rotate(Math.PI / 2);
+        ctx.beginPath();
+        ctx.moveTo(9, 0); ctx.lineTo(22, 0);
+        ctx.stroke();
+      }
+      ctx.restore();
       // Center dot
       ctx.fillStyle = P.ui.enemy;
       ctx.beginPath();
       ctx.arc(ts.x, ts.y, 2, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = P.ui.enemy;
+      // Label + range-to-target
+      const tRange = Math.round(Math.hypot(heli.target.x - heli.x, heli.target.y - heli.y) / 10) * 10;
       ctx.font = '9px "Courier New", monospace';
       ctx.textAlign = 'center';
-       ctx.fillText(
-         heli.target === boss ? 'HIND PURSUIT GUNSHIP' :
-           (heli.target.weaponName || heli.target.className || (heli.target.objectiveTag ? `${heli.target.objectiveTag.toUpperCase()} TARGET` : 'TARGET')),
-         ts.x, ts.y - 24,
-       );
+      ctx.fillStyle = P.ui.enemy;
+      ctx.fillText(
+        heli.target === boss ? 'HIND PURSUIT GUNSHIP' :
+          (heli.target.weaponName || heli.target.className || (heli.target.objectiveTag ? `${heli.target.objectiveTag.toUpperCase()} TARGET` : 'TARGET')),
+        ts.x, ts.y - 26,
+      );
+      ctx.fillStyle = '#ffaa88';
+      ctx.fillText(`${tRange} m`, ts.x, ts.y + 22);
     }
 
-    // Target mode indicator
-    ctx.fillStyle = P.ui.text;
-    ctx.font = '10px "Courier New", monospace';
-    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-    ctx.fillText(`TARGET: ${heli.targetMode.toUpperCase()}`, 8, 12);
-    ctx.fillStyle = P.ui.textDim;
-    ctx.fillText('[SHIFT] cycle', 8, 26);
-
-    // Autofire indicator
-    if (input.autofire) {
-      ctx.fillStyle = P.ui.rocket;
-      ctx.fillText('AUTOFIRE ON', 8, 42);
-    }
-    if (input.clickToTarget) {
-      ctx.fillStyle = P.ui.rocket;
-      ctx.fillText('CLICK TO TARGET', 8, input.autofire ? 56 : 42);
-    }
-
-    if (world?.objective && !sortieState.objectiveComplete) {
+    // Systems plate — target mode, toggles, objective (drawn last, stays on top)
+    {
+      const px = 8, py = 8, pw = lpw;
+      hudPlate(ctx, px, py, pw, sysH, 'rgba(90,140,80,0.55)');
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      ctx.font = 'bold 10px "Courier New", monospace';
       ctx.fillStyle = P.ui.text;
-      ctx.fillText(`OBJECTIVE: ${objectiveHudText()}`, 8, 72);
-      if (world.objective.type === 'suppression') {
+      ctx.fillText(`TGT ${heli.targetMode.toUpperCase()}`, px + 12, py + 8);
+      if (!narrow) {
         ctx.fillStyle = P.ui.textDim;
-        ctx.fillText(`PROGRESS: ${world.objective.progress}/${world.objective.requiredCount}`, 8, 86);
+        ctx.fillText('[SHIFT] CYCLE', px + 92, py + 8);
+      }
+      let ty = py + 24;
+      for (let i = 0; i < nToggles; i++) {
+        ctx.fillStyle = P.ui.rocket;
+        ctx.fillText(i === 0 && input.autofire ? 'AUTOFIRE' : 'CLICK-TARGET', px + 12, ty);
+        ty += 15;
+      }
+      ctx.font = 'bold 10px "Courier New", monospace';
+      for (const line of objWrap) {
+        ctx.fillStyle = sortieState.objectiveComplete ? '#44ddff' : '#ffcc44';
+        ctx.fillText(line, px + 12, ty); ty += 13;
+      }
+      if (showProgress) {
+        ctx.fillStyle = P.ui.textDim;
+        ctx.fillText(`PROGRESS ${world.objective.progress}/${world.objective.requiredCount}`, px + 12, ty);
       }
     }
-    if (sortieState.objectiveComplete) {
-      ctx.fillStyle = '#44ddff';
-      ctx.fillText('OBJECTIVE COMPLETE - REACH EXTRACTION', 8, 72);
+
+    // ── BOTTOM-LEFT: tactical radar ────────────────────────────────────
+    if (world) {
+      hudPlate(ctx, mmX - 4, mmY - 4, mmS + 8, mmS + 8, 'rgba(90,140,80,0.55)');
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(mmX, mmY, mmS, mmS);
+      ctx.clip();
+
+      const half = world.worldSize / 2;
+      const k = mmS / world.worldSize;
+      const mx = (wx) => mmX + (wx + half) * k;
+      const my = (wy) => mmY + (wy + half) * k;
+
+      // Roads (cached layer)
+      ctx.drawImage(getMiniRoads(mmS), mmX, mmY);
+
+      // Radar sweep
+      const sweepAng = performance.now() / 900;
+      ctx.save();
+      ctx.translate(mmX + mmS / 2, mmY + mmS / 2);
+      ctx.rotate(sweepAng);
+      const sw = ctx.createLinearGradient(0, 0, mmS / 2, 0);
+      sw.addColorStop(0, 'rgba(120,220,110,0.30)');
+      sw.addColorStop(1, 'rgba(120,220,110,0)');
+      ctx.strokeStyle = 'rgba(120,220,110,0.25)';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(mmS / 2, 0); ctx.stroke();
+      ctx.restore();
+
+      // Camera view rectangle
+      {
+        const vb = camera.getVisibleBounds();
+        ctx.strokeStyle = 'rgba(200,255,180,0.35)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(mx(vb.left), my(vb.top), (vb.right - vb.left) * k, (vb.bottom - vb.top) * k);
+      }
+
+      // Sites
+      for (const s of world.sites) {
+        const isObj = world.objective && world.objective.targetSiteId === s.id;
+        let col = s.cleared ? '#3f7f3f' : s.discovered ? '#ffcc44' : 'rgba(255,204,68,0.5)';
+        ctx.fillStyle = col;
+        ctx.fillRect(mx(s.x) - 2, my(s.y) - 2, 4, 4);
+        if (isObj && !s.cleared) {
+          const pr = 3.5 + Math.sin(performance.now() / 180) * 1.5;
+          ctx.strokeStyle = '#ff5544';
+          ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.arc(mx(s.x), my(s.y), pr, 0, Math.PI * 2); ctx.stroke();
+        }
+      }
+      // Convoys
+      for (const c of world.convoys) {
+        if (c.destroyed || !c.active) continue;
+        ctx.fillStyle = '#ff8844';
+        ctx.fillRect(mx(c.x) - 1.5, my(c.y) - 1.5, 3, 3);
+      }
+      // Extraction
+      if (world.extraction?.active) {
+        ctx.fillStyle = '#44ddff';
+        ctx.beginPath();
+        ctx.arc(mx(world.extraction.x), my(world.extraction.y), 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // Boss
+      if (boss.spawned && boss.state !== 'dead') {
+        ctx.fillStyle = '#ff2222';
+        ctx.beginPath();
+        ctx.arc(mx(boss.x), my(boss.y), 3.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // Player wedge
+      ctx.save();
+      ctx.translate(mx(heli.x), my(heli.y));
+      ctx.rotate(heli.angle);
+      ctx.fillStyle = '#66ff66';
+      ctx.beginPath();
+      ctx.moveTo(5, 0); ctx.lineTo(-4, -3.5); ctx.lineTo(-4, 3.5);
+      ctx.closePath(); ctx.fill();
+      ctx.restore();
+
+      ctx.restore(); // clip
     }
 
-    // Controls hint
-    ctx.fillStyle = P.ui.textDim;
-    ctx.font = '10px "Courier New", monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText(
-      'Mouse: steer  |  Click: fire  |  Shift: cycle target  |  P: settings',
-      w / 2, h - 8
-    );
+    // ── BOTTOM-CENTRE: compass tape + speed ─────────────────────────────
+    if (cpW >= 130) {
+      const cx = W / 2, cy = H - cpH / 2 - 12;
+      hudPlate(ctx, cx - cpW / 2, cy - cpH / 2, cpW, cpH, 'rgba(90,140,80,0.55)');
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(cx - cpW / 2 + 6, cy - cpH / 2, cpW - 12, cpH);
+      ctx.clip();
+      const headingDeg = ((heli.angle * 180 / Math.PI) + 90 + 360) % 360;
+      const pxPerDeg = 2.1;
+      ctx.font = 'bold 9px "Courier New", monospace';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      for (let d = Math.floor((headingDeg - 70) / 15) * 15; d <= headingDeg + 70; d += 15) {
+        const x = cx + (d - headingDeg) * pxPerDeg;
+        const dd = ((d % 360) + 360) % 360;
+        const major = dd % 90 === 0;
+        ctx.strokeStyle = major ? 'rgba(170,255,136,0.8)' : 'rgba(120,160,100,0.45)';
+        ctx.lineWidth = major ? 1.5 : 1;
+        ctx.beginPath();
+        ctx.moveTo(x, cy - cpH / 2 + 6);
+        ctx.lineTo(x, cy - cpH / 2 + (major ? 14 : 10));
+        ctx.stroke();
+        if (major) {
+          const lbl = ['N', 'E', 'S', 'W'][dd / 90];
+          ctx.fillStyle = lbl === 'N' ? '#aaff88' : P.ui.textDim;
+          ctx.fillText(lbl, x, cy - cpH / 2 + 22);
+        }
+      }
+      // Caret + numeric heading
+      ctx.fillStyle = P.ui.textBright;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - cpH / 2 + 2);
+      ctx.lineTo(cx - 4, cy - cpH / 2 - 3);
+      ctx.lineTo(cx + 4, cy - cpH / 2 - 3);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
 
-    // ── Boss warning arrow (pointing toward spawn direction) ──
+      // Speed readout at the right end of the compass plate
+      const spdNow = Math.round(Math.hypot(heli.vx, heli.vy));
+      ctx.font = 'bold 9px "Courier New", monospace';
+      ctx.fillStyle = P.ui.textDim;
+      ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+      ctx.fillText(`${spdNow}`, cx + cpW / 2 - 26, cy);
+      ctx.fillStyle = 'rgba(120,160,100,0.6)';
+      ctx.fillText('SPD', cx + cpW / 2 - 26, cy + 10);
+    }
+
+    // ── BOTTOM-RIGHT: sortie stats ──────────────────────────────────────
+    {
+      hudPlate(ctx, stX, stY, stW, stH, 'rgba(90,140,80,0.55)');
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      const secs = Math.floor((performance.now() - sortieStartedAt) / 1000);
+      const tStr = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+      const clearedN = world ? world.sites.filter(s => s.cleared).length : 0;
+      const totalSites = world ? world.sites.length : 0;
+      ctx.font = 'bold 11px "Courier New", monospace';
+      ctx.fillStyle = P.ui.text;
+      ctx.fillText(`KILLS ${sortieState.stats.kills}`, stX + 12, stY + 8);
+      ctx.fillText(`TIME ${tStr}`, stX + 12, stY + 24);
+      ctx.fillStyle = '#ffcc44';
+      ctx.fillText(`SITES ${clearedN}/${totalSites}`, stX + 62, stY + 8);
+      ctx.font = 'bold 9px "Courier New", monospace';
+      ctx.fillStyle = 'rgba(90,130,80,0.8)';
+      ctx.fillText(`FPS ${lastFps}`, stX + 62, stY + 24);
+    }
+
+    // ── Objective + extraction direction markers (drawn above all plates) ──
+    {
+      const focus = getObjectiveFocus();
+      if (focus) drawOffscreenMarker(ctx, camera, W, H, focus.x, focus.y, '#ff5544', '#ff9966', null, uiS);
+      if (world?.extraction?.active) {
+        drawOffscreenMarker(ctx, camera, W, H, world.extraction.x, world.extraction.y, '#44ddff', '#88ddff', 'LZ', uiS);
+      }
+    }
+
+    // Controls hint — fades out after the first seconds of a sortie,
+    // lifted above the bottom HUD row.
+    {
+      const age = (performance.now() - sortieStartedAt) / 1000;
+      const alpha = clamp(1 - (age - 10) / 3, 0, 1) * 0.55;
+      if (alpha > 0.01) {
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = P.ui.text;
+        ctx.font = '9px "Courier New", monospace';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+        ctx.fillText('MOUSE STEER · CLICK FIRE · SHIFT TARGET · P SETTINGS', W / 2, mmY - 10);
+        ctx.globalAlpha = 1;
+      }
+    }
+
+    // ── Boss warning (pointing toward spawn direction) ──
     if (bossState.warning && !bossState.spawned) {
-      // Flash red border
+      // Flashing corner brackets instead of a full border
       const flash = Math.sin(performance.now() / 150) > 0;
       if (flash) {
-        ctx.strokeStyle = '#ff4444';
-        ctx.lineWidth = 4;
-        ctx.strokeRect(2, 2, w - 4, h - 4);
+        drawCornerBrackets(ctx, 4, 4, W - 8, H - 8, '#ff4444', 42, 5);
       }
       // Warning text
       ctx.fillStyle = '#ff4444';
       ctx.font = 'bold 16px "Courier New", monospace';
       ctx.textAlign = 'center';
-      ctx.fillText('! INCOMING HOSTILE !', w / 2, h / 2 - 60);
+      ctx.fillText('! INCOMING HOSTILE !', W / 2, H / 2 - 60);
       ctx.font = '12px "Courier New", monospace';
-      ctx.fillText(`ARRIVING IN ${Math.ceil(bossState.warningTimer)}s`, w / 2, h / 2 - 40);
+      ctx.fillText(`ARRIVING IN ${Math.ceil(bossState.warningTimer)}s`, W / 2, H / 2 - 40);
     }
 
     ctx.restore();
@@ -2460,12 +3396,13 @@ function drawSettings(ctx, cam) {
   ctx.strokeStyle = '#3a5a2a';
   ctx.lineWidth = 2;
   ctx.strokeRect(cx - panelW / 2, cy - panelH / 2, panelW, panelH);
+  drawCornerBrackets(ctx, cx - panelW / 2, cy - panelH / 2, panelW, panelH, P.ui.borderHi, 14, 2);
 
   // Title
   ctx.fillStyle = P.ui.textBright;
   ctx.font = 'bold 16px "Courier New", monospace';
   ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-  ctx.fillText('CONTROLS', cx, cy - panelH / 2 + 16);
+  ctx.fillText('PAUSE — SETTINGS', cx, cy - panelH / 2 + 14);
 
   ctx.strokeStyle = '#3a5a2a'; ctx.lineWidth = 1;
   ctx.beginPath();
@@ -2500,6 +3437,15 @@ function drawSettings(ctx, cam) {
   drawOption('Autofire (F key)', input.autofire);
   drawOption('Click to Target (T key)', input.clickToTarget);
   optY += 8;
+
+  // Abandon option (in-sortie only)
+  if (currentScreen === screens.sortie && sortieState.status === 'active') {
+    ctx.fillStyle = '#ff7744';
+    ctx.font = 'bold 12px "Courier New", monospace';
+    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.fillText('Q — ABANDON SORTIE', optX, optY);
+    optY += lineH;
+  }
 
   // Close hint
   ctx.fillStyle = P.ui.textDim;

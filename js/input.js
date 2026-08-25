@@ -37,9 +37,10 @@ export class Input {
     // Cycle target (one-shot per tick)
     this.cycleTarget = false;
 
-    // Equipment / pause (one-shot)
+    // Equipment / pause / abandon (one-shot)
     this.equipment = false;
     this.pause = false;
+    this.abandon = false;
 
     // Settings
     this.autofire = false;
@@ -73,6 +74,7 @@ export class Input {
       if (e.code === 'KeyT') this.clickToTarget = !this.clickToTarget;
       if (e.code === 'KeyE') this.equipment = true;
       if (e.code === 'Escape' || e.code === 'KeyP') this.pause = true;
+      if (e.code === 'KeyQ') this.abandon = true;
     });
     window.addEventListener('keyup', (e) => {
       this.keys[e.code] = false;
@@ -263,6 +265,7 @@ export class Input {
     this.clickTarget = false;
     this.equipment = false;
     this.pause = false;
+    this.abandon = false;
   }
 
   /** Draw touch controls in screen space. */
