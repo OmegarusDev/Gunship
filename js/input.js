@@ -34,10 +34,9 @@ export class Input {
     this.clickTargetX = 0;
     this.clickTargetY = 0;
 
-    // Cycle target (one-shot per tick)
+    // Cycle target / cycle target MODE / abandon (one-shot)
     this.cycleTarget = false;
-
-    // Equipment / pause / abandon (one-shot)
+    this.cycleMode = false;
     this.equipment = false;
     this.pause = false;
     this.abandon = false;
@@ -70,6 +69,7 @@ export class Input {
       this.keys[e.code] = true;
       if (e.code === 'Space') this.fire = true;
       if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') this.cycleTarget = true;
+      if (e.code === 'KeyV') this.cycleMode = true;
       if (e.code === 'KeyF') this.autofire = !this.autofire;
       if (e.code === 'KeyT') this.clickToTarget = !this.clickToTarget;
       if (e.code === 'KeyE') this.equipment = true;
@@ -141,6 +141,9 @@ export class Input {
       } else if (norm.y < 0.3) {
         // Top-right = target cycle
         this.cycleTarget = true;
+      } else if (norm.y < 0.42) {
+        // Below it = target MODE cycle (next to the fire button)
+        this.cycleMode = true;
       } else {
         // Rest of right side = fire
         this.fire = true;
@@ -202,10 +205,13 @@ export class Input {
         if (fireNow) { this.fireHeld = true; this.fire = true; }
         else { this.fireHeld = false; }
 
-        // LB (4) = cycle target (rising edge)
+        // LB (4) = cycle target, RB (5) = cycle target mode (rising edge)
         const cycleNow = gp.buttons[4]?.pressed;
         if (cycleNow && !this._gpButtonsPrev[4]) this.cycleTarget = true;
         this._gpButtonsPrev[4] = cycleNow;
+        const modeNow = gp.buttons[5]?.pressed;
+        if (modeNow && !this._gpButtonsPrev[5]) this.cycleMode = true;
+        this._gpButtonsPrev[5] = modeNow;
       }
     }
 
@@ -262,6 +268,7 @@ export class Input {
   consumeOneShots() {
     this.fire = false;
     this.cycleTarget = false;
+    this.cycleMode = false;
     this.clickTarget = false;
     this.equipment = false;
     this.pause = false;

@@ -271,34 +271,49 @@ export function createTerrain(seed, worldSize = 6000) {
     return e;
   }
 
+  // ── Single-pass classify: computes type AND elevation, sharing the
+  //    nearest-water queries and elevation math between both. This is the
+  //    hot path for terrain rendering — call this instead of type() +
+  //    elevation() separately.
+  function classify(x, y) {
+    const no = nearestOasis(x, y);
+    const nw = nearestWadi(x, y);
+
+    // Elevation (identical math to elevation(), reusing `nw`).
+    let e = structuralElevation(x, y);
+    const wadiReach = nw.order === 1 ? 400 : 200;
+    if (nw.dist < wadiReach) {
+      e -= (1 - nw.dist / wadiReach) * (nw.order === 1 ? 160 : 90);
+    }
+    const bd = Math.hypot(x - skeleton.basin.x, y - skeleton.basin.y);
+    const basinT = bd / (skeleton.basin.radius * 2);
+    e -= 120 * Math.exp(-(basinT * basinT));
+    e += fbm(noise, x * 0.0011, y * 0.0011, 4, 2.0, 0.5) * 90;
+
+    // Type (identical precedence to the standalone type()).
+    let t;
+    if (no < 130) {
+      t = TERRAIN_TYPES.OASIS;
+    } else if (nw.dist < (nw.order === 1 ? 130 : 70)) {
+      t = TERRAIN_TYPES.WADI;
+    } else if (e > 620) {
+      t = TERRAIN_TYPES.ROCK;
+    } else if (e > 250 && e < 560) {
+      const dn = ridged(noise, x * 0.0008, y * 0.0008, 3, 2.0, 0.5);
+      t = dn > 0.25 ? TERRAIN_TYPES.DUNES : TERRAIN_TYPES.SAND;
+    } else if (e < 120) {
+      const moist = fbm(noise, x * 0.0009 + 100, y * 0.0009 + 100, 3, 2.0, 0.5);
+      t = moist > 0.15 ? TERRAIN_TYPES.HARDPACK : TERRAIN_TYPES.GRAVEL;
+    } else {
+      t = TERRAIN_TYPES.SAND;
+    }
+
+    return { type: t, elevation: e };
+  }
+
   // ── Terrain classification ──
   function type(x, y) {
-    // Water features first (they override everything).
-    const no = nearestOasis(x, y);
-    if (no < 130) return TERRAIN_TYPES.OASIS;
-
-    const nw = nearestWadi(x, y);
-    const wadiHalfWidth = nw.order === 1 ? 130 : 70;
-    if (nw.dist < wadiHalfWidth) return TERRAIN_TYPES.WADI;
-
-    const e = elevation(x, y);
-
-    // Mountains.
-    if (e > 620) return TERRAIN_TYPES.ROCK;
-
-    // Dune belts (wind-driven noise) at mid elevations.
-    if (e > 250 && e < 560) {
-      const dn = ridged(noise, x * 0.0008, y * 0.0008, 3, 2.0, 0.5);
-      if (dn > 0.25) return TERRAIN_TYPES.DUNES;
-    }
-
-    // Low & dry -> gravel fan apron; low & wet -> hardpack.
-    if (e < 120) {
-      const moist = fbm(noise, x * 0.0009 + 100, y * 0.0009 + 100, 3, 2.0, 0.5);
-      return moist > 0.15 ? TERRAIN_TYPES.HARDPACK : TERRAIN_TYPES.GRAVEL;
-    }
-
-    return TERRAIN_TYPES.SAND;
+    return classify(x, y).type;
   }
 
   // ── Settlement suitability — for world-gen site placement ──
@@ -335,6 +350,7 @@ export function createTerrain(seed, worldSize = 6000) {
     elevation,
     structuralElevation,
     type,
+    typeAndElevation: classify,
     suitability,
     nearestWadi,
     nearestOasis,

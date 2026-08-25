@@ -3,7 +3,7 @@
  */
 console.log('[Gunship] app.js loading...');
 
-import { SIM_HZ, SIM_DT, WORLD_SIZE, TIMER, CIVILIAN_ESCAPE_RADIUS } from './config.js';
+import { SIM_HZ, SIM_DT, WORLD_SIZE, TIMER, CIVILIAN_ESCAPE_RADIUS, CAMERA, COMBAT, HUD } from './config.js';
 import { WorldCamera } from './camera.js';
 import { Input } from './input.js';
 import { P, mats } from './palette.js';
@@ -79,10 +79,21 @@ let settingsOpen = false;
 // Sortie start timestamp — used to fade the on-screen controls hint.
 let sortieStartedAt = performance.now();
 let lastFps = 0;
+const IS_TOUCH = typeof window !== 'undefined' && ('ontouchstart' in window);
+let modeToastUntil = 0; // targeting-mode banner expiry (performance.now clock)
 
 // Position of the player's most recent gunshot — civilians panic only
 // when gunfire happens near them (or their site's defenders open up).
 let lastShotX = 0, lastShotY = 0, lastShotT = -999;
+
+// ── Equipment — one usable item per sortie, chosen at briefing ────────────
+const EQUIPMENT = {
+  repair:    { name: 'REPAIR PATCH', desc: 'E: +40 hull instantly' },
+  rocket:    { name: 'ROCKET SALVO', desc: 'E: 6 rockets on target' },
+  overboost: { name: 'OVERBOOST',    desc: 'E: +50% spd & fire 6s' },
+};
+let selectedEquipment = 'rocket';
+let briefingEquipmentBoxes = [];
 
 // ── Road network queries (vehicles prefer driving on roads) ──
 let _roadSegsCache = null;
@@ -124,21 +135,45 @@ function nearestRoadPoint(x, y, maxDist) {
 }
 
 /** Blend a desired heading toward the nearest road so ground vehicles
- *  naturally flow onto and follow the road network. */
+ *  naturally flow onto and follow the road network. Returns
+ *  { angle, dist } — dist lets callers grant an on-road speed bonus. */
 function steerAlongRoads(desiredAngle, x, y) {
-  const rp = nearestRoadPoint(x, y, 260);
-  if (!rp) return desiredAngle;
+  const rp = nearestRoadPoint(x, y, 320);
+  if (!rp) return { angle: desiredAngle, dist: Infinity };
   // Pick whichever way along the segment best matches our intent…
   let roadAng = rp.ang;
   const diffA = Math.abs(Math.atan2(Math.sin(rp.ang - desiredAngle), Math.cos(rp.ang - desiredAngle)));
   const diffB = Math.abs(Math.atan2(Math.sin(rp.ang + Math.PI - desiredAngle), Math.cos(rp.ang + Math.PI - desiredAngle)));
   if (diffB < diffA) roadAng = rp.ang + Math.PI;
   // …then blend by proximity (full grip within 120u of the centreline).
-  const w = Math.max(0, 1 - rp.dist / 260) * 0.85;
+  const w = Math.max(0, 1 - rp.dist / 320);
   let diff = roadAng - desiredAngle;
   while (diff > Math.PI) diff -= Math.PI * 2;
   while (diff < -Math.PI) diff += Math.PI * 2;
-  return desiredAngle + diff * w;
+  return { angle: desiredAngle + diff * w, dist: rp.dist };
+}
+
+/** Ground speed multiplier by terrain type — vehicles hate soft sand. */
+const TERRAIN_VEHICLE_SPEED = {
+  hardpack: 1.1,
+  sand: 1.0,
+  gravel: 0.95,
+  wadi: 0.9,
+  oasis: 0.7,
+  dunes: 0.6,
+  rock: 0.5,
+};
+
+/** Terrain + road speed factor for a ground vehicle at (x,y). */
+function vehicleSpeedFactor(x, y) {
+  let f = 1.0;
+  if (sharedTerrain) {
+    const ty = sharedTerrain.type(x, y);
+    f *= TERRAIN_VEHICLE_SPEED[ty] || 1.0;
+  }
+  const rp = nearestRoadPoint(x, y, 120);
+  if (rp) f *= 1.2; // on-road bonus: firm surface, known route
+  return f;
 }
 
 // ── Convoy path mechanics ─────────────────────────────────────────────────
@@ -216,14 +251,6 @@ const sortieState = {
     lastEvent: '',
     eventTimer: 0,
     decayMultiplier: 1,
-  },
-  hunter: {
-    etaRemaining: TIMER.baseTime,
-    warning: false,
-    warningTimer: 0,
-  },
-  extraction: {
-    progress: 0,
   },
   rewards: {
     objective: 0,
@@ -323,8 +350,9 @@ function sampleTerrain(wx, wy) {
   // ── Base colour from the shared terrain model (same source as world-gen)
   let r, g, b;
   if (sharedTerrain) {
-    const ty = sharedTerrain.type(wx, wy);
-    const e = sharedTerrain.elevation(wx, wy);
+    const ce = sharedTerrain.typeAndElevation(wx, wy);
+    const ty = ce.type;
+    const e = ce.elevation;
     const shade = clamp(e / 1600, -0.5, 0.5) * 26; // gentle relief shading
 
     switch (ty) {
@@ -774,25 +802,51 @@ function drawDecorations(ctx, cam) {
 function drawScenarioOverlays(ctx, cam) {
   if (!world) return;
 
-  if (world.extraction?.active) {
-    const pulse = 1 + Math.sin(performance.now() / 180) * 0.12;
-    ctx.strokeStyle = withAlpha('#44ddff', 0.85);
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(world.extraction.x, world.extraction.y, world.extraction.radius * pulse, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.strokeStyle = withAlpha('#44ddff', 0.35);
+  // ── INFRA mode: mark the eligible target pool so it's visible ──
+  if (heli.targetMode === 'infrastructure') {
+    const cands = [];
+    for (const b of world.buildings) {
+      if (!b.destructible || b.destroyed) continue;
+      const d = Math.hypot(b.x - heli.x, b.y - heli.y);
+      if (d < heli.weaponRange) cands.push({ x: b.x, y: b.y, d, r: Math.max(b.w, b.d) * 0.6 });
+    }
+    for (const convoy of world.convoys) {
+      if (!convoy.active || convoy.destroyed) continue;
+      const d = Math.hypot(convoy.x - heli.x, convoy.y - heli.y);
+      if (d < heli.weaponRange) cands.push({ x: convoy.x, y: convoy.y, d, r: 14 });
+    }
+    cands.sort((a, b) => a.d - b.d);
+    ctx.strokeStyle = 'rgba(68,221,255,0.4)';
     ctx.lineWidth = 1;
+    for (const c of cands.slice(0, 14)) {
+      if (!cam.isVisible(c.x, c.y, 40)) continue;
+      const r = Math.max(c.r, 8);
+      // Four corner ticks
+      for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+        ctx.beginPath();
+        ctx.moveTo(c.x + sx * r, c.y + sy * r - sy * 5);
+        ctx.lineTo(c.x + sx * r, c.y + sy * r);
+        ctx.lineTo(c.x + sx * r - sx * 5, c.y + sy * r);
+        ctx.stroke();
+      }
+    }
+  }
+
+  if (world.extraction?.active) {
+    // Extraction = leave the map. Highlight the nearest boundary edge.
+    const lim = WORLD_SIZE * 0.48;
+    const dL = heli.x + lim, dR = lim - heli.x;
+    const dT = heli.y + lim, dB = lim - heli.y;
+    const m = Math.min(dL, dR, dT, dB);
+    const pulse = 0.55 + 0.35 * Math.sin(performance.now() / 220);
+    ctx.strokeStyle = withAlpha('#44ddff', pulse);
+    ctx.lineWidth = 6;
     ctx.beginPath();
-    ctx.moveTo(world.extraction.x - 20, world.extraction.y);
-    ctx.lineTo(world.extraction.x + 20, world.extraction.y);
-    ctx.moveTo(world.extraction.x, world.extraction.y - 20);
-    ctx.lineTo(world.extraction.x, world.extraction.y + 20);
+    if (m === dL) { ctx.moveTo(-lim, -lim); ctx.lineTo(-lim, lim); }
+    else if (m === dR) { ctx.moveTo(lim, -lim); ctx.lineTo(lim, lim); }
+    else if (m === dT) { ctx.moveTo(-lim, -lim); ctx.lineTo(lim, -lim); }
+    else { ctx.moveTo(-lim, lim); ctx.lineTo(lim, lim); }
     ctx.stroke();
-    ctx.fillStyle = '#44ddff';
-    ctx.font = 'bold 9px "Courier New", monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText(`EXTRACTION ${Math.round(clamp(sortieState.extraction.progress / (world.extraction.holdTime || 1), 0, 1) * 100)}%`, world.extraction.x, world.extraction.y - 52);
   }
 
   for (const crate of world.supplyCrates || []) {
@@ -1196,7 +1250,7 @@ const heli = {
   targetAssist: 0,
   target: null,
   manualTarget: null,
-  targetMode: 'nearest', // nearest, strongest, weakest
+  targetMode: 'closest', // closest, strongest, infrastructure
   targetCycleIndex: 0,
   score: 0,
   fear: 0, // instilled in the enemy — earned on kills
@@ -1302,6 +1356,7 @@ const HEAT_LABELS = ['QUIET', 'SUSPICIOUS', 'CONTACT', 'COORDINATED', 'CRITICAL'
 function resetSortieState() {
   const difficulty = getDifficultyProfile(activeContract?.difficultyId);
   sortieStartedAt = performance.now();
+  hudAnim.hp = 100; hudAnim.fear = 0; hudAnim.heat = 0; hudAnim.hpFlash = 0;
   sortieState.status = 'active';
   sortieState.objectiveComplete = false;
   sortieState.fearLevel = 0;
@@ -1315,10 +1370,6 @@ function resetSortieState() {
   sortieState.heat.lastEvent = '';
   sortieState.heat.eventTimer = 0;
   sortieState.heat.decayMultiplier = 1;
-  sortieState.hunter.etaRemaining = TIMER.baseTime * difficulty.hunterEtaMultiplier;
-  sortieState.hunter.warning = false;
-  sortieState.hunter.warningTimer = 0;
-  sortieState.extraction.progress = 0;
   sortieState.rewards.objective = 0;
   sortieState.rewards.supplies = 0;
   sortieState.rewards.hunter = 0;
@@ -1418,6 +1469,45 @@ function hudPlate(ctx, x, y, w, h, accent = 'rgba(90,140,80,0.55)') {
   ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
   drawCornerBrackets(ctx, x, y, w, h, accent, 7, 1.5);
 }
+
+/** Tiny letterspaced section label inside a plate, with divider. */
+function plateHeader(ctx, px, py, pw, title, accent = P.ui.textDim) {
+  ctx.font = 'bold 8px "Courier New", monospace';
+  ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  ctx.fillStyle = accent;
+  ctx.fillText(title, px + 10, py + 5);
+  ctx.strokeStyle = 'rgba(90,140,80,0.30)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(px + 10 + ctx.measureText(title).width + 8, py + 9);
+  ctx.lineTo(px + pw - 10, py + 9);
+  ctx.stroke();
+}
+
+/** Animated status bar: smooth chase, segment ticks, optional flash. */
+function hudBar(ctx, x, y, w, h, frac, col, opts = {}) {
+  const shown = opts.shown ?? frac; // pre-lerped by caller
+  ctx.fillStyle = 'rgba(10,16,10,0.9)';
+  ctx.fillRect(x, y, w, h);
+  if (shown > 0) {
+    ctx.fillStyle = col;
+    ctx.fillRect(x, y, w * clamp(shown, 0, 1), h);
+  }
+  // Segment ticks every 25%
+  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  for (let i = 1; i < 4; i++) ctx.fillRect(x + (w * i / 4) - 0.5, y, 1, h);
+  ctx.strokeStyle = opts.border || 'rgba(90,110,80,0.7)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x - 0.5, y - 0.5, w + 1, h + 1);
+  if (opts.flash > 0) {
+    ctx.fillStyle = `rgba(255,255,255,${Math.min(0.55, opts.flash * 3)})`;
+    ctx.fillRect(x, y, w * clamp(frac, 0, 1), h);
+  }
+}
+
+// Per-sortie HUD animation state (smooth bar chase + hit flash).
+const hudAnim = { hp: 100, fear: 0, heat: 0, hpFlash: 0 };
+
 
 /** Off-screen direction marker: pulsing chevron clamped to the screen edge,
  *  pointing at a world position, with distance (+optional tag) readout. */
@@ -1537,6 +1627,52 @@ function damageWorldTarget(target, damage, x, y) {
     target.hp = 0;
     target.destroyed = true;
     spawnExplosion(target.x, target.y, target.objectiveTag === 'command' ? 1.8 : 1.2);
+
+    // ── Fuel tank: chain-detonating timer bonus (GDD +20s) ──
+    if (target.special === 'fuel') {
+      spawnExplosion(target.x, target.y, 2.4);
+      addHeat(1.5, 'secondary explosions');
+      reduceHeat(6, 'fuel reserves destroyed');
+      bossState.timeRemaining += TIMER.fuelTankBonus;
+      spawnFloatingText(target.x, target.y - 28, `FUEL DEPOT +${TIMER.fuelTankBonus}s`, '#44ddff');
+      // Blast damage: nearby hostiles, the pilot if careless, and any
+      // other building in reach (chain-reacting tanks).
+      for (const e of enemies) {
+        if (e.state === 'dead') continue;
+        if (Math.hypot(e.x - target.x, e.y - target.y) < 70) {
+          e.hp -= 45;
+          e.flashTimer = 0.1;
+          if (e.hp <= 0) {
+            e.state = 'dead';
+            e.deathTimer = 0.5;
+            heli.score += e.points;
+            sortieState.stats.kills++;
+            spawnFloatingText(e.x, e.y - 10, `+${e.points}`, '#ffcc44');
+          }
+        }
+      }
+      if (Math.hypot(heli.x - target.x, heli.y - target.y) < 70) {
+        heli.hp -= 25;
+        spawnExplosion(heli.x, heli.y, 0.5);
+        spawnFloatingText(heli.x, heli.y - 30, 'TOO CLOSE!', '#ff4444');
+        if (heli.hp <= 0) { heli.hp = 0; finishSortie('failed'); }
+      }
+      for (const b of world.buildings) {
+        if (b === target || b.destroyed) continue;
+        if (Math.hypot(b.x - target.x, b.y - target.y) < 60) {
+          damageWorldTarget(b, 45, b.x, b.y);
+        }
+      }
+      // Depot fully flattened? Mark it for the minimap.
+      if (target.depotId) {
+        const depot = world.fuelDepots?.find(d => d.id === target.depotId);
+        if (depot && world.buildings.every(b => b.depotId !== depot.id || b.destroyed)) {
+          depot.destroyed = true;
+        }
+      }
+      return true;
+    }
+
     if (target.special === 'radar') {
       addHeat(5, 'radar installation attacked');
       reduceHeat(24, 'radar disabled');
@@ -1590,9 +1726,7 @@ function completeObjective() {
   addFear(8, 'primary objective complete');
   addHeat(6, 'primary objective reported');
   spawnFloatingText(heli.x, heli.y - 42, 'OBJECTIVE COMPLETE', '#aaff88');
-  if (world?.extraction) {
-    spawnFloatingText(world.extraction.x, world.extraction.y - 30, 'EXTRACTION ACTIVE', '#44ddff');
-  }
+  spawnFloatingText(heli.x, heli.y - 58, 'EXIT THE MAP', '#44ddff');
 }
 
 function checkObjectiveProgress() {
@@ -1646,17 +1780,23 @@ function collectSupplyCrates() {
   }
 }
 
+/** Extraction = cross the map boundary. No LZ, no hold timer. */
 function updateExtraction(dt) {
   if (!world?.extraction?.active || !sortieState.objectiveComplete || sortieState.status !== 'active') return;
-  const dist = Math.hypot(world.extraction.x - heli.x, world.extraction.y - heli.y);
-  if (dist < world.extraction.radius) {
-    sortieState.extraction.progress += dt;
-    world.extraction.progress = sortieState.extraction.progress / world.extraction.holdTime;
-    if (sortieState.extraction.progress >= world.extraction.holdTime) finishSortie('complete');
-  } else {
-    sortieState.extraction.progress = Math.max(0, sortieState.extraction.progress - dt * 2);
-    world.extraction.progress = sortieState.extraction.progress / world.extraction.holdTime;
-  }
+  const lim = WORLD_SIZE * 0.48;
+  if (Math.abs(heli.x) > lim || Math.abs(heli.y) > lim) finishSortie('complete');
+}
+
+/** Nearest boundary exit from the helicopter, with compass cardinal. */
+function nearestExitPoint() {
+  const lim = WORLD_SIZE * 0.48;
+  const dL = heli.x + lim, dR = lim - heli.x;
+  const dT = heli.y + lim, dB = lim - heli.y;
+  const m = Math.min(dL, dR, dT, dB);
+  let x = clamp(heli.x, -lim, lim), y = clamp(heli.y, -lim, lim);
+  if (m === dL) x = -lim; else if (m === dR) x = lim; else if (m === dT) y = -lim; else y = lim;
+  const card = m === dT ? 'N' : m === dR ? 'E' : m === dB ? 'S' : 'W';
+  return { x, y, card };
 }
 
 function finishSortie(status) {
@@ -2121,7 +2261,7 @@ registerScreen('briefing', {
     drawScreenBackground(ctx, cam, 'SORTIE BRIEFING', activeContract ? `CONTRACT SEED ${activeContract.seed}` : 'NO CONTRACT');
     ctx.save(); ctx.scale(cam.dpr, cam.dpr);
     const panelW = Math.min(480, w - 32);
-    const panelH = Math.min(330, h - 120);
+    const panelH = Math.min(400, h - 120);
     const x = (w - panelW) / 2;
     const y = 78;
     ctx.fillStyle = '#0d210f'; ctx.fillRect(x, y, panelW, panelH);
@@ -2148,14 +2288,47 @@ registerScreen('briefing', {
     ctx.fillText(`THREAT      ${activeContract?.threatTags.join(' / ').toUpperCase()}`, x + 18, detailY + 40);
     ctx.fillStyle = '#ffcc44';
     ctx.fillText(`BASE PAY    $${activeContract?.reward || 0}`, x + 18, detailY + 60);
+
+    // ── Flow layout: hints → equipment → launch prompt (no absolute overlaps)
+    let fy = detailY + 86;
     ctx.fillStyle = P.ui.textDim;
-    ctx.fillText('Fear levels you up. Heat accelerates the Hunter.', x + 18, detailY + 100);
-    ctx.fillText('Complete the objective, then reach extraction.', x + 18, detailY + 118);
+    ctx.fillText('Fear levels you up. Heat accelerates the Hunter.', x + 18, fy); fy += 16;
+    ctx.fillText('Complete the objective, then leave the map.', x + 18, fy); fy += 26;
+
+    ctx.fillStyle = P.ui.textDim;
+    ctx.font = 'bold 10px "Courier New", monospace';
+    ctx.fillText('FIELD EQUIPMENT — CLICK TO SELECT', x + 18, fy); fy += 20;
+    briefingEquipmentBoxes = [];
+    const eqKeys = Object.keys(EQUIPMENT);
+    const eqGap = 10;
+    const eqW = Math.min(140, (panelW - 36 - eqGap * 2) / 3);
+    for (let i = 0; i < eqKeys.length; i++) {
+      const key = eqKeys[i];
+      const bx = x + 18 + i * (eqW + eqGap);
+      const by = fy;
+      const isSel = selectedEquipment === key;
+      ctx.fillStyle = isSel ? 'rgba(68,204,204,0.16)' : 'rgba(0,0,0,0.25)';
+      ctx.fillRect(bx, by, eqW, 46);
+      ctx.strokeStyle = isSel ? '#44cccc' : P.ui.border;
+      ctx.lineWidth = isSel ? 1.5 : 1;
+      ctx.strokeRect(bx, by, eqW, 46);
+      if (isSel) drawCornerBrackets(ctx, bx, by, eqW, 46, '#44cccc', 7, 1.5);
+      ctx.textAlign = 'left';
+      ctx.fillStyle = isSel ? '#88eeee' : P.ui.text;
+      ctx.font = 'bold 10px "Courier New", monospace';
+      ctx.fillText(EQUIPMENT[key].name, bx + 8, by + 8);
+      ctx.fillStyle = P.ui.textDim;
+      ctx.font = '9px "Courier New", monospace';
+      ctx.fillText(EQUIPMENT[key].desc, bx + 8, by + 24);
+      briefingEquipmentBoxes.push({ x: bx, y: by, w: eqW, h: 46, key });
+    }
+    fy += 46 + 22;
+
+    ctx.textAlign = 'center';
     if (Math.sin(performance.now() / 500) > 0) {
       ctx.fillStyle = P.ui.textBright;
-      ctx.textAlign = 'center';
       ctx.font = 'bold 14px "Courier New", monospace';
-      ctx.fillText('[ CLICK TO INSERT ]', w / 2, y + panelH - 32);
+      ctx.fillText('[ CLICK TO INSERT ]', w / 2, fy);
     }
     ctx.restore();
   },
@@ -2172,7 +2345,7 @@ registerScreen('sortie', {
     heli.x = 0; heli.y = 0; heli.vx = 0; heli.vy = 0;
     heli.angle = -Math.PI / 2; heli.hp = 100; heli.maxHp = 100; heli.score = 0; heli.fear = 0;
     heli.bladeAngle = 0;
-    heli.targetMode = 'nearest';
+    heli.targetMode = 'closest';
     heli.targetCycleIndex = 0;
     heli.fireCooldown = 0;
     heli.fireRate = 0.15;
@@ -2185,6 +2358,12 @@ registerScreen('sortie', {
     heli.targetAssist = 0;
     heli.target = null;
     heli.manualTarget = null;
+    // Equipment — one use per sortie, chosen at briefing.
+    heli.equipmentType = selectedEquipment;
+    heli.equipmentUsed = false;
+    heli.salvoShots = 0;
+    heli.salvoTimer = 0;
+    heli.adrenalineT = 0;
     try {
       initWorld(activeContract);
     } catch (e) {
@@ -2214,11 +2393,18 @@ registerScreen('sortie', {
       return;
     }
 
-    // ── Cycle target mode (Shift / touch button / gamepad LB) ──
-    if (input.cycleTarget) {
-      const modes = ['nearest', 'strongest', 'weakest'];
-      heli.targetCycleIndex = (heli.targetCycleIndex + 1) % modes.length;
-      heli.targetMode = modes[heli.targetCycleIndex];
+    // ── Cycle target MODE (Shift / V / touch chip / gamepad RB) ──
+    const TARGET_MODES = ['closest', 'strongest', 'infrastructure'];
+    const MODE_HELP = {
+      closest: 'nearest hostile in weapons range',
+      strongest: 'hostile with highest damage per second',
+      infrastructure: 'buildings & convoys only',
+    };
+    if (input.cycleTarget || input.cycleMode) {
+      heli.targetCycleIndex = (heli.targetCycleIndex + 1) % TARGET_MODES.length;
+      heli.targetMode = TARGET_MODES[heli.targetCycleIndex];
+      heli.manualTarget = null; // switching priority releases an old lock
+      modeToastUntil = performance.now() + 2600;
     }
 
     // ── Find target based on mode ──
@@ -2232,6 +2418,24 @@ registerScreen('sortie', {
         const dist = Math.hypot(e.x - worldPos.x, e.y - worldPos.y);
         if (dist < closestDist) { closestDist = dist; clickedTarget = e; }
       }
+      // Convoys: any member is clickable.
+      for (const convoy of world.convoys) {
+        if (!convoy.active || convoy.destroyed) continue;
+        for (const m of getConvoyMembers(convoy)) {
+          const dist = Math.hypot(m.x - worldPos.x, m.y - worldPos.y);
+          const r = m.isVeh ? 26 : 20;
+          if (dist < Math.max(closestDist, r) && dist < closestDist + r) {
+            if (dist < closestDist) { closestDist = dist; clickedTarget = convoy; }
+          }
+        }
+      }
+      // Buildings are clickable infrastructure.
+      for (const b of world.buildings) {
+        if (!b.destructible || b.destroyed) continue;
+        const dist = Math.hypot(b.x - worldPos.x, b.y - worldPos.y);
+        const r = Math.max(b.w, b.d) * 0.7 + 18;
+        if (dist < r && dist < closestDist) { closestDist = dist; clickedTarget = b; }
+      }
       const objectiveTarget = world?.objective?.target;
       if (objectiveTarget && isTargetAlive(objectiveTarget)) {
         const dist = Math.hypot(objectiveTarget.x - worldPos.x, objectiveTarget.y - worldPos.y);
@@ -2244,14 +2448,14 @@ registerScreen('sortie', {
       if (clickedTarget) heli.manualTarget = clickedTarget;
     }
 
-    // Auto-target cycle — an explicit lock takes priority.
+    // Auto-target — an explicit click lock takes priority.
     let bestTarget = null;
     let bestValue = Infinity;
     if (heli.manualTarget && isTargetAlive(heli.manualTarget)) {
       bestTarget = heli.manualTarget;
     } else {
       heli.manualTarget = null;
-      // Check Hunter first.
+      // Check Hunter first — it always overrides the priority modes.
       if (boss.spawned && boss.state !== 'dead') {
         const bossDist = Math.hypot(boss.x - heli.x, boss.y - heli.y);
         if (bossDist < heli.weaponRange) {
@@ -2268,15 +2472,35 @@ registerScreen('sortie', {
           bestValue = -500;
         }
       }
-      for (const e of enemies) {
-        if (e.state === 'dead') continue;
-        const dist = Math.hypot(e.x - heli.x, e.y - heli.y);
-        if (dist > heli.weaponRange) continue;
-        let value = 0;
-        if (heli.targetMode === 'nearest') value = dist;
-        else if (heli.targetMode === 'strongest') value = -e.hp;
-        else if (heli.targetMode === 'weakest') value = e.hp;
-        if (value < bestValue) { bestValue = value; bestTarget = e; }
+      if (heli.targetMode === 'infrastructure') {
+        // Buildings and convoys only — closest first.
+        for (const b of world.buildings) {
+          if (!b.destructible || b.destroyed) continue;
+          const dist = Math.hypot(b.x - heli.x, b.y - heli.y);
+          if (dist > heli.weaponRange) continue;
+          if (dist < bestValue) { bestValue = dist; bestTarget = b; }
+        }
+        for (const convoy of world.convoys) {
+          if (!convoy.active || convoy.destroyed) continue;
+          const dist = Math.hypot(convoy.x - heli.x, convoy.y - heli.y);
+          if (dist > heli.weaponRange) continue;
+          if (dist < bestValue) { bestValue = dist; bestTarget = convoy; }
+        }
+      } else {
+        for (const e of enemies) {
+          if (e.state === 'dead') continue;
+          const dist = Math.hypot(e.x - heli.x, e.y - heli.y);
+          if (dist > heli.weaponRange) continue;
+          let value = 0;
+          if (heli.targetMode === 'closest') {
+            value = dist;
+          } else if (heli.targetMode === 'strongest') {
+            // Threat = damage per second, with reach as a tiebreaker.
+            const dps = e.damage / Math.max(0.2, e.fireRate);
+            value = -(dps + e.range * 0.03);
+          }
+          if (value < bestValue) { bestValue = value; bestTarget = e; }
+        }
       }
     }
     heli.target = bestTarget;
@@ -2300,7 +2524,9 @@ registerScreen('sortie', {
     heli.angle += diff * Math.min(1, 3.0 * dt);
 
     // ── Movement: speed scales with cursor distance ──
-    const accel = heli.accel, drag = 0.91, maxSpeed = heli.maxSpeed;
+    if (heli.adrenalineT > 0) heli.adrenalineT -= dt;
+    const boost = heli.adrenalineT > 0 ? 1.5 : 1.0;
+    const accel = heli.accel * boost, drag = 0.91, maxSpeed = heli.maxSpeed * boost;
     const mx = input.moveX, my = input.moveY;
     if (mx !== 0 || my !== 0) {
       // WASD / joystick: magnitude controls speed
@@ -2331,13 +2557,16 @@ registerScreen('sortie', {
 
     heli.x += heli.vx * dt;
     heli.y += heli.vy * dt;
-    heli.x = clamp(heli.x, -WORLD_SIZE * 0.48, WORLD_SIZE * 0.48);
-    heli.y = clamp(heli.y, -WORLD_SIZE * 0.48, WORLD_SIZE * 0.48);
+    // Extraction = fly off the map: the clamp opens up once it's active.
+    const boundLim = world?.extraction?.active ? WORLD_SIZE * 0.55 : WORLD_SIZE * 0.48;
+    heli.x = clamp(heli.x, -boundLim, boundLim);
+    heli.y = clamp(heli.y, -boundLim, boundLim);
 
     heli.bladeAngle += 18 * dt;
 
     // ── Fire (click / Space / autofire toggle) ──
     heli.fireCooldown -= dt;
+    const fireRate = heli.fireRate * (heli.adrenalineT > 0 ? 0.6 : 1.0);
     const wantsFire = input.fire || (input.autofire && heli.target);
     if (wantsFire && heli.fireCooldown <= 0) {
       if (heli.target) {
@@ -2348,7 +2577,35 @@ registerScreen('sortie', {
       }
       addHeat(0.08, 'gunfire reported');
       lastShotX = heli.x; lastShotY = heli.y; lastShotT = performance.now() / 1000;
-      heli.fireCooldown = heli.fireRate;
+      heli.fireCooldown = fireRate;
+    }
+
+    // ── Equipment activation (E) ──
+    if (input.equipment && heli.equipmentType && !heli.equipmentUsed && sortieState.status === 'active') {
+      heli.equipmentUsed = true;
+      if (heli.equipmentType === 'repair') {
+        heli.hp = Math.min(heli.maxHp, heli.hp + 40);
+        spawnFloatingText(heli.x, heli.y - 34, '+40 HULL', '#44ff44');
+      } else if (heli.equipmentType === 'overboost') {
+        heli.adrenalineT = 6;
+        spawnFloatingText(heli.x, heli.y - 34, 'OVERBOOST', '#44cccc');
+      } else if (heli.equipmentType === 'rocket') {
+        heli.salvoShots = 6;
+        heli.salvoTimer = 0;
+        spawnFloatingText(heli.x, heli.y - 34, 'ROCKETS AWAY', '#ff8844');
+      }
+    }
+    // Rocket salvo: staggered launches at the current target (or facing).
+    if (heli.salvoShots > 0) {
+      heli.salvoTimer -= dt;
+      if (heli.salvoTimer <= 0) {
+        const tx = heli.target ? heli.target.x : heli.x + Math.cos(heli.angle) * 400;
+        const ty = heli.target ? heli.target.y : heli.y + Math.sin(heli.angle) * 400;
+        const angle = Math.atan2(ty - heli.y, tx - heli.x) + (Math.random() - 0.5) * 0.14;
+        spawnProjectile(heli.x + Math.cos(angle) * 22, heli.y + Math.sin(angle) * 22, angle, 340, 15, false, 1.6);
+        heli.salvoShots--;
+        heli.salvoTimer = 0.12;
+      }
     }
 
     // ── Settlement discovery ──
@@ -2381,9 +2638,9 @@ registerScreen('sortie', {
       // reaches them — gunfire nearby, or their own defenders opening up —
       // then run until they escape the area.
       if (e.className === 'unarmed') {
-        const gunfireNear = (performance.now() / 1000 - lastShotT) < 4 &&
-          Math.hypot(e.x - lastShotX, e.y - lastShotY) < 900;
-        if ((gunfireNear || (e.siteId && sitesUnderAttack.has(e.siteId))) && dist < 500) {
+        const gunfireNear = (performance.now() / 1000 - lastShotT) < COMBAT.gunfireMemorySec &&
+          Math.hypot(e.x - lastShotX, e.y - lastShotY) < COMBAT.gunfireRadius;
+        if ((gunfireNear || (e.siteId && sitesUnderAttack.has(e.siteId))) && dist < COMBAT.civilianPanicRadius) {
           e.state = 'flee';
         }
         if (e.state === 'flee') {
@@ -2416,31 +2673,35 @@ registerScreen('sortie', {
 
       // ── Armed hostiles. Aggro range scales with Heat; a home leash keeps
       // garrisons defending their post instead of swarming across the map.
-      const responseRange = 330 + sortieState.heat.tier * 25;
+      const responseRange = COMBAT.aggroBase + sortieState.heat.tier * COMBAT.aggroPerHeatTier;
       const homeDist = e.homeX !== undefined
         ? Math.hypot(e.x - e.homeX, e.y - e.homeY)
         : 0;
-      const leash = e.category === 'vehicle' ? 900 : 480;
+      const leash = e.category === 'vehicle' ? COMBAT.leashVehicle : COMBAT.leashInfantry;
       const wasAttacking = e.state === 'attack';
       if (dist < responseRange && homeDist < leash) e.state = 'attack';
-      else if ((dist < responseRange + 200 || wasAttacking) && homeDist < leash + 120) e.state = 'alert';
+      else if ((dist < responseRange + COMBAT.alertExtra || wasAttacking) && homeDist < leash + COMBAT.leashGrace) e.state = 'alert';
       else e.state = 'idle';
 
       if (e.state === 'attack' && !wasAttacking) addHeat(1.2, 'hostile contact');
 
       if (e.state === 'attack') {
         let moveAngle = Math.atan2(heli.y - e.y, heli.x - e.x);
-        // Ground vehicles flow onto the road network when pursuing.
+        // Ground vehicles flow onto the road network when pursuing, and
+        // their speed responds to the ground beneath them.
+        let vehFactor = 1.0;
         if (e.category === 'vehicle' && e.speed > 0) {
-          moveAngle = steerAlongRoads(moveAngle, e.x, e.y);
+          const steer = steerAlongRoads(moveAngle, e.x, e.y);
+          moveAngle = steer.angle;
+          vehFactor = vehicleSpeedFactor(e.x, e.y);
         }
         let adiff = moveAngle - e.angle;
         while (adiff > Math.PI) adiff -= Math.PI * 2;
         while (adiff < -Math.PI) adiff += Math.PI * 2;
         e.angle += adiff * Math.min(1, 2.0 * dt);
         if (e.speed > 0 && dist > e.range * 0.5) {
-          e.x += Math.cos(e.angle) * e.speed * dt;
-          e.y += Math.sin(e.angle) * e.speed * dt;
+          e.x += Math.cos(e.angle) * e.speed * vehFactor * dt;
+          e.y += Math.sin(e.angle) * e.speed * vehFactor * dt;
         }
         e.fireCooldown -= dt;
         if (e.fireCooldown <= 0 && dist < e.range) {
@@ -2448,19 +2709,22 @@ registerScreen('sortie', {
           spawnProjectile(e.x, e.y, fireAngle, 200, e.damage, true, e.bulletLife || 1.5);
           e.fireCooldown = e.fireRate;
         }
-      } else if (e.homeX !== undefined && homeDist > 130) {
+      } else if (e.homeX !== undefined && homeDist > COMBAT.returnHomeDist) {
         // Lost contact: head back to post instead of drifting.
         let homeAngle = Math.atan2(e.homeY - e.y, e.homeX - e.x);
+        let homeFactor = 1.0;
         if (e.category === 'vehicle' && e.speed > 0) {
-          homeAngle = steerAlongRoads(homeAngle, e.x, e.y);
+          const steer = steerAlongRoads(homeAngle, e.x, e.y);
+          homeAngle = steer.angle;
+          homeFactor = vehicleSpeedFactor(e.x, e.y);
         }
         let adiff = homeAngle - e.angle;
         while (adiff > Math.PI) adiff -= Math.PI * 2;
         while (adiff < -Math.PI) adiff += Math.PI * 2;
         e.angle += adiff * Math.min(1, 1.5 * dt);
         if (e.speed > 0 && homeDist > 40) {
-          e.x += Math.cos(e.angle) * e.speed * 0.55 * dt;
-          e.y += Math.sin(e.angle) * e.speed * 0.55 * dt;
+          e.x += Math.cos(e.angle) * e.speed * 0.55 * homeFactor * dt;
+          e.y += Math.sin(e.angle) * e.speed * 0.55 * homeFactor * dt;
         }
       } else if (e.state === 'alert') {
         // Hold position and watch the player.
@@ -2497,27 +2761,22 @@ registerScreen('sortie', {
     collectSupplyCrates();
     updateHeat(dt);
 
-    // ── Hunter ETA ──
+    // ── Hunter ETA ── (single source of truth: bossState)
     if (bossState.active && !bossState.defeated) {
       bossState.timeRemaining -= dt * hunterClockRate();
-      sortieState.hunter.etaRemaining = bossState.timeRemaining;
 
       // 5-second warning
       if (bossState.timeRemaining <= TIMER.bossWarningTime && !bossState.warning && !bossState.spawned) {
         bossState.warning = true;
         bossState.warningTimer = TIMER.bossWarningTime;
-        sortieState.hunter.warning = true;
-        sortieState.hunter.warningTimer = TIMER.bossWarningTime;
       }
 
       // Warning countdown
       if (bossState.warning && !bossState.spawned) {
         bossState.warningTimer -= dt;
-        sortieState.hunter.warningTimer = bossState.warningTimer;
         if (bossState.warningTimer <= 0) {
           spawnBoss();
           bossState.warning = false;
-          sortieState.hunter.warning = false;
         }
       }
 
@@ -2525,7 +2784,6 @@ registerScreen('sortie', {
       if (bossState.timeRemaining <= 0 && !bossState.spawned) {
         spawnBoss();
         bossState.warning = false;
-        sortieState.hunter.warning = false;
       }
     }
 
@@ -2745,6 +3003,8 @@ registerScreen('sortie', {
         // Enemy bullet → hit helicopter
         if (Math.hypot(heli.x - p.x, heli.y - p.y) < 20) {
           heli.hp -= p.damage;
+          hudAnim.hpFlash = 0.15;
+          camera.shake(4, 0.15);
           spawnExplosion(p.x, p.y, 0.2);
           projectiles.splice(i, 1);
           if (heli.hp <= 0) {
@@ -2768,11 +3028,11 @@ registerScreen('sortie', {
     const panFactor = clamp(spd / maxSpeed, 0, 0.35);
     camera.followAhead(heli.x, heli.y, heli.vx, heli.vy, panFactor);
     // Zoom: faster = more zoomed out to see ahead
-    const speedZoom = lerp(1.1, 0.75, spd / maxSpeed);
-    camera.setZoom(heli.target ? Math.max(speedZoom, 0.95) : speedZoom);
+    const speedZoom = lerp(CAMERA.zoomSpeedNear, CAMERA.zoomSpeedFar, spd / maxSpeed);
+    camera.setZoom(heli.target ? Math.max(speedZoom, CAMERA.zoomCombatFloor) : speedZoom);
   },
 
-  draw(ctx, cam) {
+  draw(ctx, cam, dt = 0) {
     const dpr = cam.dpr, w = cam.screenW, h = cam.screenH;
     cam.begin(ctx);
 
@@ -2948,24 +3208,25 @@ registerScreen('sortie', {
 
     // Scale the HUD with viewport size so it stays readable on big screens
     // and still fits on small ones. All HUD code below uses W/H (logical).
-    const uiS = clamp(Math.min(w, h) / 720, 1, 1.7);
+    const uiS = clamp(Math.min(w, h) / HUD.scaleDivisor, 1, HUD.scaleMax);
     ctx.scale(uiS, uiS);
 
     // ── HUD layout metrics (responsive; no plate overlaps) ──
     const W = w / uiS, H = h / uiS;
-    const narrow = W < 720;
+    const narrow = W < HUD.narrowBreakpoint;
     const lpw = narrow ? 178 : 240;                 // left systems plate width
     const rpw = narrow ? 152 : 188;                 // right status plate width
     const rph = narrow ? 106 : 96;                  // right status plate height
     const rpx = W - rpw - 8;
 
     const nToggles = (input.autofire ? 1 : 0) + (input.clickToTarget ? 1 : 0);
+    const equipReady = sortieState.status === 'active' && heli.equipmentType && !heli.equipmentUsed;
     const objText = (world?.objective && !sortieState.objectiveComplete)
       ? objectiveHudText()
-      : (sortieState.objectiveComplete ? 'BRT — REACH EXTRACTION' : null);
+      : (sortieState.objectiveComplete ? 'RTB — EXIT THE MAP' : null);
     const objWrap = objText ? wrapText(objText, Math.max(16, Math.floor((lpw - 26) / 6))).slice(0, 2) : [];
     const showProgress = !!(world?.objective && !sortieState.objectiveComplete && world.objective.type === 'suppression');
-    const sysH = 30 + nToggles * 15 + objWrap.length * 13 + (showProgress ? 13 : 0) + 4;
+    const sysH = 40 + nToggles * 15 + (equipReady ? 15 : 0) + objWrap.length * 13 + (showProgress ? 13 : 0) + 4;
 
     // Centre stack drops below the side plates on narrow screens.
     const hpY0 = narrow ? 8 + Math.max(sysH, rph) + 12 : 8;
@@ -2994,9 +3255,33 @@ registerScreen('sortie', {
       }
     }
 
-    // Hull plate (centred — contents measured & centred as a group)
+    // ── Targeting-mode toast — explains what the mode does ──
     {
-      const hpBarW = 110, hpBarH = 8;
+      const now = performance.now();
+      if (now < modeToastUntil) {
+        const MODE_HELP = {
+          closest: 'nearest hostile in weapons range',
+          strongest: 'hostile with highest damage per second',
+          infrastructure: 'buildings & convoys only',
+        };
+        const alpha = Math.min(1, (modeToastUntil - now) / 600);
+        const modeLabel = { closest: 'CLOSEST', strongest: 'STRONGEST', infrastructure: 'INFRA' }[heli.targetMode] || heli.targetMode;
+        const ty0 = hpY0 + 44;
+        ctx.globalAlpha = alpha;
+        ctx.font = 'bold 12px "Courier New", monospace';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+        ctx.fillStyle = '#44cccc';
+        ctx.fillText(`TARGETING: ${modeLabel}`, W / 2, ty0);
+        ctx.font = '9px "Courier New", monospace';
+        ctx.fillStyle = P.ui.textDim;
+        ctx.fillText(MODE_HELP[heli.targetMode] || '', W / 2, ty0 + 15);
+        ctx.globalAlpha = 1;
+      }
+    }
+
+    // Hull plate (centred — animated bar, segments, damage flash)
+    {
+      const hpBarW = 110, hpBarH = 9;
       const plateW = 212, plateH = 30;
       const px = W / 2 - plateW / 2, py = hpY0;
       const hpPct = heli.hp / heli.maxHp;
@@ -3004,7 +3289,10 @@ registerScreen('sortie', {
         hpPct <= 0.25 ? 'rgba(255,68,68,0.7)' : hpPct <= 0.5 ? 'rgba(204,170,51,0.55)' : 'rgba(90,140,80,0.55)');
       const lowPulse = hpPct <= 0.25 ? (0.55 + 0.45 * Math.sin(performance.now() / 120)) : 1;
 
-      // State-dependent label (short enough to keep the row compact)
+      // Animate the displayed value toward the real one; flash on damage.
+      hudAnim.hp += (heli.hp - hudAnim.hp) * Math.min(1, 10 * (dt || 0.016));
+      hudAnim.hpFlash = Math.max(0, (hudAnim.hpFlash || 0) - (dt || 0.016));
+
       let label = 'HULL', labelCol = P.ui.text;
       if (hpPct <= 0.25) { label = 'CRIT'; labelCol = '#ff4444'; }
       else if (hpPct <= 0.5) { label = 'DMGD'; labelCol = P.ui.hpMed; }
@@ -3017,26 +3305,20 @@ registerScreen('sortie', {
       const gap = 9;
       const total = labelW + gap + hpBarW + gap + numW;
 
-      const midY = py + plateH / 2 + 0.5;   // optical centre of the plate
-      let cx0 = px + (plateW - total) / 2;  // centre the whole row
+      const midY = py + plateH / 2 + 0.5;
+      let cx0 = px + (plateW - total) / 2;
 
-      // Label
       ctx.fillStyle = labelCol;
       ctx.globalAlpha = hpPct <= 0.25 ? lowPulse : 1;
       ctx.fillText(label, cx0, midY);
       ctx.globalAlpha = 1;
-      // Bar
       const barX = cx0 + labelW + gap, barY = py + (plateH - hpBarH) / 2;
-      ctx.fillStyle = P.ui.hpBar; ctx.fillRect(barX, barY, hpBarW, hpBarH);
       const hpCol = hpPct > 0.5 ? P.ui.hp : hpPct > 0.25 ? P.ui.hpMed : P.ui.hpLow;
-      if (hpPct > 0) {
-        ctx.globalAlpha = lowPulse;
-        ctx.fillStyle = hpCol; ctx.fillRect(barX, barY, hpBarW * hpPct, hpBarH);
-        ctx.globalAlpha = 1;
-      }
-      ctx.strokeStyle = P.ui.hpBorder; ctx.lineWidth = 1;
-      ctx.strokeRect(barX - 0.5, barY - 0.5, hpBarW + 1, hpBarH + 1);
-      // Numeric readout
+      hudBar(ctx, barX, barY, hpBarW, hpBarH, hpPct, hpCol, {
+        shown: hudAnim.hp / heli.maxHp,
+        flash: hudAnim.hpFlash,
+        border: P.ui.hpBorder,
+      });
       ctx.fillStyle = P.ui.text;
       ctx.fillText(num, barX + hpBarW + gap, midY);
     }
@@ -3045,35 +3327,39 @@ registerScreen('sortie', {
     {
       const px = rpx, py = 8, pw = rpw, ph = rph;
       hudPlate(ctx, px, py, pw, ph, 'rgba(90,140,80,0.55)');
+      plateHeader(ctx, px, py, pw, 'STATUS');
       ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      const fbW = pw - 24;
 
-      // SCORE
+      // Animate bars toward real values
+      const fearThreshold = getFearThreshold();
+      hudAnim.fear += (clamp(heli.fear / fearThreshold, 0, 1) - hudAnim.fear) * Math.min(1, 8 * (dt || 0.016));
+      hudAnim.heat += (sortieState.heat.value / 100 - hudAnim.heat) * Math.min(1, 8 * (dt || 0.016));
+
+      // SCORE — big number, right-aligned
       ctx.font = 'bold 10px "Courier New", monospace';
-      ctx.fillStyle = P.ui.textDim; ctx.fillText('SCORE', px + 12, py + 8);
+      ctx.fillStyle = P.ui.textDim; ctx.fillText('SCORE', px + 12, py + 18);
       ctx.font = 'bold 14px "Courier New", monospace';
-      ctx.fillStyle = P.ui.infamy; ctx.fillText(`${heli.score}`, px + 58, py + 6);
+      ctx.fillStyle = P.ui.infamy;
+      ctx.textAlign = 'right';
+      ctx.fillText(`${heli.score}`, px + pw - 12, py + 16);
+      ctx.textAlign = 'left';
 
       // FEAR
-      const fearThreshold = getFearThreshold();
       ctx.font = 'bold 10px "Courier New", monospace';
-      ctx.fillStyle = '#ff8844'; ctx.fillText(`FEAR LV ${sortieState.fearLevel || 0}`, px + 12, py + 26);
-      const fbW = pw - 24;
-      ctx.fillStyle = 'rgba(26,26,10,0.9)'; ctx.fillRect(px + 12, py + 39, fbW, 5);
-      ctx.fillStyle = '#cc8833'; ctx.fillRect(px + 12, py + 39, fbW * clamp(heli.fear / fearThreshold, 0, 1), 5);
-      ctx.strokeStyle = '#5a4a2a'; ctx.strokeRect(px + 11.5, py + 38.5, fbW + 1, 6);
+      ctx.fillStyle = '#ff8844'; ctx.fillText(`FEAR LV ${sortieState.fearLevel || 0}`, px + 12, py + 38);
+      hudBar(ctx, px + 12, py + 50, fbW, 5, heli.fear / fearThreshold, '#cc8833', { shown: hudAnim.fear });
 
       // HEAT (tier-colored)
       const heatCols = [P.ui.hp, P.ui.hpMed, '#ff8844', '#ff5533', '#ff2222'];
       ctx.fillStyle = heatCols[Math.min(sortieState.heat.tier, heatCols.length - 1)];
-      ctx.fillText(`HEAT ${HEAT_LABELS[sortieState.heat.tier]}`, px + 12, py + 50);
-      ctx.fillStyle = 'rgba(26,15,10,0.9)'; ctx.fillRect(px + 12, py + 63, fbW, 6);
-      ctx.fillStyle = sortieState.heat.tier >= 3 ? '#ff4444' : '#cc6633';
-      ctx.fillRect(px + 12, py + 63, fbW * sortieState.heat.value / 100, 6);
-      ctx.strokeStyle = '#6a3a2a'; ctx.strokeRect(px + 11.5, py + 62.5, fbW + 1, 7);
+      ctx.fillText(`HEAT ${HEAT_LABELS[sortieState.heat.tier]}`, px + 12, py + 62);
+      hudBar(ctx, px + 12, py + 74, fbW, 6, sortieState.heat.value / 100,
+        sortieState.heat.tier >= 3 ? '#ff4444' : '#cc6633', { shown: hudAnim.heat });
       if (sortieState.heat.eventTimer > 0 && sortieState.heat.lastEvent) {
         ctx.fillStyle = '#ffcc88'; ctx.font = '8px "Courier New", monospace';
         const ev = sortieState.heat.lastEvent.toUpperCase();
-        ctx.fillText(ev.length > 34 ? ev.slice(0, 33) + '…' : ev, px + 12, py + 74);
+        ctx.fillText(ev.length > 34 ? ev.slice(0, 33) + '…' : ev, px + 12, py + 84);
       }
     }
 
@@ -3091,6 +3377,11 @@ registerScreen('sortie', {
       ctx.font = 'bold 13px "Courier New", monospace';
       ctx.textAlign = 'center'; ctx.textBaseline = 'top';
       ctx.fillText(`HUNTER ETA ${timerStr}`, W / 2, by + 5);
+      // Time-remaining underline (normalized against base timer)
+      const baseT = Math.max(1, TIMER.baseTime);
+      const frac = clamp(bossState.timeRemaining / baseT, 0, 1);
+      ctx.fillStyle = urgent ? 'rgba(255,68,68,0.8)' : 'rgba(120,180,100,0.6)';
+      ctx.fillRect(bx + 8, by + 20, (bw - 16) * frac, 2);
     }
 
     // ── Boss HP bar (when spawned) — sits clear of the ETA plate ──
@@ -3118,10 +3409,15 @@ registerScreen('sortie', {
     if (heli.target) {
       const ts = cam.worldToScreen(heli.target.x, heli.target.y);
       ts.x /= uiS; ts.y /= uiS; // convert to HUD-logical space
+      // Reticle color follows the targeting mode (boss always red)
+      const retCol = heli.target === boss ? P.ui.enemy
+        : heli.targetMode === 'infrastructure' ? '#44cccc'
+        : heli.targetMode === 'strongest' ? '#ff8844'
+        : P.ui.enemy;
       ctx.save();
       ctx.translate(ts.x, ts.y);
       ctx.rotate(performance.now() / 2400); // slow instrument rotation
-      ctx.strokeStyle = P.ui.enemy;
+      ctx.strokeStyle = retCol;
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.arc(0, 0, 16, 0, Math.PI * 2);
@@ -3135,40 +3431,62 @@ registerScreen('sortie', {
       }
       ctx.restore();
       // Center dot
-      ctx.fillStyle = P.ui.enemy;
+      ctx.fillStyle = retCol;
       ctx.beginPath();
       ctx.arc(ts.x, ts.y, 2, 0, Math.PI * 2);
       ctx.fill();
-      // Label + range-to-target
+      // Target HP mini-bar (when the target has one)
+      if (heli.target.hp !== undefined && heli.target.maxHp) {
+        const bw2 = 40;
+        ctx.fillStyle = 'rgba(10,16,10,0.85)';
+        ctx.fillRect(ts.x - bw2 / 2, ts.y + 14, bw2, 3);
+        ctx.fillStyle = retCol;
+        ctx.fillRect(ts.x - bw2 / 2, ts.y + 14, bw2 * clamp(heli.target.hp / heli.target.maxHp, 0, 1), 3);
+      }
+      // Label + range-to-target (+ lock indicator when click-locked)
       const tRange = Math.round(Math.hypot(heli.target.x - heli.x, heli.target.y - heli.y) / 10) * 10;
       ctx.font = '9px "Courier New", monospace';
       ctx.textAlign = 'center';
-      ctx.fillStyle = P.ui.enemy;
-      ctx.fillText(
-        heli.target === boss ? 'HIND PURSUIT GUNSHIP' :
-          (heli.target.weaponName || heli.target.className || (heli.target.objectiveTag ? `${heli.target.objectiveTag.toUpperCase()} TARGET` : 'TARGET')),
-        ts.x, ts.y - 26,
-      );
+      ctx.fillStyle = retCol;
+      let label = 'TARGET';
+      if (heli.target === boss) label = 'HIND PURSUIT GUNSHIP';
+      else if (Array.isArray(heli.target.route)) label = 'CONVOY';
+      else if (heli.target.type) label = heli.target.special === 'radar' ? 'RADAR'
+        : heli.target.special === 'fuel' ? 'FUEL TANK'
+        : heli.target.type.toUpperCase();
+      else if (heli.target.weaponName) label = heli.target.weaponName;
+      else if (heli.target.className) label = heli.target.className.toUpperCase();
+      if (heli.manualTarget === heli.target) label = 'LCK · ' + label;
+      ctx.fillText(label, ts.x, ts.y - 26);
       ctx.fillStyle = '#ffaa88';
       ctx.fillText(`${tRange} m`, ts.x, ts.y + 22);
     }
 
-    // Systems plate — target mode, toggles, objective (drawn last, stays on top)
+    // Systems plate — targeting, toggles, equipment, objective
     {
       const px = 8, py = 8, pw = lpw;
       hudPlate(ctx, px, py, pw, sysH, 'rgba(90,140,80,0.55)');
+      plateHeader(ctx, px, py, pw, 'SYSTEMS');
       ctx.textAlign = 'left'; ctx.textBaseline = 'top';
       ctx.font = 'bold 10px "Courier New", monospace';
-      ctx.fillStyle = P.ui.text;
-      ctx.fillText(`TGT ${heli.targetMode.toUpperCase()}`, px + 12, py + 8);
+      // Mode-colored targeting readout
+      const modeCol = { closest: P.ui.text, strongest: '#ff8844', infrastructure: '#44cccc' }[heli.targetMode] || P.ui.text;
+      const modeLabel = { closest: 'CLOSEST', strongest: 'STRONGEST', infrastructure: 'INFRA' }[heli.targetMode] || 'CLOSEST';
+      ctx.fillStyle = modeCol;
+      ctx.fillText(`TGT ${modeLabel}`, px + 12, py + 18);
       if (!narrow) {
         ctx.fillStyle = P.ui.textDim;
-        ctx.fillText('[SHIFT] CYCLE', px + 92, py + 8);
+        ctx.fillText('[SHIFT/V]', px + 92, py + 18);
       }
-      let ty = py + 24;
+      let ty = py + 34;
       for (let i = 0; i < nToggles; i++) {
         ctx.fillStyle = P.ui.rocket;
         ctx.fillText(i === 0 && input.autofire ? 'AUTOFIRE' : 'CLICK-TARGET', px + 12, ty);
+        ty += 15;
+      }
+      if (equipReady) {
+        ctx.fillStyle = '#44cccc';
+        ctx.fillText(`E · ${EQUIPMENT[heli.equipmentType].name}`, px + 12, ty);
         ty += 15;
       }
       ctx.font = 'bold 10px "Courier New", monospace';
@@ -3182,12 +3500,19 @@ registerScreen('sortie', {
       }
     }
 
-    // ── BOTTOM-LEFT: tactical radar ────────────────────────────────────
+    // ── BOTTOM-LEFT: circular tactical radar ───────────────────────────
     if (world) {
-      hudPlate(ctx, mmX - 4, mmY - 4, mmS + 8, mmS + 8, 'rgba(90,140,80,0.55)');
+      const R = mmS / 2;
+      const ccx = mmX + R, ccy = mmY + R;
+      // Circular backdrop + bezel
+      ctx.fillStyle = 'rgba(6,14,6,0.78)';
+      ctx.beginPath(); ctx.arc(ccx, ccy, R + 4, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = 'rgba(90,140,80,0.55)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(ccx, ccy, R + 4, 0, Math.PI * 2); ctx.stroke();
       ctx.save();
       ctx.beginPath();
-      ctx.rect(mmX, mmY, mmS, mmS);
+      ctx.arc(ccx, ccy, R, 0, Math.PI * 2);
       ctx.clip();
 
       const half = world.worldSize / 2;
@@ -3195,55 +3520,102 @@ registerScreen('sortie', {
       const mx = (wx) => mmX + (wx + half) * k;
       const my = (wy) => mmY + (wy + half) * k;
 
+      // Range rings + crosshair
+      ctx.strokeStyle = 'rgba(90,160,80,0.22)';
+      ctx.lineWidth = 1;
+      for (const rr of [0.33, 0.66, 1]) {
+        ctx.beginPath(); ctx.arc(ccx, ccy, R * rr, 0, Math.PI * 2); ctx.stroke();
+      }
+      ctx.beginPath();
+      ctx.moveTo(ccx - R, ccy); ctx.lineTo(ccx + R, ccy);
+      ctx.moveTo(ccx, ccy - R); ctx.lineTo(ccx, ccy + R);
+      ctx.stroke();
+
       // Roads (cached layer)
       ctx.drawImage(getMiniRoads(mmS), mmX, mmY);
 
       // Radar sweep
       const sweepAng = performance.now() / 900;
       ctx.save();
-      ctx.translate(mmX + mmS / 2, mmY + mmS / 2);
+      ctx.translate(ccx, ccy);
       ctx.rotate(sweepAng);
-      const sw = ctx.createLinearGradient(0, 0, mmS / 2, 0);
+      const sw = ctx.createLinearGradient(0, 0, R, 0);
       sw.addColorStop(0, 'rgba(120,220,110,0.30)');
       sw.addColorStop(1, 'rgba(120,220,110,0)');
       ctx.strokeStyle = 'rgba(120,220,110,0.25)';
       ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(mmS / 2, 0); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(R, 0); ctx.stroke();
       ctx.restore();
 
       // Camera view rectangle
       {
         const vb = camera.getVisibleBounds();
-        ctx.strokeStyle = 'rgba(200,255,180,0.35)';
+        ctx.strokeStyle = 'rgba(200,255,180,0.30)';
         ctx.lineWidth = 1;
         ctx.strokeRect(mx(vb.left), my(vb.top), (vb.right - vb.left) * k, (vb.bottom - vb.top) * k);
       }
 
-      // Sites
+      // Sites — shape encodes archetype: dot=rural, square=town,
+      // triangle=camp, diamond=base
       for (const s of world.sites) {
         const isObj = world.objective && world.objective.targetSiteId === s.id;
-        let col = s.cleared ? '#3f7f3f' : s.discovered ? '#ffcc44' : 'rgba(255,204,68,0.5)';
+        const col = s.cleared ? '#3f7f3f' : s.discovered ? '#ffcc44' : 'rgba(255,204,68,0.5)';
         ctx.fillStyle = col;
-        ctx.fillRect(mx(s.x) - 2, my(s.y) - 2, 4, 4);
+        const sx = mx(s.x), sy = my(s.y);
+        if (s.archetype === 'town') {
+          ctx.fillRect(sx - 2.5, sy - 2.5, 5, 5);
+        } else if (s.archetype === 'camp') {
+          ctx.beginPath();
+          ctx.moveTo(sx, sy - 3); ctx.lineTo(sx + 3, sy + 2.5); ctx.lineTo(sx - 3, sy + 2.5);
+          ctx.closePath(); ctx.fill();
+        } else if (s.archetype === 'base') {
+          ctx.save();
+          ctx.translate(sx, sy); ctx.rotate(Math.PI / 4);
+          ctx.fillRect(-2.5, -2.5, 5, 5);
+          ctx.restore();
+        } else {
+          ctx.fillRect(sx - 2, sy - 2, 4, 4);
+        }
         if (isObj && !s.cleared) {
           const pr = 3.5 + Math.sin(performance.now() / 180) * 1.5;
           ctx.strokeStyle = '#ff5544';
           ctx.lineWidth = 1;
-          ctx.beginPath(); ctx.arc(mx(s.x), my(s.y), pr, 0, Math.PI * 2); ctx.stroke();
+          ctx.beginPath(); ctx.arc(sx, sy, pr, 0, Math.PI * 2); ctx.stroke();
         }
       }
-      // Convoys
+      // Convoys — heading ticks
       for (const c of world.convoys) {
         if (c.destroyed || !c.active) continue;
-        ctx.fillStyle = '#ff8844';
-        ctx.fillRect(mx(c.x) - 1.5, my(c.y) - 1.5, 3, 3);
-      }
-      // Extraction
-      if (world.extraction?.active) {
-        ctx.fillStyle = '#44ddff';
+        const cx2 = mx(c.x), cy2 = my(c.y);
+        ctx.strokeStyle = '#ff8844';
+        ctx.lineWidth = 1.5;
         ctx.beginPath();
-        ctx.arc(mx(world.extraction.x), my(world.extraction.y), 3, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.moveTo(cx2 - Math.cos(c.angle) * 3, cy2 - Math.sin(c.angle) * 3);
+        ctx.lineTo(cx2 + Math.cos(c.angle) * 3, cy2 + Math.sin(c.angle) * 3);
+        ctx.stroke();
+      }
+      // Fuel depots (orange diamonds — timer bonuses)
+      for (const d of world.fuelDepots || []) {
+        if (d.destroyed) continue;
+        ctx.fillStyle = '#ff8844';
+        ctx.save();
+        ctx.translate(mx(d.x), my(d.y));
+        ctx.rotate(Math.PI / 4);
+        ctx.fillRect(-2, -2, 4, 4);
+        ctx.restore();
+      }
+      // Extraction = leave the map: highlight the nearest map edge
+      if (world.extraction?.active) {
+        const lim = WORLD_SIZE * 0.48;
+        const ep = nearestExitPoint();
+        ctx.strokeStyle = '#44ddff';
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        if (ep.card === 'N') { ctx.moveTo(mx(-lim), my(-lim)); ctx.lineTo(mx(lim), my(-lim)); }
+        else if (ep.card === 'S') { ctx.moveTo(mx(-lim), my(lim)); ctx.lineTo(mx(lim), my(lim)); }
+        else if (ep.card === 'W') { ctx.moveTo(mx(-lim), my(-lim)); ctx.lineTo(mx(-lim), my(lim)); }
+        else { ctx.moveTo(mx(lim), my(-lim)); ctx.lineTo(mx(lim), my(lim)); }
+        ctx.stroke();
       }
       // Boss
       if (boss.spawned && boss.state !== 'dead') {
@@ -3262,7 +3634,14 @@ registerScreen('sortie', {
       ctx.closePath(); ctx.fill();
       ctx.restore();
 
-      ctx.restore(); // clip
+      ctx.restore(); // circular clip
+
+      // Cardinal N marker on the bezel
+      ctx.fillStyle = 'rgba(170,255,136,0.8)';
+      ctx.font = 'bold 8px "Courier New", monospace';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('N', ccx, mmY - 8);
+      drawCornerBrackets(ctx, mmX - 4, mmY - 4, mmS + 8, mmS + 8, 'rgba(90,140,80,0.55)', 10, 1.5);
     }
 
     // ── BOTTOM-CENTRE: compass tape + speed ─────────────────────────────
@@ -3293,6 +3672,27 @@ registerScreen('sortie', {
           ctx.fillText(lbl, x, cy - cpH / 2 + 22);
         }
       }
+      // Bearing markers: objective (amber) / exit (cyan) — clamped to tape ends
+      const bearingMarker = (wx, wy, col) => {
+        const b = ((Math.atan2(wy - heli.y, wx - heli.x) * 180 / Math.PI) + 90 + 360) % 360;
+        let off = b - headingDeg;
+        while (off > 180) off -= 360;
+        while (off < -180) off += 360;
+        const x = cx + clamp(off, -68, 68) * pxPerDeg;
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.moveTo(x, cy - cpH / 2 + 4);
+        ctx.lineTo(x - 3.5, cy - cpH / 2 - 1);
+        ctx.lineTo(x + 3.5, cy - cpH / 2 - 1);
+        ctx.closePath();
+        ctx.fill();
+      };
+      const objFocusC = getObjectiveFocus();
+      if (objFocusC) bearingMarker(objFocusC.x, objFocusC.y, '#ffcc44');
+      if (world?.extraction?.active) {
+        const ep = nearestExitPoint();
+        bearingMarker(ep.x, ep.y, '#44ddff');
+      }
       // Caret + numeric heading
       ctx.fillStyle = P.ui.textBright;
       ctx.beginPath();
@@ -3301,6 +3701,9 @@ registerScreen('sortie', {
       ctx.lineTo(cx + 4, cy - cpH / 2 - 3);
       ctx.closePath();
       ctx.fill();
+      ctx.font = 'bold 9px "Courier New", monospace';
+      ctx.fillStyle = P.ui.text;
+      ctx.fillText(`${Math.round(headingDeg)}°`, cx, cy + cpH / 2 - 8);
       ctx.restore();
 
       // Speed readout at the right end of the compass plate
@@ -3332,12 +3735,25 @@ registerScreen('sortie', {
       ctx.fillText(`FPS ${lastFps}`, stX + 62, stY + 24);
     }
 
+    // ── Target-MODE chip (touch: sits on the mode tap-zone near fire) ──
+    if (IS_TOUCH) {
+      const chipW = 118, chipH = 24;
+      const chipX = W - chipW - 10, chipY = H * 0.36 - chipH / 2;
+      hudPlate(ctx, chipX, chipY, chipW, chipH, 'rgba(90,140,80,0.55)');
+      const modeLabel = { closest: 'CLOSEST', strongest: 'STRONGEST', infrastructure: 'INFRA' }[heli.targetMode] || 'CLOSEST';
+      ctx.font = 'bold 9px "Courier New", monospace';
+      ctx.fillStyle = P.ui.text;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(`MODE ▸ ${modeLabel}`, chipX + chipW / 2, chipY + chipH / 2 + 0.5);
+    }
+
     // ── Objective + extraction direction markers (drawn above all plates) ──
     {
       const focus = getObjectiveFocus();
       if (focus) drawOffscreenMarker(ctx, camera, W, H, focus.x, focus.y, '#ff5544', '#ff9966', null, uiS);
       if (world?.extraction?.active) {
-        drawOffscreenMarker(ctx, camera, W, H, world.extraction.x, world.extraction.y, '#44ddff', '#88ddff', 'LZ', uiS);
+        const ep = nearestExitPoint();
+        drawOffscreenMarker(ctx, camera, W, H, ep.x, ep.y, '#44ddff', '#88ddff', `EXIT ${ep.card}`, uiS);
       }
     }
 
@@ -3351,7 +3767,7 @@ registerScreen('sortie', {
         ctx.fillStyle = P.ui.text;
         ctx.font = '9px "Courier New", monospace';
         ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-        ctx.fillText('MOUSE STEER · CLICK FIRE · SHIFT TARGET · P SETTINGS', W / 2, mmY - 10);
+        ctx.fillText('MOUSE STEER · CLICK FIRE · V MODE · E EQUIP · P SETTINGS', W / 2, mmY - 10);
         ctx.globalAlpha = 1;
       }
     }
@@ -3824,6 +4240,14 @@ canvas.addEventListener('click', (e) => {
       }
     }
   } else if (currentScreen === screens.briefing) {
+    // Equipment selector first — a click on a box selects instead of launching.
+    for (const box of briefingEquipmentBoxes) {
+      if (pos.x >= box.x * cam.dpr && pos.x <= (box.x + box.w) * cam.dpr &&
+          pos.y >= box.y * cam.dpr && pos.y <= (box.y + box.h) * cam.dpr) {
+        selectedEquipment = box.key;
+        return;
+      }
+    }
     switchScreen('sortie', activeContract);
   } else if (currentScreen === screens.debrief) {
     switchScreen('contracts');

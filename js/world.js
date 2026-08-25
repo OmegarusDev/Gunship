@@ -62,11 +62,11 @@ function getTerrainGrid(terrain, worldSize) {
       const wx = -worldSize / 2 + (i + 0.5) * PATH_CELL;
       const wy = -worldSize / 2 + (j + 0.5) * PATH_CELL;
       const idx = j * n + i;
-      const t = terrain.type(wx, wy);
-      elev[idx] = terrain.elevation(wx, wy);
+      const ce = terrain.typeAndElevation(wx, wy);
+      elev[idx] = ce.elevation;
       // Base traversal cost by ground: wadis are natural corridors,
       // dunes/rock are slow, settlements (oasis) avoided by through-roads.
-      switch (t) {
+      switch (ce.type) {
         case 'hardpack': cost[idx] = 0.8; break;
         case 'sand':     cost[idx] = 1.0; break;
         case 'wadi':     cost[idx] = 0.85; break;
@@ -1026,10 +1026,12 @@ export function generateConvoys(seed, roads, sites, worldSize) {
       s: 60,                 // arc-length position of the lead along the route
       direction: 1,          // ping-pong patrol direction
       composition,
+      surface: road.surface, // speed mod by the road it patrols
       x: route[0].x,
       y: route[0].y,
       angle: 0,
-      speed: 25 + rng() * 15,
+      baseSpeed: 25 + rng() * 15,
+      speed: (25 + rng() * 15) * (SURFACE[road.surface]?.speedMod || 1),
       active: false,
       hp: 70 + vehicleCount * 30,
       maxHp: 70 + vehicleCount * 30,
@@ -1210,18 +1212,9 @@ function addRosterEnemy(site, className, rng, index, objectiveTarget = false) {
   });
 }
 
-function makeExtraction(world, target, style) {
-  const targetAngle = Math.atan2(target.y, target.x);
-  const distance = world.worldSize * 0.34 * style.extractionDistanceMultiplier;
-  const angle = targetAngle + Math.PI;
-  return {
-    x: clamp(Math.cos(angle) * distance, -world.worldSize * 0.44, world.worldSize * 0.44),
-    y: clamp(Math.sin(angle) * distance, -world.worldSize * 0.44, world.worldSize * 0.44),
-    radius: 42,
-    holdTime: 1.25,
-    active: false,
-    progress: 0,
-  };
+function makeExtraction() {
+  // Extraction = leaving the map. No LZ point, no hold timer.
+  return { active: false };
 }
 
 function chooseTargetSite(world, scenario, rng) {
@@ -1362,7 +1355,7 @@ function applyContractPlan(world, contract) {
 
   world.objective.targetSiteId = targetSite.id;
   world.objective.targetSiteName = targetSite.name;
-  world.extraction = makeExtraction(world, targetPoint, style);
+  world.extraction = makeExtraction();
   world.responsePlan = {
     heatGainMultiplier: style.heatGainMultiplier,
     hunterRateMultiplier: style.hunterRateMultiplier,
@@ -1374,6 +1367,77 @@ function applyContractPlan(world, contract) {
       { tier: 3, label: 'COORDINATED RESPONSE' },
       { tier: 4, label: 'HUNTER DISPATCHED' },
     ],
+  };
+}
+
+// ══════════════════════════════════════════════════════════════
+//  FUEL DEPOTS — standalone timer-bonus targets (GDD: +20s per tank)
+// ══════════════════════════════════════════════════════════════
+
+function generateFuelDepots(seed, roads, sites, worldSize, rng) {
+  const depots = [];
+  const buildings = [];
+  const candidates = [];
+  // Sample drivable points off the paved/dirt network, away from sites.
+  for (const road of roads) {
+    if (road.hierarchy === 'local') continue;
+    for (let i = 2; i < road.points.length - 2; i += 3) {
+      candidates.push({ p: road.points[i], hierarchy: road.hierarchy });
+    }
+  }
+  if (candidates.length === 0) return { depots, buildings };
+
+  const want = randInt(3, 5, rng);
+  let guard = 0;
+  while (depots.length < want && guard++ < 200) {
+    const cand = pick(candidates, rng);
+    const x = cand.p.x + randFloat(-70, 70, rng);
+    const y = cand.p.y + randFloat(-70, 70, rng);
+    if (Math.abs(x) > worldSize * 0.45 || Math.abs(y) > worldSize * 0.45) continue;
+    if (sites.some(s => Math.hypot(s.x - x, s.y - y) < 550)) continue;
+    if (depots.some(d => Math.hypot(d.x - x, d.y - y) < 900)) continue;
+
+    const id = `depot-${String(depots.length + 1).padStart(2, '0')}`;
+    const tanks = randInt(2, 3);
+    const depot = { id, x, y, tanks };
+    depots.push(depot);
+
+    // Fuel tanks + a watch tower + sandbag revetment.
+    for (let t = 0; t < tanks; t++) {
+      const ang = (t / tanks) * Math.PI * 2 + rng();
+      buildings.push(makeFuelBuilding(
+        `${id}-tank-${t + 1}`,
+        x + Math.cos(ang) * 22, y + Math.sin(ang) * 22,
+        'fuel', { depotId: id, hp: 15 }
+      ));
+    }
+    buildings.push(makeFuelBuilding(
+      `${id}-tower`, x + randFloat(-30, 30), y + randFloat(-30, 30),
+      'tower', { depotId: id, hp: 20 }
+    ));
+    buildings.push(makeFuelBuilding(
+      `${id}-bag`, x + randFloat(-30, 30), y + randFloat(-30, 30),
+      'sandbag', { depotId: id, hp: 25 }
+    ));
+  }
+  return { depots, buildings };
+}
+
+function makeFuelBuilding(id, x, y, type, opts = {}) {
+  const tmpl = getBuildingTemplate(type);
+  return {
+    id, x, y, type,
+    w: tmpl.w, d: tmpl.d, h: tmpl.h, col: tmpl.col,
+    siteId: null,
+    hp: opts.hp || 80,
+    maxHp: opts.hp || 80,
+    destructible: true,
+    objectiveTag: null,
+    special: type === 'fuel' ? 'fuel' : null,
+    highPriority: false,
+    depotId: opts.depotId || null,
+    destroyed: false,
+    flashTimer: 0,
   };
 }
 
@@ -1417,6 +1481,12 @@ export function generateWorld(input) {
     }
   }
 
+  // Fuel depots — standalone timer-bonus targets along the road network.
+  const depotRng = mulberry32(seed + 5000);
+  const { depots: fuelDepots, buildings: depotBuildings } =
+    generateFuelDepots(seed + 5000, roads, sites, worldSize, depotRng);
+  for (const db of depotBuildings) buildings.push(db);
+
   const world = {
     seed,
     worldSize,
@@ -1424,6 +1494,7 @@ export function generateWorld(input) {
     sites,
     decorations,
     buildings,
+    fuelDepots,
     convoys,
     supplyCrates: [],
     radarSites: [],
