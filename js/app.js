@@ -15,7 +15,7 @@ import { clamp } from './rng.js';
 import { createNoise, fbm, ridged, duneNoise, windStreaks, voronoi } from './noise.js';
 import { generateWorld, getBuildingTemplate, getSpeedMod, ARCHETYPES } from './world.js';
 import { createTerrain } from './terrain.js';
-import { drawCornerBrackets } from './appBridge.js';
+import { drawCornerBrackets, drawBackButton } from './appBridge.js';
 import {
   metaState, createCareer, loadCareer, commitSortieOutcome, applyCareerToHeli,
   gainXp, xpToNext, saveCareer,
@@ -101,6 +101,11 @@ const EQUIPMENT = {
 };
 let selectedEquipment = 'rocket';
 let briefingEquipmentBoxes = [];
+let briefingBackBox = null;
+let briefingInsertBox = null;
+let contractsBackBox = null;
+let debriefNextBox = null;
+let debriefPilotBox = null;
 
 // ── Road network queries (vehicles prefer driving on roads) ──
 let _roadSegsCache = null;
@@ -242,6 +247,7 @@ let sharedTerrain = null;
 let career = null;
 let sortieXpEarned = 0;
 let sortieDollarsEarned = 0;
+let metaReturnScreen = 'title'; // hangar/pilot BACK returns here
 let titleMenuBoxes = [];
 let terrainNoise = null;
 let moistureNoise = null;
@@ -1527,6 +1533,11 @@ function hudBar(ctx, x, y, w, h, frac, col, opts = {}) {
 // Per-sortie HUD animation state (smooth bar chase + hit flash).
 const hudAnim = { hp: 100, fear: 0, heat: 0, hpFlash: 0 };
 
+function posInBox(pos, box, dpr) {
+  return box && pos.x >= box.x * dpr && pos.x <= (box.x + box.w) * dpr &&
+         pos.y >= box.y * dpr && pos.y <= (box.y + box.h) * dpr;
+}
+
 
 /** Off-screen direction marker: pulsing chevron clamped to the screen edge,
  *  pointing at a world position, with distance (+optional tag) readout. */
@@ -2054,7 +2065,7 @@ registerScreen('debrief', {
       success ? 'OPERATIONAL REPORT' : aborted ? 'PILOT RECOVERED' : 'SIGNAL LOST');
     ctx.save(); ctx.scale(cam.dpr, cam.dpr);
     const panelW = Math.min(420, w - 32);
-    const panelH = Math.min(320, h - 120);
+    const panelH = Math.min(420, h - 130);
     const x = (w - panelW) / 2;
     const y = 84;
     ctx.fillStyle = '#0d210f'; ctx.fillRect(x, y, panelW, panelH);
@@ -2085,23 +2096,63 @@ registerScreen('debrief', {
       ctx.fillStyle = i === rows.length - 1 ? '#ffcc44' : P.ui.text;
       ctx.fillText(`${rows[i][0].padEnd(16, ' ')} ${rows[i][1]}`, x + 18, y + 58 + i * 22);
     }
-    // Career callouts
+    // Career callouts flow below the rows
     ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    let cy2 = y + 58 + rows.length * 22 + 12;
     if (debriefInfo?.died) {
       ctx.fillStyle = '#ff6666';
       ctx.font = 'bold 11px "Courier New", monospace';
-      ctx.fillText('PILOT KIA — NEW PILOT ASSIGNED TO THE CAMPAIGN', x + 18, y + panelH - 46);
+      ctx.fillText('PILOT KIA — NEW PILOT ASSIGNED TO THE CAMPAIGN', x + 18, cy2);
+      cy2 += 20;
     } else if (debriefInfo?.levelsGained) {
       ctx.fillStyle = '#44cccc';
       ctx.font = 'bold 11px "Courier New", monospace';
-      ctx.fillText(`LEVEL UP — ${debriefInfo.sp} SKILL POINT${debriefInfo.sp === 1 ? '' : 'S'} TO SPEND IN PILOT RECORD`, x + 18, y + panelH - 46);
+      ctx.fillText(`LEVEL UP — ${debriefInfo.sp} SKILL POINT${debriefInfo.sp === 1 ? '' : 'S'} AVAILABLE`, x + 18, cy2);
+      cy2 += 20;
+    } else if (debriefInfo && debriefInfo.sp > 0) {
+      ctx.fillStyle = '#44cccc';
+      ctx.font = 'bold 11px "Courier New", monospace';
+      ctx.fillText(`${debriefInfo.sp} UNSPENT SKILL POINT${debriefInfo.sp === 1 ? '' : 'S'}`, x + 18, cy2);
+      cy2 += 20;
     }
-    if (Math.sin(performance.now() / 500) > 0) {
-      ctx.fillStyle = P.ui.textBright;
-      ctx.textAlign = 'center';
-      ctx.font = 'bold 13px "Courier New", monospace';
-      ctx.fillText('[ CLICK FOR NEXT BOARD ]', w / 2, y + panelH - 28);
+
+    // Action buttons: PILOT RECORD (when it has something to offer) + NEXT BOARD
+    const btnH = 32;
+    const showPilot = debriefInfo && (debriefInfo.sp > 0 || debriefInfo.levelsGained) && !debriefInfo.died;
+    const nbW = showPilot ? 190 : 220;
+    const nbH = btnH;
+    const gap = 14;
+    const totalW = nbW + (showPilot ? 190 + gap : 0);
+    let bx2 = w / 2 - totalW / 2;
+    const by2 = cy2 + 8;
+
+    if (showPilot) {
+      ctx.fillStyle = 'rgba(68,204,204,0.12)';
+      ctx.fillRect(bx2, by2, 190, nbH);
+      ctx.strokeStyle = '#44cccc';
+      ctx.lineWidth = 1.4;
+      ctx.strokeRect(bx2, by2, 190, nbH);
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#88eeee';
+      ctx.font = 'bold 12px "Courier New", monospace';
+      ctx.fillText('PILOT RECORD ▸', bx2 + 95, by2 + nbH / 2 + 0.5);
+      debriefPilotBox = { x: bx2, y: by2, w: 190, h: nbH };
+      bx2 += 190 + gap;
+    } else {
+      debriefPilotBox = null;
     }
+
+    const blink2 = Math.sin(performance.now() / 500) > -0.4;
+    ctx.fillStyle = 'rgba(20,40,16,0.65)';
+    ctx.fillRect(bx2, by2, nbW, nbH);
+    ctx.strokeStyle = blink2 ? P.ui.textBright : P.ui.borderHi;
+    ctx.lineWidth = 1.4;
+    ctx.strokeRect(bx2, by2, nbW, nbH);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = P.ui.textBright;
+    ctx.font = 'bold 13px "Courier New", monospace';
+    ctx.fillText('[ NEXT BOARD ]', bx2 + nbW / 2, by2 + nbH / 2 + 0.5);
+    debriefNextBox = { x: bx2, y: by2, w: nbW, h: nbH };
     ctx.restore();
   },
 });
@@ -2298,7 +2349,8 @@ registerScreen('contracts', {
   draw(ctx, cam) {
     const w = cam.screenW;
     const h = cam.screenH;
-    drawScreenBackground(ctx, cam, 'AVAILABLE OPERATIONS', 'SELECT ONE CONTRACT');
+    const camp = career?.campaign || { act: 1, sortie: 1 };
+    drawScreenBackground(ctx, cam, 'AVAILABLE OPERATIONS', `ACT ${camp.act} · SORTIE ${camp.sortie} — SELECT ONE CONTRACT`);
     ctx.save(); ctx.scale(cam.dpr, cam.dpr);
     for (let i = 0; i < contractBoard.length; i++) {
       drawContractCard(ctx, contractBoard[i], contractCardRect(i, w, h));
@@ -2306,7 +2358,8 @@ registerScreen('contracts', {
     ctx.fillStyle = P.ui.textDim;
     ctx.font = '10px "Courier New", monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('Each operation is generated from its contract and seed.', w / 2, h - 22);
+    ctx.fillText('Each operation is generated from its contract and seed.', w / 2, h - 40);
+    contractsBackBox = drawBackButton(ctx, w, h, '◂ TITLE');
     ctx.restore();
   },
 });
@@ -2387,12 +2440,25 @@ registerScreen('briefing', {
     }
     fy += (46 + eqGap) * 2 + 16;
 
+    briefingBackBox = drawBackButton(ctx, w, h, '◂ CONTRACTS');
+
+    // Launch button (explicit zone — no more click-anywhere launches)
     ctx.textAlign = 'center';
-    if (Math.sin(performance.now() / 500) > 0) {
-      ctx.fillStyle = P.ui.textBright;
-      ctx.font = 'bold 14px "Courier New", monospace';
-      ctx.fillText('[ CLICK TO INSERT ]', w / 2, fy);
-    }
+    const lbl = '[ CLICK TO INSERT ]';
+    ctx.font = 'bold 14px "Courier New", monospace';
+    const lw2 = ctx.measureText(lbl).width + 36;
+    const lh2 = 32;
+    const lx = w / 2 - lw2 / 2, ly = fy - lh2 / 2 + 4;
+    const blink = Math.sin(performance.now() / 500) > -0.4;
+    ctx.fillStyle = 'rgba(20,40,16,0.65)';
+    ctx.fillRect(lx, ly, lw2, lh2);
+    ctx.strokeStyle = blink ? P.ui.textBright : P.ui.borderHi;
+    ctx.lineWidth = 1.4;
+    ctx.strokeRect(lx, ly, lw2, lh2);
+    drawCornerBrackets(ctx, lx, ly, lw2, lh2, 'rgba(170,255,136,0.5)', 7, 1.5);
+    ctx.fillStyle = P.ui.textBright;
+    ctx.fillText(lbl, w / 2, fy + 4);
+    briefingInsertBox = { x: lx, y: ly, w: lw2, h: lh2 };
     ctx.restore();
   },
 });
@@ -4369,18 +4435,19 @@ canvas.addEventListener('click', (e) => {
 
   if (currentScreen === screens.hangar) {
     const r = handleHangarClick(pos.x, pos.y, cam.dpr);
-    if (r === 'back') switchScreen('title');
+    if (r === 'back') switchScreen(metaReturnScreen);
     return;
   }
   if (currentScreen === screens.pilot) {
     const r = handlePilotClick(pos.x, pos.y, cam.dpr);
-    if (r === 'back') switchScreen('title');
+    if (r === 'back') switchScreen(metaReturnScreen);
     return;
   }
   if (currentScreen === screens.title) {
     for (const box of titleMenuBoxes) {
       if (pos.x >= box.x * cam.dpr && pos.x <= (box.x + box.w) * cam.dpr &&
           pos.y >= box.y * cam.dpr && pos.y <= (box.y + box.h) * cam.dpr) {
+        metaReturnScreen = 'title';
         switchScreen(box.target);
         return;
       }
@@ -4395,18 +4462,29 @@ canvas.addEventListener('click', (e) => {
         break;
       }
     }
+  } else if (currentScreen === screens.contracts) {
+    if (posInBox(pos, contractsBackBox, cam.dpr)) { switchScreen('title'); return; }
+    for (let i = 0; i < contractBoard.length; i++) {
+      const r = contractCardRect(i, w / cam.dpr, h / cam.dpr);
+      const scaled = { x: r.x * cam.dpr, y: r.y * cam.dpr, w: r.w * cam.dpr, h: r.h * cam.dpr };
+      if (pointInRect(pos.x, pos.y, scaled)) {
+        switchScreen('briefing', contractBoard[i]);
+        break;
+      }
+    }
   } else if (currentScreen === screens.briefing) {
+    if (posInBox(pos, briefingBackBox, cam.dpr)) { switchScreen('contracts'); return; }
     // Equipment selector first — a click on a box selects instead of launching.
     for (const box of briefingEquipmentBoxes) {
-      if (pos.x >= box.x * cam.dpr && pos.x <= (box.x + box.w) * cam.dpr &&
-          pos.y >= box.y * cam.dpr && pos.y <= (box.y + box.h) * cam.dpr) {
+      if (posInBox(pos, box, cam.dpr)) {
         selectedEquipment = box.key;
         return;
       }
     }
-    switchScreen('sortie', activeContract);
+    if (posInBox(pos, briefingInsertBox, cam.dpr)) switchScreen('sortie', activeContract);
   } else if (currentScreen === screens.debrief) {
-    switchScreen('contracts');
+    if (posInBox(pos, debriefPilotBox, cam.dpr)) { metaReturnScreen = 'contracts'; switchScreen('pilot'); return; }
+    if (posInBox(pos, debriefNextBox, cam.dpr)) switchScreen('contracts');
   }
 });
 

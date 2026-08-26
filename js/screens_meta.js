@@ -6,6 +6,7 @@
 import { P } from './palette.js';
 import { withAlpha } from './drawUtil.js';
 import { drawCornerBrackets } from './appBridge.js';
+import { drawBackButton } from './appBridge.js';
 import {
   metaState, HANGAR_SLOTS, SKILL_GRID, gridNeighbors, canAllocate,
   buyHangarLevel, allocateSkill, respecSkills, saveCareer, xpToNext, clamp,
@@ -95,14 +96,13 @@ export const hangarScreen = {
       }
     }
 
-    // Footer hint
+    // Footer hint + back button
     ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
     ctx.font = '10px "Courier New", monospace';
     ctx.fillStyle = P.ui.textDim;
     ctx.fillText('UPGRADES PERSIST ACROSS PILOTS · CLICK ENTRY ZONE TO BUY', w / 2, h - 30);
-    ctx.fillStyle = P.ui.textDim;
-    ctx.fillText('◂ BACK', 40, h - 30);
-    hangarBuyBoxes.push({ x: 12, y: h - 52, w: 80, h: 30, slot: '__back' });
+    const backRect = drawBackButton(ctx, w, h);
+    hangarBuyBoxes.push({ x: backRect.x, y: backRect.y, w: backRect.w, h: backRect.h, slot: '__back' });
 
     drawCornerBrackets(ctx, 8, 8, w - 16, h - 16, 'rgba(90,140,80,0.5)', 22, 2);
     ctx.restore();
@@ -253,11 +253,7 @@ export const pilotScreen = {
     }
 
     // Back
-    ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
-    ctx.font = '10px "Courier New", monospace';
-    ctx.fillStyle = P.ui.textDim;
-    ctx.fillText('◂ BACK', 40, h - 30);
-    pilotBackBox = { x: 12, y: h - 52, w: 80, h: 30 };
+    pilotBackBox = drawBackButton(ctx, w, h);
 
     drawCornerBrackets(ctx, 8, 8, w - 16, h - 16, 'rgba(90,140,80,0.5)', 22, 2);
     ctx.restore();
