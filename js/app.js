@@ -13,8 +13,14 @@ import { withAlpha, fillCircle, drawLine, drawTextShadow } from './drawUtil.js';
 import { mulberry32 } from './rng.js';
 import { clamp } from './rng.js';
 import { createNoise, fbm, ridged, duneNoise, windStreaks, voronoi } from './noise.js';
-import { generateWorld, getBuildingTemplate, getSpeedMod } from './world.js';
+import { generateWorld, getBuildingTemplate, getSpeedMod, ARCHETYPES } from './world.js';
 import { createTerrain } from './terrain.js';
+import { drawCornerBrackets } from './appBridge.js';
+import {
+  metaState, createCareer, loadCareer, commitSortieOutcome, applyCareerToHeli,
+  gainXp, xpToNext, saveCareer,
+} from './meta.js';
+import { hangarScreen, pilotScreen, handleHangarClick, handlePilotClick } from './screens_meta.js';
 import { createEnemyFromRoster } from './data/enemies.js';
 import { createContractBoard, getDifficulty as getDifficultyProfile, getScenario, getStyle } from './contracts.js';
 import { createUpgradeChoices } from './upgrades.js';
@@ -91,6 +97,7 @@ const EQUIPMENT = {
   repair:    { name: 'REPAIR PATCH', desc: 'E: +40 hull instantly' },
   rocket:    { name: 'ROCKET SALVO', desc: 'E: 6 rockets on target' },
   overboost: { name: 'OVERBOOST',    desc: 'E: +50% spd & fire 6s' },
+  flares:    { name: 'FLARES',       desc: 'E: dissolve nearby fire 3s' },
 };
 let selectedEquipment = 'rocket';
 let briefingEquipmentBoxes = [];
@@ -230,6 +237,12 @@ function toggleSettings() {
 
 let world = null;
 let sharedTerrain = null;
+
+// ── Career (pilot + wallet + hangar) — persisted, loaded at boot ──
+let career = null;
+let sortieXpEarned = 0;
+let sortieDollarsEarned = 0;
+let titleMenuBoxes = [];
 let terrainNoise = null;
 let moistureNoise = null;
 let detailNoise = null;
@@ -1205,6 +1218,12 @@ function checkSettlementClear(settlement) {
       const dist = Math.hypot(settlement.x, settlement.y);
       const bonus = Math.floor(50 + dist * 0.02);
       heli.score += bonus;
+      // Career earnings: Dollars from the site's wealth range, XP bonus.
+      if (arch && ARCHETYPES[arch.archetype]) {
+        const range = ARCHETYPES[arch.archetype].dollars;
+        sortieDollarsEarned += Math.floor(range[0] + Math.random() * (range[1] - range[0]));
+        sortieXpEarned += 30;
+      }
       floatingTexts.push({
         x: settlement.x,
         y: settlement.y - 50,
@@ -1604,6 +1623,8 @@ function damageWorldTarget(target, damage, x, y) {
       // Different reward track from buildings: bounty + fear, and the
       // burning tailings drop salvage.
       heli.score += 150;
+      sortieXpEarned += 40;
+      sortieDollarsEarned += 60;
       addFear(3, 'convoy ambushed');
       spawnFloatingText(target.x, target.y - 30, 'CONVOY DESTROYED', '#aaff88');
       spawnFloatingText(target.x, target.y - 48, '+150', '#ffcc44');
@@ -1652,7 +1673,7 @@ function damageWorldTarget(target, damage, x, y) {
         }
       }
       if (Math.hypot(heli.x - target.x, heli.y - target.y) < 70) {
-        heli.hp -= 25;
+        heli.hp -= Math.max(1, Math.round(25 * (1 - (heli.dmgResist || 0))));
         spawnExplosion(heli.x, heli.y, 0.5);
         spawnFloatingText(heli.x, heli.y - 30, 'TOO CLOSE!', '#ff4444');
         if (heli.hp <= 0) { heli.hp = 0; finishSortie('failed'); }
@@ -1900,20 +1921,43 @@ registerScreen('title', {
     ctx.fillStyle = P.ui.infamy;
     ctx.fillText(sub, cx, subY);
 
-    // Prompt box
-    const pY = h * 0.62;
-    if (Math.sin(t * 3.4) > -0.25) {
-      const label = '[ CLICK FOR OPERATIONS ]';
-      ctx.font = 'bold 14px "Courier New", monospace';
-      const pw = ctx.measureText(label).width + 36;
-      const ph = 34;
+    // ── Main menu entries ──
+    const menuW = Math.min(260, w - 60);
+    const menuX = cx - menuW / 2;
+    let my2 = h * 0.58;
+    titleMenuBoxes = [];
+    const entries = [
+      { label: 'OPERATIONS', sub: 'SELECT CONTRACT', target: 'contracts' },
+      { label: 'HANGAR', sub: 'BUY CHOPPER PARTS', target: 'hangar' },
+      { label: 'PILOT RECORD', sub: 'LEVEL & SKILLS', target: 'pilot' },
+    ];
+    for (const entry of entries) {
+      const mh = 42;
       ctx.fillStyle = 'rgba(20,40,16,0.65)';
-      ctx.fillRect(cx - pw / 2, pY - ph / 2, pw, ph);
-      ctx.strokeStyle = P.ui.textBright;
+      ctx.fillRect(menuX, my2, menuW, mh);
+      ctx.strokeStyle = P.ui.borderHi;
       ctx.lineWidth = 1.2;
-      ctx.strokeRect(cx - pw / 2, pY - ph / 2, pw, ph);
+      ctx.strokeRect(menuX, my2, menuW, mh);
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillStyle = P.ui.textBright;
-      ctx.fillText(label, cx, pY);
+      ctx.font = 'bold 13px "Courier New", monospace';
+      ctx.fillText(entry.label, cx, my2 + 14);
+      ctx.font = '9px "Courier New", monospace';
+      ctx.fillStyle = P.ui.textDim;
+      ctx.fillText(entry.sub, cx, my2 + 30);
+      titleMenuBoxes.push({ x: menuX, y: my2, w: menuW, h: mh, target: entry.target });
+      my2 += mh + 10;
+    }
+
+    // Pilot + wallet readout
+    const c = career || metaState.career;
+    if (c) {
+      ctx.font = 'bold 11px "Courier New", monospace';
+      ctx.fillStyle = P.ui.text;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+      ctx.fillText(`${c.pilot.name}  ·  LV ${c.pilot.level}`, cx, my2 + 8);
+      ctx.fillStyle = '#ffcc44';
+      ctx.fillText(`$ ${c.dollars}`, cx, my2 + 26);
     }
 
     // Footer
@@ -1978,7 +2022,28 @@ function drawFearUpgradeOverlay(ctx, cam) {
   ctx.restore();
 }
 
+let debriefInfo = null;
+
 registerScreen('debrief', {
+  enter() {
+    // Commit the sortie to the career: XP/levels if the pilot survived,
+    // fresh pilot if KIA. Dollars always banked. Campaign advances on win.
+    const res = commitSortieOutcome(career, sortieState.status, sortieXpEarned, sortieDollarsEarned);
+    if (sortieState.status === 'complete') {
+      career.campaign.sortie += 1;
+      if (career.campaign.sortie > 4) { career.campaign.sortie = 1; career.campaign.act += 1; }
+      saveCareer(career);
+    }
+    debriefInfo = {
+      ...res,
+      xp: sortieXpEarned,
+      dollars: sortieDollarsEarned,
+      level: career.pilot.level,
+      pilotName: career.pilot.name,
+      sp: career.pilot.skillPoints,
+    };
+    metaState.career = career;
+  },
   draw(ctx, cam) {
     const w = cam.screenW;
     const h = cam.screenH;
@@ -2012,10 +2077,24 @@ registerScreen('debrief', {
       ['FEAR LEVEL', `${sortieState.fearLevel || 0}`],
       ['PEAK HEAT', `${Math.round(sortieState.heat.value)}`],
       ['SECURED PAY', `$${sortieState.rewards.secured}`],
+      ['XP EARNED', debriefInfo ? `${debriefInfo.xp}${debriefInfo.died ? ' (LOST — KIA)' : ''}` : '0'],
+      ['DOLLARS EARNED', `$${debriefInfo ? debriefInfo.dollars : 0}`],
+      ['PILOT LEVEL', debriefInfo ? `LV ${debriefInfo.level}${debriefInfo.levelsGained ? ` (+${debriefInfo.levelsGained})` : ''}` : '—'],
     ];
     for (let i = 0; i < rows.length; i++) {
       ctx.fillStyle = i === rows.length - 1 ? '#ffcc44' : P.ui.text;
       ctx.fillText(`${rows[i][0].padEnd(16, ' ')} ${rows[i][1]}`, x + 18, y + 58 + i * 22);
+    }
+    // Career callouts
+    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    if (debriefInfo?.died) {
+      ctx.fillStyle = '#ff6666';
+      ctx.font = 'bold 11px "Courier New", monospace';
+      ctx.fillText('PILOT KIA — NEW PILOT ASSIGNED TO THE CAMPAIGN', x + 18, y + panelH - 46);
+    } else if (debriefInfo?.levelsGained) {
+      ctx.fillStyle = '#44cccc';
+      ctx.font = 'bold 11px "Courier New", monospace';
+      ctx.fillText(`LEVEL UP — ${debriefInfo.sp} SKILL POINT${debriefInfo.sp === 1 ? '' : 'S'} TO SPEND IN PILOT RECORD`, x + 18, y + panelH - 46);
     }
     if (Math.sin(performance.now() / 500) > 0) {
       ctx.fillStyle = P.ui.textBright;
@@ -2028,22 +2107,6 @@ registerScreen('debrief', {
 });
 
 // ── Shared UI decoration helpers ──────────────────────────────────────────
-
-/** Military frame: corner brackets around a rect. */
-function drawCornerBrackets(ctx, x, y, w, h, color, len = 14, lw = 2) {
-  ctx.strokeStyle = color;
-  ctx.lineWidth = lw;
-  ctx.beginPath();
-  // TL
-  ctx.moveTo(x, y + len); ctx.lineTo(x, y); ctx.lineTo(x + len, y);
-  // TR
-  ctx.moveTo(x + w - len, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w, y + len);
-  // BR
-  ctx.moveTo(x + w, y + h - len); ctx.lineTo(x + w, y + h); ctx.lineTo(x + w - len, y + h);
-  // BL
-  ctx.moveTo(x + len, y + h); ctx.lineTo(x, y + h); ctx.lineTo(x, y + h - len);
-  ctx.stroke();
-}
 
 /** Subtle CRT scanlines + edge vignette over a full-screen UI. */
 function drawScanlines(ctx, w, h) {
@@ -2301,11 +2364,11 @@ registerScreen('briefing', {
     briefingEquipmentBoxes = [];
     const eqKeys = Object.keys(EQUIPMENT);
     const eqGap = 10;
-    const eqW = Math.min(140, (panelW - 36 - eqGap * 2) / 3);
+    const eqW = Math.min(180, (panelW - 36 - eqGap) / 2);
     for (let i = 0; i < eqKeys.length; i++) {
       const key = eqKeys[i];
-      const bx = x + 18 + i * (eqW + eqGap);
-      const by = fy;
+      const bx = x + 18 + (i % 2) * (eqW + eqGap);
+      const by = fy + Math.floor(i / 2) * (46 + eqGap);
       const isSel = selectedEquipment === key;
       ctx.fillStyle = isSel ? 'rgba(68,204,204,0.16)' : 'rgba(0,0,0,0.25)';
       ctx.fillRect(bx, by, eqW, 46);
@@ -2322,7 +2385,7 @@ registerScreen('briefing', {
       ctx.fillText(EQUIPMENT[key].desc, bx + 8, by + 24);
       briefingEquipmentBoxes.push({ x: bx, y: by, w: eqW, h: 46, key });
     }
-    fy += 46 + 22;
+    fy += (46 + eqGap) * 2 + 16;
 
     ctx.textAlign = 'center';
     if (Math.sin(performance.now() / 500) > 0) {
@@ -2364,6 +2427,10 @@ registerScreen('sortie', {
     heli.salvoShots = 0;
     heli.salvoTimer = 0;
     heli.adrenalineT = 0;
+    heli.flareT = 0;
+    applyCareerToHeli(heli, career.pilot, career.hangar, career.gunship);
+    sortieXpEarned = 0;
+    sortieDollarsEarned = 0;
     try {
       initWorld(activeContract);
     } catch (e) {
@@ -2509,6 +2576,15 @@ registerScreen('sortie', {
     let aimAngle;
     if (heli.target) {
       aimAngle = Math.atan2(heli.target.y - heli.y, heli.target.x - heli.x);
+      // Targeting Computer: lead moving targets by projectile flight time.
+      if (heli.autoLead && heli.target.speed > 0) {
+        const t = heli.target;
+        const tvx = Math.cos(t.angle || 0) * t.speed;
+        const tvy = Math.sin(t.angle || 0) * t.speed;
+        const dist = Math.hypot(t.x - heli.x, t.y - heli.y);
+        const tof = dist / heli.bulletSpeed;
+        aimAngle = Math.atan2(t.y + tvy * tof - heli.y, t.x + tvx * tof - heli.x);
+      }
     } else if (input.hasAim) {
       aimAngle = Math.atan2(input.aimY, input.aimX);
     } else if (input.moveX !== 0 || input.moveY !== 0) {
@@ -2521,11 +2597,12 @@ registerScreen('sortie', {
     let diff = aimAngle - heli.angle;
     while (diff > Math.PI) diff -= Math.PI * 2;
     while (diff < -Math.PI) diff += Math.PI * 2;
-    heli.angle += diff * Math.min(1, 3.0 * dt);
+    heli.angle += diff * Math.min(1, 3.0 * (heli.turnMult || 1) * dt);
 
     // ── Movement: speed scales with cursor distance ──
     if (heli.adrenalineT > 0) heli.adrenalineT -= dt;
-    const boost = heli.adrenalineT > 0 ? 1.5 : 1.0;
+    if (heli.flareT > 0) heli.flareT -= dt;
+    const boost = heli.adrenalineT > 0 ? 1 + 0.5 * (heli.boostPotency || 1) : 1.0;
     const accel = heli.accel * boost, drag = 0.91, maxSpeed = heli.maxSpeed * boost;
     const mx = input.moveX, my = input.moveY;
     if (mx !== 0 || my !== 0) {
@@ -2569,11 +2646,21 @@ registerScreen('sortie', {
     const fireRate = heli.fireRate * (heli.adrenalineT > 0 ? 0.6 : 1.0);
     const wantsFire = input.fire || (input.autofire && heli.target);
     if (wantsFire && heli.fireCooldown <= 0) {
+      let aimA = heli.target
+        ? Math.atan2(heli.target.y - heli.y, heli.target.x - heli.x)
+        : heli.angle;
+      // Career ballistics: spread, crit, sniper, marked target, double tap.
+      let dmg = heli.bulletDamage;
       if (heli.target) {
-        const angle = Math.atan2(heli.target.y - heli.y, heli.target.x - heli.x);
-        spawnProjectile(heli.x + Math.cos(angle) * 20, heli.y + Math.sin(angle) * 20, angle, heli.bulletSpeed, heli.bulletDamage);
-      } else {
-        spawnProjectile(heli.x + Math.cos(heli.angle) * 20, heli.y + Math.sin(heli.angle) * 20, heli.angle, heli.bulletSpeed, heli.bulletDamage);
+        const td = Math.hypot(heli.target.x - heli.x, heli.target.y - heli.y);
+        if (heli.sniperBonus && td > 250) dmg *= 1 + heli.sniperBonus;
+        if (heli.markedDmg) dmg *= 1 + heli.markedDmg;
+      }
+      if (Math.random() < (heli.critChance || 0)) dmg *= 2;
+      aimA += (Math.random() - 0.5) * 0.035 * (heli.spreadMult || 1);
+      spawnProjectile(heli.x + Math.cos(aimA) * 20, heli.y + Math.sin(aimA) * 20, aimA, heli.bulletSpeed, Math.round(dmg));
+      if (Math.random() < (heli.doubleTap || 0)) {
+        spawnProjectile(heli.x + Math.cos(aimA + 0.05) * 20, heli.y + Math.sin(aimA + 0.05) * 20, aimA + 0.05, heli.bulletSpeed, Math.round(dmg));
       }
       addHeat(0.08, 'gunfire reported');
       lastShotX = heli.x; lastShotY = heli.y; lastShotT = performance.now() / 1000;
@@ -2587,12 +2674,15 @@ registerScreen('sortie', {
         heli.hp = Math.min(heli.maxHp, heli.hp + 40);
         spawnFloatingText(heli.x, heli.y - 34, '+40 HULL', '#44ff44');
       } else if (heli.equipmentType === 'overboost') {
-        heli.adrenalineT = 6;
+        heli.adrenalineT = 6 * (heli.boostDurMult || 1);
         spawnFloatingText(heli.x, heli.y - 34, 'OVERBOOST', '#44cccc');
       } else if (heli.equipmentType === 'rocket') {
         heli.salvoShots = 6;
         heli.salvoTimer = 0;
         spawnFloatingText(heli.x, heli.y - 34, 'ROCKETS AWAY', '#ff8844');
+      } else if (heli.equipmentType === 'flares') {
+        heli.flareT = 3;
+        spawnFloatingText(heli.x, heli.y - 34, 'FLARES DEPLOYED', '#ffdd66');
       }
     }
     // Rocket salvo: staggered launches at the current target (or facing).
@@ -2962,6 +3052,7 @@ registerScreen('sortie', {
               bossState.defeated = true;
               bossState.active = false;
               sortieState.rewards.hunter += 300;
+              sortieDollarsEarned += 250;
               heli.score += 500;
               addFear(12, 'Hunter destroyed');
               reduceHeat(18, 'Hunter destroyed');
@@ -2984,6 +3075,7 @@ registerScreen('sortie', {
               e.state = 'dead';
               e.deathTimer = 0.5;
               heli.score += e.points;
+              sortieXpEarned += e.points;
               sortieState.stats.kills++;
               // Award fear based on enemy type
               let fearGain = 1;
@@ -3000,17 +3092,32 @@ registerScreen('sortie', {
           }
         }
       } else {
+        // Flares: incoming fire near the helo burns up in the light
+        if (heli.flareT > 0) {
+          if (Math.hypot(p.x - heli.x, p.y - heli.y) < 170) {
+            spawnExplosion(p.x, p.y, 0.15);
+            projectiles.splice(i, 1);
+            continue;
+          }
+        }
         // Enemy bullet → hit helicopter
         if (Math.hypot(heli.x - p.x, heli.y - p.y) < 20) {
-          heli.hp -= p.damage;
+          heli.hp -= Math.max(1, Math.round(p.damage * (1 - (heli.dmgResist || 0))));
           hudAnim.hpFlash = 0.15;
           camera.shake(4, 0.15);
           spawnExplosion(p.x, p.y, 0.2);
           projectiles.splice(i, 1);
           if (heli.hp <= 0) {
-            heli.hp = 0;
-            spawnExplosion(heli.x, heli.y, 3.0);
-            finishSortie('failed');
+            if (heli.lastStand && !heli.lastStandUsed) {
+              heli.lastStandUsed = true;
+              heli.hp = Math.round(heli.maxHp * 0.25);
+              spawnExplosion(heli.x, heli.y, 1.2);
+              spawnFloatingText(heli.x, heli.y - 30, 'LAST STAND', '#ffcc44');
+            } else {
+              heli.hp = 0;
+              spawnExplosion(heli.x, heli.y, 3.0);
+              finishSortie('failed');
+            }
           }
         }
       }
@@ -3181,6 +3288,19 @@ registerScreen('sortie', {
     drawHeliShadow(ctx, heli);
     // Draw helicopter
     drawGunship(ctx, heli);
+    // Flares: bright falling sparks around the airframe
+    if (heli.flareT > 0) {
+      for (let f = 0; f < 5; f++) {
+        const fa = performance.now() / 130 + f * 1.256;
+        const fr = 18 + (f % 3) * 9;
+        const fx = heli.x + Math.cos(fa) * fr;
+        const fy = heli.y + Math.sin(fa) * fr * 0.7 + (performance.now() / 60 + f * 13) % 14;
+        ctx.fillStyle = withAlpha('#ffdd66', 0.85);
+        ctx.beginPath(); ctx.arc(fx, fy, 2.2, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = withAlpha('#ff8833', 0.4);
+        ctx.beginPath(); ctx.arc(fx, fy + 2, 3.4, 0, Math.PI * 2); ctx.fill();
+      }
+    }
 
     // Draw floating texts (CLEAR!, damage numbers)
     for (const ft of floatingTexts) {
@@ -3246,7 +3366,7 @@ registerScreen('sortie', {
       const hpPctV = heli.hp / heli.maxHp;
       if (hpPctV < 0.35) {
         const pulse = 0.75 + 0.25 * Math.sin(performance.now() / 160);
-        const a = (1 - hpPctV / 0.35) * 0.38 * pulse;
+        const a = (1 - hpPctV / 0.35) * 0.38 * pulse * (1 - (heli.redScreenRed || 0));
         const vg = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.32, W / 2, H / 2, Math.max(W, H) * 0.72);
         vg.addColorStop(0, 'rgba(180,20,20,0)');
         vg.addColorStop(1, `rgba(180,20,20,${a.toFixed(3)})`);
@@ -3555,11 +3675,26 @@ registerScreen('sortie', {
         ctx.strokeRect(mx(vb.left), my(vb.top), (vb.right - vb.left) * k, (vb.bottom - vb.top) * k);
       }
 
+      // Awareness: blips outside the pilot's radar detail range dim down.
+      const nowMs = performance.now();
+      if (heli.reconPulse) {
+        if (!heli._nextPulse) heli._nextPulse = nowMs + 30000;
+        if (nowMs > heli._nextPulse) { heli._reconUntil = nowMs + 10000; heli._nextPulse = nowMs + 30000; }
+      }
+      const reconActive = heli._reconUntil > nowMs;
+      const revealR = 1900 * (heli.radarRange || 1);
+      const blipAlpha = (wx, wy) => {
+        if (reconActive || heli.fullSpectrum) return 1;
+        const d = Math.hypot(wx - heli.x, wy - heli.y);
+        return d < revealR ? 1 : 0.25;
+      };
+
       // Sites — shape encodes archetype: dot=rural, square=town,
       // triangle=camp, diamond=base
       for (const s of world.sites) {
         const isObj = world.objective && world.objective.targetSiteId === s.id;
         const col = s.cleared ? '#3f7f3f' : s.discovered ? '#ffcc44' : 'rgba(255,204,68,0.5)';
+        ctx.globalAlpha = blipAlpha(s.x, s.y);
         ctx.fillStyle = col;
         const sx = mx(s.x), sy = my(s.y);
         if (s.archetype === 'town') {
@@ -3586,6 +3721,7 @@ registerScreen('sortie', {
       // Convoys — heading ticks
       for (const c of world.convoys) {
         if (c.destroyed || !c.active) continue;
+        ctx.globalAlpha = blipAlpha(c.x, c.y);
         const cx2 = mx(c.x), cy2 = my(c.y);
         ctx.strokeStyle = '#ff8844';
         ctx.lineWidth = 1.5;
@@ -3593,16 +3729,19 @@ registerScreen('sortie', {
         ctx.moveTo(cx2 - Math.cos(c.angle) * 3, cy2 - Math.sin(c.angle) * 3);
         ctx.lineTo(cx2 + Math.cos(c.angle) * 3, cy2 + Math.sin(c.angle) * 3);
         ctx.stroke();
+        ctx.globalAlpha = 1;
       }
       // Fuel depots (orange diamonds — timer bonuses)
       for (const d of world.fuelDepots || []) {
         if (d.destroyed) continue;
+        ctx.globalAlpha = blipAlpha(d.x, d.y);
         ctx.fillStyle = '#ff8844';
         ctx.save();
         ctx.translate(mx(d.x), my(d.y));
         ctx.rotate(Math.PI / 4);
         ctx.fillRect(-2, -2, 4, 4);
         ctx.restore();
+        ctx.globalAlpha = 1;
       }
       // Extraction = leave the map: highlight the nearest map edge
       if (world.extraction?.active) {
@@ -4228,8 +4367,25 @@ canvas.addEventListener('click', (e) => {
   const w = cam.screenW * cam.dpr;
   const h = cam.screenH * cam.dpr;
 
+  if (currentScreen === screens.hangar) {
+    const r = handleHangarClick(pos.x, pos.y, cam.dpr);
+    if (r === 'back') switchScreen('title');
+    return;
+  }
+  if (currentScreen === screens.pilot) {
+    const r = handlePilotClick(pos.x, pos.y, cam.dpr);
+    if (r === 'back') switchScreen('title');
+    return;
+  }
   if (currentScreen === screens.title) {
-    switchScreen('contracts');
+    for (const box of titleMenuBoxes) {
+      if (pos.x >= box.x * cam.dpr && pos.x <= (box.x + box.w) * cam.dpr &&
+          pos.y >= box.y * cam.dpr && pos.y <= (box.y + box.h) * cam.dpr) {
+        switchScreen(box.target);
+        return;
+      }
+    }
+    return;
   } else if (currentScreen === screens.contracts) {
     for (let i = 0; i < contractBoard.length; i++) {
       const r = contractCardRect(i, w / cam.dpr, h / cam.dpr);
@@ -4261,6 +4417,11 @@ canvas.addEventListener('touchstart', (e) => {
     clientY: touch.clientY,
   }));
 });
+
+career = loadCareer() || createCareer((Math.random() * 0xffffffff) >>> 0);
+metaState.career = career;
+registerScreen('hangar', hangarScreen);
+registerScreen('pilot', pilotScreen);
 
 switchScreen('title');
 console.log('[Gunship] starting loop');
