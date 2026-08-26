@@ -12,7 +12,7 @@ import { cyl25, box25, frustum25 } from './prims25.js';
 import { withAlpha, fillCircle, drawLine, drawTextShadow } from './drawUtil.js';
 import { mulberry32 } from './rng.js';
 import { clamp } from './rng.js';
-import { createNoise, fbm, ridged, duneNoise, windStreaks, voronoi } from './noise.js';
+import { createNoise } from './noise.js';
 import { generateWorld, getBuildingTemplate, getSpeedMod, ARCHETYPES } from './world.js';
 import { createTerrain } from './terrain.js';
 import { drawCornerBrackets, drawBackButton } from './appBridge.js';
@@ -24,6 +24,12 @@ import { hangarScreen, pilotScreen, handleHangarClick, handlePilotClick } from '
 import { createEnemyFromRoster } from './data/enemies.js';
 import { createContractBoard, getDifficulty as getDifficultyProfile, getScenario, getStyle } from './contracts.js';
 import { createUpgradeChoices } from './upgrades.js';
+import { FEAR_THRESHOLDS as _FEAR_THRESHOLDS, HEAT_LABELS as _HEAT_LABELS, EQUIPMENT as _EQUIPMENT, hunterClockRate as _hunterClockRate } from './sim/state.js';
+import { nearestRoadPoint as _nearestRoadPoint, steerAlongRoads as _steerAlongRoads, vehicleSpeedFactor as _vehicleSpeedFactor, pointAlongRoute as _pointAlongRoute, getConvoyMembers as _getConvoyMembers } from './sim/movement.js';
+import { isTargetAlive as _isTargetAlive, objectiveComplete as _objectiveComplete, canExtract as _canExtract, getObjectiveFocus as _getObjectiveFocus, nearestExitPoint as _nearestExitPoint } from './sim/objectives.js';
+import { setTerrain as _setTerrain, drawSmoothTerrain as _drawSmoothTerrain } from './render/terrain.js';
+import { drawRoads as _drawRoads, getMiniRoads as _getMiniRoads } from './render/roads.js';
+import { hudPlate as _hudPlate, plateHeader as _plateHeader, hudBar as _hudBar, drawOffscreenMarker as _drawOffscreenMarker } from './render/hud.js';
 
 const canvas = document.getElementById('game');
 const camera = new WorldCamera(canvas);
@@ -53,12 +59,14 @@ function loop(now) {
     if (settingsOpen && input.abandon && currentScreen === screens.sortie) abandonSortie();
     accumulator += dt;
     let safety = 0;
-    while (accumulator >= SIM_DT && safety < 4) {
+    while (accumulator >= SIM_DT && safety < 8) {
       if (!settingsOpen && !sortieState.levelUpOpen && currentScreen && currentScreen.tick) currentScreen.tick(SIM_DT);
       accumulator -= SIM_DT;
       safety++;
     }
-    accumulator = 0;
+    // Preserve sub-tick remainder for determinism; clamp spiral on long hitches
+    if (accumulator > 0.1) accumulator = 0;
+    accumulator = Math.max(0, accumulator);
     input.consumeOneShots();
     camera.tick(dt);
     camera.clear(camera.ctx, '#1a1a0a');
@@ -92,13 +100,8 @@ let modeToastUntil = 0; // targeting-mode banner expiry (performance.now clock)
 // when gunfire happens near them (or their site's defenders open up).
 let lastShotX = 0, lastShotY = 0, lastShotT = -999;
 
-// ── Equipment — one usable item per sortie, chosen at briefing ────────────
-const EQUIPMENT = {
-  repair:    { name: 'REPAIR PATCH', desc: 'E: +40 hull instantly' },
-  rocket:    { name: 'ROCKET SALVO', desc: 'E: 6 rockets on target' },
-  overboost: { name: 'OVERBOOST',    desc: 'E: +50% spd & fire 6s' },
-  flares:    { name: 'FLARES',       desc: 'E: dissolve nearby fire 3s' },
-};
+// ── Equipment — one usable item per sortie, chosen at briefing (now from sim/state) ────────────
+const EQUIPMENT = _EQUIPMENT;
 let selectedEquipment = 'rocket';
 let briefingEquipmentBoxes = [];
 let briefingBackBox = null;
@@ -107,130 +110,17 @@ let contractsBackBox = null;
 let debriefNextBox = null;
 let debriefPilotBox = null;
 
-// ── Road network queries (vehicles prefer driving on roads) ──
-let _roadSegsCache = null;
-let _miniRoadsCache = null;
-
-function getRoadSegs() {
-  if (_roadSegsCache || !world) return _roadSegsCache;
-  const segs = [];
-  for (const road of world.roads) {
-    for (let i = 0; i < road.points.length - 1; i++) {
-      segs.push({ ax: road.points[i].x, ay: road.points[i].y, bx: road.points[i + 1].x, by: road.points[i + 1].y });
-    }
-  }
-  _roadSegsCache = segs;
-  return segs;
-}
-
-/** Nearest point on the road network within maxDist, else null.
- *  Returns { x, y, ang, dist } where ang is the segment direction. */
-function nearestRoadPoint(x, y, maxDist) {
-  const segs = getRoadSegs();
-  if (!segs || segs.length === 0) return null;
-  let bd = maxDist * maxDist;
-  let best = null;
-  for (const s of segs) {
-    const dx = s.bx - s.ax, dy = s.by - s.ay;
-    const l2 = dx * dx + dy * dy || 1e-6;
-    let t = ((x - s.ax) * dx + (y - s.ay) * dy) / l2;
-    t = t < 0 ? 0 : t > 1 ? 1 : t;
-    const px = s.ax + t * dx, py = s.ay + t * dy;
-    const ddx = x - px, ddy = y - py;
-    const d2 = ddx * ddx + ddy * ddy;
-    if (d2 < bd) {
-      bd = d2;
-      best = { x: px, y: py, ang: Math.atan2(dy, dx), dist: Math.sqrt(d2) };
-    }
-  }
-  return best;
-}
-
-/** Blend a desired heading toward the nearest road so ground vehicles
- *  naturally flow onto and follow the road network. Returns
- *  { angle, dist } — dist lets callers grant an on-road speed bonus. */
-function steerAlongRoads(desiredAngle, x, y) {
-  const rp = nearestRoadPoint(x, y, 320);
-  if (!rp) return { angle: desiredAngle, dist: Infinity };
-  // Pick whichever way along the segment best matches our intent…
-  let roadAng = rp.ang;
-  const diffA = Math.abs(Math.atan2(Math.sin(rp.ang - desiredAngle), Math.cos(rp.ang - desiredAngle)));
-  const diffB = Math.abs(Math.atan2(Math.sin(rp.ang + Math.PI - desiredAngle), Math.cos(rp.ang + Math.PI - desiredAngle)));
-  if (diffB < diffA) roadAng = rp.ang + Math.PI;
-  // …then blend by proximity (full grip within 120u of the centreline).
-  const w = Math.max(0, 1 - rp.dist / 320);
-  let diff = roadAng - desiredAngle;
-  while (diff > Math.PI) diff -= Math.PI * 2;
-  while (diff < -Math.PI) diff += Math.PI * 2;
-  return { angle: desiredAngle + diff * w, dist: rp.dist };
-}
-
-/** Ground speed multiplier by terrain type — vehicles hate soft sand. */
-const TERRAIN_VEHICLE_SPEED = {
-  hardpack: 1.1,
-  sand: 1.0,
-  gravel: 0.95,
-  wadi: 0.9,
-  oasis: 0.7,
-  dunes: 0.6,
-  rock: 0.5,
-};
-
-/** Terrain + road speed factor for a ground vehicle at (x,y). */
-function vehicleSpeedFactor(x, y) {
-  let f = 1.0;
-  if (sharedTerrain) {
-    const ty = sharedTerrain.type(x, y);
-    f *= TERRAIN_VEHICLE_SPEED[ty] || 1.0;
-  }
-  const rp = nearestRoadPoint(x, y, 120);
-  if (rp) f *= 1.2; // on-road bonus: firm surface, known route
-  return f;
-}
-
-// ── Convoy path mechanics ─────────────────────────────────────────────────
-// Convoys are arc-length bound to their route polyline: every member sits at
-// its own distance along the SAME path, so rear trucks trace corners exactly
-// like the lead instead of whipping around its pivot.
-
-/** Position + tangent direction at distance s along a convoy's route. */
-function pointAlongRoute(convoy, s) {
-  const pts = convoy.route, cum = convoy.routeCum;
-  const total = cum[cum.length - 1];
-  s = ((s % total) + total) % total; // wrap
-  // Binary search the segment
-  let lo = 0, hi = cum.length - 1;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if (cum[mid] < s) lo = mid + 1; else hi = mid;
-  }
-  const i = Math.max(0, lo - 1);
-  const segLen = cum[i + 1] - cum[i] || 1e-6;
-  const t = (s - cum[i]) / segLen;
-  const a = pts[i], b = pts[Math.min(i + 1, pts.length - 1)];
-  return {
-    x: a.x + (b.x - a.x) * t,
-    y: a.y + (b.y - a.y) * t,
-    ang: Math.atan2(b.y - a.y, b.x - a.x),
-  };
-}
-
-/** All members of a convoy in world space (lead first). Shared by
- *  rendering, bullet collision and escort fire. */
+// ── Road network queries — delegated to sim/movement (app.js stays thin) ──
+let _roadSegsCache = null; // legacy shim — movement.js owns the real cache
+let _miniRoadsCache = null; // minimap road layer now via render/roads
+function getRoadSegs() { return null; } // shim retained for any legacy callers
+function nearestRoadPoint(x, y, maxDist) { return _nearestRoadPoint(world, x, y, maxDist); }
+function steerAlongRoads(desiredAngle, x, y) { return _steerAlongRoads(world, desiredAngle, x, y); }
+const TERRAIN_VEHICLE_SPEED = { hardpack: 1.1, sand: 1.0, gravel: 0.95, wadi: 0.9, oasis: 0.7, dunes: 0.6, rock: 0.5 };
+function vehicleSpeedFactor(x, y) { return _vehicleSpeedFactor(world, sharedTerrain, x, y); }
 const CONVOY_GAP_VEH = 30, CONVOY_GAP_INF = 17;
-function getConvoyMembers(convoy) {
-  const out = [];
-  let offset = 0;
-  for (let i = 0; i < (convoy.composition || []).length; i++) {
-    const cls = convoy.composition[i];
-    const isVeh = cls === 'technical' || cls === 'apc' || cls === 'shilka' || cls === 'sam';
-    offset += isVeh ? CONVOY_GAP_VEH : CONVOY_GAP_INF;
-    const dirSign = convoy.direction >= 0 ? 1 : -1;
-    const p = pointAlongRoute(convoy, convoy.s - offset * dirSign);
-    out.push({ x: p.x, y: p.y, angle: p.ang + (dirSign < 0 ? Math.PI : 0), isVeh, cls });
-  }
-  return out;
-}
+function pointAlongRoute(convoy, s) { return _pointAlongRoute(convoy, s); }
+function getConvoyMembers(convoy) { return _getConvoyMembers(convoy); }
 
 function toggleSettings() {
   settingsOpen = !settingsOpen;
@@ -286,27 +176,8 @@ const sortieState = {
 };
 
 /** Pre-rendered minimap road layer at a given size (cached per world). */
-function getMiniRoads(S) {
-  if (_miniRoadsCache && _miniRoadsCache.S === S) return _miniRoadsCache.c;
-  const c = document.createElement('canvas');
-  c.width = S; c.height = S;
-  const g = c.getContext('2d');
-  const half = world.worldSize / 2;
-  const k = S / world.worldSize;
-  g.strokeStyle = 'rgba(170,150,95,0.5)';
-  g.lineWidth = 1;
-  for (const road of world.roads) {
-    if (road.points.length < 2) continue;
-    g.beginPath();
-    g.moveTo((road.points[0].x + half) * k, (road.points[0].y + half) * k);
-    for (let i = 1; i < road.points.length; i++) {
-      g.lineTo((road.points[i].x + half) * k, (road.points[i].y + half) * k);
-    }
-    g.stroke();
-  }
-  _miniRoadsCache = { S, c };
-  return c;
-}
+function getMiniRoads(S) { return _getMiniRoads(world, S); }
+// minimap road cache now in render/roads.js
 
 function initWorld(contract = null) {
   const seed = contract?.seed ?? 42;
@@ -317,6 +188,7 @@ function initWorld(contract = null) {
   terrainNoise = createNoise(seed);
   moistureNoise = createNoise(seed + 777);
   detailNoise = createNoise(seed + 333);
+  _setTerrain(sharedTerrain, terrainNoise, moistureNoise, detailNoise);
 }
 
 /** Spawn all outdoor (non-indoor) enemies at sites immediately. */
@@ -351,364 +223,14 @@ function applyEnemyDifficulty(enemy) {
   enemy.damage = Math.max(1, enemy.damage * difficulty.enemyDamageMultiplier);
 }
 
-const BIOME = {
-  sand:      { r: 210, g: 180, b: 130 },  // warmer, less yellow
-  hardpack:  { r: 185, g: 155, b: 110 },  // compacted desert floor
-  rock:      { r: 130, g: 115, b: 90  },  // darker, more grey-brown
-  dunes:     { r: 225, g: 200, b: 145 },  // soft golden
-  gravel:    { r: 155, g: 140, b: 105 },  // grey gravel
-  wetSand:   { r: 165, g: 140, b: 100 },  // damp, muted
-  brightSand:{ r: 235, g: 215, b: 160 },  // sunlit crests
-  oasisGreen:{ r: 84,  g: 128, b: 74  },  // vegetated wet ground
-};
+// ── Terrain rendering — delegated to render/terrain.js ──
+function drawSmoothTerrain(ctx, cam) { return _drawSmoothTerrain(ctx, cam); }
+// BIOME, sampleTerrain, updateTerrainGrid, grain/mottle/macro live in render/terrain.js
+// Call _setTerrain(sharedTerrain, terrainNoise, moistureNoise, detailNoise) after initWorld.
 
-function sampleTerrain(wx, wy) {
-  const detail = 0.005;
-  const windAngle = 0.6; // prevailing wind direction
-
-  // ── Base colour from the shared terrain model (same source as world-gen)
-  let r, g, b;
-  if (sharedTerrain) {
-    const ce = sharedTerrain.typeAndElevation(wx, wy);
-    const ty = ce.type;
-    const e = ce.elevation;
-    const shade = clamp(e / 1600, -0.5, 0.5) * 26; // gentle relief shading
-
-    switch (ty) {
-      case 'wadi': {
-        const t = clamp((e + 120) / 240, 0, 1);
-        r = lerp(BIOME.wetSand.r, BIOME.gravel.r, 1 - t * 0.6) - 8 + shade * 0.4;
-        g = lerp(BIOME.wetSand.g, BIOME.gravel.g, 1 - t * 0.6) - 8 + shade * 0.4;
-        b = lerp(BIOME.wetSand.b, BIOME.gravel.b, 1 - t * 0.6) - 6 + shade * 0.4;
-        break;
-      }
-      case 'oasis': {
-        r = BIOME.oasisGreen.r; g = BIOME.oasisGreen.g; b = BIOME.oasisGreen.b;
-        break;
-      }
-      case 'hardpack': {
-        r = BIOME.hardpack.r + shade * 0.5; g = BIOME.hardpack.g + shade * 0.5; b = BIOME.hardpack.b + shade * 0.5;
-        break;
-      }
-      case 'gravel': {
-        r = BIOME.gravel.r + shade * 0.6; g = BIOME.gravel.g + shade * 0.6; b = BIOME.gravel.b + shade * 0.6;
-        break;
-      }
-      case 'dunes': {
-        const dn = duneNoise(terrainNoise, wx * 0.0005, wy * 0.0005, windAngle, 1.0);
-        const crest = Math.max(0, dn - 0.35) * 2.2;
-        r = lerp(BIOME.dunes.r, BIOME.brightSand.r, crest) + shade * 0.3;
-        g = lerp(BIOME.dunes.g, BIOME.brightSand.g, crest) + shade * 0.3;
-        b = lerp(BIOME.dunes.b, BIOME.brightSand.b, crest) + shade * 0.3;
-        if (dn < -0.15) { const sh = -dn * 40; r -= sh; g -= sh; b -= sh; } // slipface shadow
-        break;
-      }
-      case 'rock': {
-        const rocky = voronoi(terrainNoise, wx, wy, 0.008);
-        const edge = clamp(rocky * 4, 0, 1);
-        r = lerp(BIOME.rock.r, BIOME.rock.r * 0.78, edge) + shade;
-        g = lerp(BIOME.rock.g, BIOME.rock.g * 0.78, edge) + shade;
-        b = lerp(BIOME.rock.b, BIOME.rock.b * 0.78, edge) + shade;
-        break;
-      }
-      default: { // sand — with subtle moisture patches
-        const moist = fbm(moistureNoise, wx * 0.0007, wy * 0.0007, 3, 2.0, 0.5);
-        const m = clamp((moist + 1) / 2, 0, 1);
-        r = lerp(BIOME.sand.r, BIOME.hardpack.r, m * 0.7) + shade * 0.4;
-        g = lerp(BIOME.sand.g, BIOME.hardpack.g, m * 0.7) + shade * 0.4;
-        b = lerp(BIOME.sand.b, BIOME.hardpack.b, m * 0.7) + shade * 0.4;
-      }
-    }
-  } else {
-    // No terrain yet (menu screens never sample this, but stay safe).
-    r = BIOME.sand.r; g = BIOME.sand.g; b = BIOME.sand.b;
-  }
-
-  // ── Detail overlays (unchanged): wind streaks + grain
-  const streaks = windStreaks(detailNoise, wx, wy, windAngle, 0.015);
-  const streakEffect = streaks * 14;
-  r += streakEffect; g += streakEffect * 0.8; b += streakEffect * 0.5;
-
-  const grain = fbm(detailNoise, wx * detail, wy * detail, 3, 2.2, 0.45);
-  const grainVar = grain * 9;
-  r += grainVar; g += grainVar; b += grainVar;
-
-  return {
-    r: Math.max(0, Math.min(255, Math.round(r))),
-    g: Math.max(0, Math.min(255, Math.round(g))),
-    b: Math.max(0, Math.min(255, Math.round(b))),
-  };
-}
-
-
-// ── Smooth terrain rendering ──
-// Terrain is sampled on a coarse grid, then bilinearly blended across the
-// display tiles, so the ground reads as continuous desert instead of blocks.
-
-const TERRAIN_GRID_STEP = 72;   // world units between terrain samples
-let tgX0 = 0, tgY0 = 0, tgCols = 0, tgRows = 0;
-let tgCanvas = null, tgCtx = null;
-
-function updateTerrainGrid(cam) {
-  const b = cam.getVisibleBounds();
-  const x0 = Math.floor(b.left / TERRAIN_GRID_STEP) * TERRAIN_GRID_STEP;
-  const y0 = Math.floor(b.top / TERRAIN_GRID_STEP) * TERRAIN_GRID_STEP;
-  const cols = Math.ceil((b.right - x0) / TERRAIN_GRID_STEP) + 2;
-  const rows = Math.ceil((b.bottom - y0) / TERRAIN_GRID_STEP) + 2;
-
-  if (!tgCanvas || cols !== tgCols || rows !== tgRows || x0 !== tgX0 || y0 !== tgY0) {
-    tgX0 = x0; tgY0 = y0; tgCols = cols; tgRows = rows;
-    if (!tgCanvas) {
-      tgCanvas = document.createElement('canvas');
-      tgCtx = tgCanvas.getContext('2d');
-    }
-    if (tgCanvas.width !== cols || tgCanvas.height !== rows) {
-      tgCanvas.width = cols; tgCanvas.height = rows;
-    }
-    const img = tgCtx.createImageData(cols, rows);
-    const d = img.data;
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        const col = sampleTerrain(x0 + c * TERRAIN_GRID_STEP, y0 + r * TERRAIN_GRID_STEP);
-        const i = (r * cols + c) * 4;
-        d[i] = col.r; d[i + 1] = col.g; d[i + 2] = col.b; d[i + 3] = 255;
-      }
-    }
-    tgCtx.putImageData(img, 0, 0);
-  }
-}
-
-// ── Static world-anchored detail overlays ─────────────────────────────────
-// Procedural tiles generated once per page load. They restore the fine
-// grain and large-scale mottling that sparse terrain sampling smooths
-// away, at zero per-sample cost. Patterns repeat in world space so they
-// never "swim" while scrolling.
-
-/** Draw `fn` nine times on a 3x3 grid so primitives wrap seamlessly
- *  across tile edges — no more clipped blobs / straight seams. */
-function drawTileWrapped(g, S, fn) {
-  for (let ox = -1; ox <= 1; ox++) {
-    for (let oy = -1; oy <= 1; oy++) {
-      g.save();
-      g.translate(ox * S, oy * S);
-      fn();
-      g.restore();
-    }
-  }
-}
-
-let _grainPattern = null;
-function getGrainPattern(ctx) {
-  if (_grainPattern) return _grainPattern;
-  const rng = mulberry32(0x5eed1234);
-  const S = 192;
-  const c = document.createElement('canvas');
-  c.width = c.height = S;
-  const g = c.getContext('2d');
-  // Fine speckle: light and dark grains (edge-wrapped)
-  for (let i = 0; i < 1400; i++) {
-    const x = rng() * S, y = rng() * S;
-    const light = rng() > 0.5;
-    const style = light ? `rgba(255,244,214,${(0.04 + rng() * 0.06).toFixed(3)})`
-                        : `rgba(30,22,10,${(0.05 + rng() * 0.07).toFixed(3)})`;
-    const w = 1 + (rng() > 0.9 ? 1 : 0);
-    drawTileWrapped(g, S, () => { g.fillStyle = style; g.fillRect(x, y, w, 1); });
-  }
-  // Sparse short scratches (wind alignment)
-  g.lineWidth = 1;
-  for (let i = 0; i < 16; i++) {
-    const x = rng() * S, y = rng() * S, l = 6 + rng() * 16, a = 0.55 + (rng() - 0.5) * 0.2;
-    drawTileWrapped(g, S, () => {
-      g.strokeStyle = 'rgba(40,30,15,0.05)';
-      g.beginPath();
-      g.moveTo(x, y);
-      g.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l);
-      g.stroke();
-    });
-  }
-  _grainPattern = ctx.createPattern(c, 'repeat');
-  return _grainPattern;
-}
-
-let _mottlePattern = null;
-function getMottlePattern(ctx) {
-  if (_mottlePattern) return _mottlePattern;
-  const rng = mulberry32(0xB10B8807);
-  const S = 512;
-  const c = document.createElement('canvas');
-  c.width = c.height = S;
-  const g = c.getContext('2d');
-  // Soft tonal blobs — drawn edge-wrapped so gradients cross seams cleanly
-  for (let i = 0; i < 34; i++) {
-    const x = rng() * S, y = rng() * S, r = 40 + rng() * 110;
-    const light = rng() > 0.5;
-    const a = 0.03 + rng() * 0.045;
-    const c0 = light ? `rgba(255,236,190,${a})` : `rgba(60,45,25,${a})`;
-    drawTileWrapped(g, S, () => {
-      const grad = g.createRadialGradient(x, y, 0, x, y, r);
-      grad.addColorStop(0, c0);
-      grad.addColorStop(1, 'rgba(0,0,0,0)');
-      g.fillStyle = grad;
-      g.fillRect(x - r, y - r, r * 2, r * 2);
-    });
-  }
-  _mottlePattern = ctx.createPattern(c, 'repeat');
-  return _mottlePattern;
-}
-
-let _macroPattern = null;
-function getMacroPattern(ctx) {
-  if (_macroPattern) return _macroPattern;
-  const rng = mulberry32(0x4D414352); // 'MACR'
-  const S = 1536;
-  const c = document.createElement('canvas');
-  c.width = c.height = S;
-  const g = c.getContext('2d');
-  // Very large, very faint ground masses — breaks tile repetition
-  for (let i = 0; i < 22; i++) {
-    const x = rng() * S, y = rng() * S, r = 220 + rng() * 420;
-    const light = rng() > 0.5;
-    const a = 0.02 + rng() * 0.03;
-    const c0 = light ? `rgba(255,238,196,${a})` : `rgba(55,42,24,${a})`;
-    drawTileWrapped(g, S, () => {
-      const grad = g.createRadialGradient(x, y, 0, x, y, r);
-      grad.addColorStop(0, c0);
-      grad.addColorStop(1, 'rgba(0,0,0,0)');
-      g.fillStyle = grad;
-      g.fillRect(x - r, y - r, r * 2, r * 2);
-    });
-  }
-  _macroPattern = ctx.createPattern(c, 'repeat');
-  return _macroPattern;
-}
-
-function drawSmoothTerrain(ctx, cam) {
-  updateTerrainGrid(cam);
-
-  // One GPU-scaled blit replaces the per-tile fillRect loop: hardware
-  // bilinear filtering interpolates every screen pixel, eliminating the
-  // block seams entirely.
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(tgCanvas, tgX0, tgY0, tgCols * TERRAIN_GRID_STEP, tgRows * TERRAIN_GRID_STEP);
-
-  // World-anchored detail overlays (seamlessly tileable)
-  const b = cam.getVisibleBounds();
-  const bw = b.right - b.left, bh = b.bottom - b.top;
-  ctx.fillStyle = getMacroPattern(ctx);
-  ctx.fillRect(b.left, b.top, bw, bh);
-  ctx.fillStyle = getMottlePattern(ctx);
-  ctx.fillRect(b.left, b.top, bw, bh);
-  ctx.fillStyle = getGrainPattern(ctx);
-  ctx.fillRect(b.left, b.top, bw, bh);
-}
-
-const ROAD_STYLE = {
-  paved:     { fill: '#7a6a4a', edge: '#5a4a2a', shoulder: 5 },
-  dirt:      { fill: '#9a8a5a', edge: '#6f6038', shoulder: 4 },
-  track:     { fill: '#a89868', edge: '#83744c', shoulder: 3 },
-};
-
-function drawRoads(ctx, cam) {
-  if (!world || world.roads.length === 0) return;
-
-  // Draw small roads first so highways visually own their intersections:
-  // pass order (shoulders → fills → detail) means no dark border ever
-  // cuts across another road's surface.
-  const HIER = { local: 0, secondary: 1, highway: 2 };
-  const vb = cam.getVisibleBounds();
-  const roads = [];
-  for (let i = 0; i < world.roads.length; i++) {
-    const road = world.roads[i];
-    if (road.points.length < 2) continue;
-    // Cheap bbox cull
-    let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
-    for (const p of road.points) {
-      if (p.x < minx) minx = p.x; if (p.x > maxx) maxx = p.x;
-      if (p.y < miny) miny = p.y; if (p.y > maxy) maxy = p.y;
-    }
-    if (maxx < vb.left - 80 || minx > vb.right + 80 || maxy < vb.top - 80 || miny > vb.bottom + 80) continue;
-    roads.push({ road, idx: i, minx, miny, maxx, maxy });
-  }
-  roads.sort((a, b) => (HIER[a.road.hierarchy] || 0) - (HIER[b.road.hierarchy] || 0));
-  if (roads.length === 0) return;
-
-  const tracePoly = (pts) => {
-    ctx.beginPath();
-    ctx.moveTo(pts[0].x, pts[0].y);
-    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-    ctx.stroke();
-  };
-
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-
-  // PASS 1 — shoulders / borders (everything)
-  for (const { road, idx } of roads) {
-    const st = ROAD_STYLE[road.surface] || ROAD_STYLE.dirt;
-    ctx.strokeStyle = st.edge;
-    ctx.lineWidth = road.width + st.shoulder;
-    tracePoly(road.points);
-  }
-
-  // PASS 2 — running surfaces (cover every shoulder crossing)
-  for (const { road, idx } of roads) {
-    const st = ROAD_STYLE[road.surface] || ROAD_STYLE.dirt;
-    // Deterministic per-road tone shift so parallel roads don't look cloned
-    const tone = ((idx * 137) % 11) - 5;
-    ctx.strokeStyle = shadeHex(st.fill, tone);
-    ctx.lineWidth = road.width;
-    tracePoly(road.points);
-  }
-
-  // PASS 3 — surface detail
-  for (const { road } of roads) {
-    const surface = road.surface || 'dirt';
-    if (surface === 'dirt') {
-      // Wheel-worn centre strip
-      ctx.strokeStyle = withAlpha('#000000', 0.05);
-      ctx.lineWidth = road.width * 0.45;
-      ctx.setLineDash([4, 10]);
-      tracePoly(road.points);
-      ctx.setLineDash([]);
-    } else if (surface === 'track') {
-      // Tyre ruts — offset perpendicular to local direction
-      const off = Math.max(1.5, road.width * 0.22);
-      ctx.strokeStyle = withAlpha('#000000', 0.09);
-      ctx.lineWidth = 1.2;
-      for (const side of [-1, 1]) {
-        ctx.beginPath();
-        for (let i = 0; i < road.points.length; i++) {
-          const p = road.points[i];
-          const q = road.points[Math.min(i + 1, road.points.length - 1)];
-          const r = road.points[Math.max(i - 1, 0)];
-          let nx = -(q.y - r.y), ny = q.x - r.x;
-          const l = Math.hypot(nx, ny) || 1;
-          nx = nx / l * off * side; ny = ny / l * off * side;
-          if (i === 0) ctx.moveTo(p.x + nx, p.y + ny);
-          else ctx.lineTo(p.x + nx, p.y + ny);
-        }
-        ctx.stroke();
-      }
-    } else {
-      // Paved centre line
-      ctx.strokeStyle = withAlpha('#ccaa66', 0.32);
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([14, 22]);
-      tracePoly(road.points);
-      ctx.setLineDash([]);
-    }
-  }
-}
-
-/** Lighten/darken a hex colour by amount (-255..255). */
-function shadeHex(hex, amt) {
-  const n = parseInt(hex.slice(1), 16);
-  const r = clamp((n >> 16) + amt, 0, 255);
-  const g = clamp(((n >> 8) & 0xff) + amt, 0, 255);
-  const b = clamp((n & 0xff) + amt, 0, 255);
-  return `rgb(${r},${g},${b})`;
-}
+// ── Roads — delegated to render/roads.js ──
+function drawRoads(ctx, cam) { return _drawRoads(ctx, cam, world); }
+// ROAD_STYLE + shadeHex now live in render/roads.js
 
 function drawSites(ctx, cam) {
   if (!world) return;
@@ -1375,8 +897,8 @@ function applyClearPenalty(village) {
   addHeat(Math.min(12, penalty * 0.35), 'site cleared');
 }
 
-const FEAR_THRESHOLDS = [10, 25, 50, 85, 130, 190, 270, 370, 500, 660];
-const HEAT_LABELS = ['QUIET', 'SUSPICIOUS', 'CONTACT', 'COORDINATED', 'CRITICAL'];
+const FEAR_THRESHOLDS = _FEAR_THRESHOLDS;
+const HEAT_LABELS = _HEAT_LABELS;
 
 function resetSortieState() {
   const difficulty = getDifficultyProfile(activeContract?.difficultyId);
@@ -1477,58 +999,14 @@ function chooseFearUpgrade(index) {
   if (sortieState.pendingLevelUps > 0) openFearUpgrade();
 }
 
-function isTargetAlive(target) {
-  if (!target) return false;
-  if (target === boss) return boss.spawned && boss.state !== 'dead';
-  if (target.state) return target.state !== 'dead';
-  if (target.collected || target.destroyed) return false;
-  return target.hp === undefined || target.hp > 0;
-}
+function isTargetAlive(target) { return _isTargetAlive(world, boss, target); }
 
 /** Semi-transparent backing plate for a HUD cluster, with corner ticks. */
-function hudPlate(ctx, x, y, w, h, accent = 'rgba(90,140,80,0.55)') {
-  ctx.fillStyle = 'rgba(6,12,6,0.62)';
-  ctx.fillRect(x, y, w, h);
-  ctx.strokeStyle = accent;
-  ctx.lineWidth = 1;
-  ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
-  drawCornerBrackets(ctx, x, y, w, h, accent, 7, 1.5);
-}
-
-/** Tiny letterspaced section label inside a plate, with divider. */
-function plateHeader(ctx, px, py, pw, title, accent = P.ui.textDim) {
-  ctx.font = 'bold 8px "Courier New", monospace';
-  ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-  ctx.fillStyle = accent;
-  ctx.fillText(title, px + 10, py + 5);
-  ctx.strokeStyle = 'rgba(90,140,80,0.30)';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(px + 10 + ctx.measureText(title).width + 8, py + 9);
-  ctx.lineTo(px + pw - 10, py + 9);
-  ctx.stroke();
-}
-
-/** Animated status bar: smooth chase, segment ticks, optional flash. */
-function hudBar(ctx, x, y, w, h, frac, col, opts = {}) {
-  const shown = opts.shown ?? frac; // pre-lerped by caller
-  ctx.fillStyle = 'rgba(10,16,10,0.9)';
-  ctx.fillRect(x, y, w, h);
-  if (shown > 0) {
-    ctx.fillStyle = col;
-    ctx.fillRect(x, y, w * clamp(shown, 0, 1), h);
-  }
-  // Segment ticks every 25%
-  ctx.fillStyle = 'rgba(0,0,0,0.45)';
-  for (let i = 1; i < 4; i++) ctx.fillRect(x + (w * i / 4) - 0.5, y, 1, h);
-  ctx.strokeStyle = opts.border || 'rgba(90,110,80,0.7)';
-  ctx.lineWidth = 1;
-  ctx.strokeRect(x - 0.5, y - 0.5, w + 1, h + 1);
-  if (opts.flash > 0) {
-    ctx.fillStyle = `rgba(255,255,255,${Math.min(0.55, opts.flash * 3)})`;
-    ctx.fillRect(x, y, w * clamp(frac, 0, 1), h);
-  }
-}
+function hudPlate(ctx, x, y, w, h, accent = 'rgba(90,140,80,0.55)') { return _hudPlate(ctx, x, y, w, h, accent); }
+function plateHeader(ctx, px, py, pw, title, accent = P.ui.textDim) { return _plateHeader(ctx, px, py, pw, title, accent); }
+function hudBar(ctx, x, y, w, h, frac, col, opts = {}) { return _hudBar(ctx, x, y, w, h, frac, col, opts); }
+function drawOffscreenMarker(ctx, cam, w, h, wx, wy, color, textColor, tag, uiScale = 1) { return _drawOffscreenMarker(ctx, cam, w, h, wx, wy, color, textColor, tag, uiScale); }
+// hud primitives now in render/hud.js
 
 // Per-sortie HUD animation state (smooth bar chase + hit flash).
 const hudAnim = { hp: 100, fear: 0, heat: 0, hpFlash: 0 };
@@ -1538,74 +1016,7 @@ function posInBox(pos, box, dpr) {
          pos.y >= box.y * dpr && pos.y <= (box.y + box.h) * dpr;
 }
 
-
-/** Off-screen direction marker: pulsing chevron clamped to the screen edge,
- *  pointing at a world position, with distance (+optional tag) readout. */
-function drawOffscreenMarker(ctx, cam, w, h, wx, wy, color, textColor, tag, uiScale = 1) {
-  const s = cam.worldToScreen(wx, wy);
-  // worldToScreen returns unscaled screen px; convert to HUD-logical space.
-  s.x /= uiScale;
-  s.y /= uiScale;
-  const marginX = 46, marginTop = 70;
-  if (s.x >= marginX && s.x <= w - marginX && s.y >= marginTop && s.y <= h - 60) return false;
-
-  const cx = w / 2, cyy = h / 2;
-  let dx = s.x - cx, dy = s.y - cyy;
-  if (dx === 0 && dy === 0) dy = -1;
-  const scale = Math.min(
-    (w / 2 - marginX) / Math.abs(dx || 1e-6),
-    (h / 2 - marginTop) / Math.abs(dy || 1e-6)
-  );
-  const ax = cx + dx * scale;
-  const ay = cyy + dy * scale;
-  const ang = Math.atan2(dy, dx);
-  const pulse = 1 + Math.sin(performance.now() / 200) * 0.1;
-  ctx.save();
-  ctx.translate(ax, ay);
-  ctx.rotate(ang);
-  ctx.scale(pulse, pulse);
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.moveTo(15, 0);
-  ctx.lineTo(-9, -10);
-  ctx.lineTo(-4, 0);
-  ctx.lineTo(-9, 10);
-  ctx.closePath();
-  ctx.fill();
-  ctx.restore();
-
-  const distKm = (Math.hypot(cam.x - wx, cam.y - wy) / 1000).toFixed(1);
-  const label = tag ? `${tag} · ${distKm} km` : `${distKm} km`;
-  ctx.fillStyle = textColor;
-  ctx.font = 'bold 10px "Courier New", monospace';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(label, ax - Math.cos(ang) * 30, ay - Math.sin(ang) * 30);
-  return true;
-}
-
-/** World-space position the player should navigate to for the active
- *  contract. Covers every scenario type:
- *    strike/sabotage/recovery -> objective building/crate
- *    intercept               -> live convoy position
- *    suppression             -> nearest surviving air-defense unit        */
-function getObjectiveFocus() {
-  const obj = world?.objective;
-  if (!obj) return null;
-  if (obj.type === 'suppression') {
-    let best = null, bestD = Infinity;
-    for (const e of enemies) {
-      if (!e.objectiveTarget || e.state === 'dead') continue;
-      const d = Math.hypot(e.x - heli.x, e.y - heli.y);
-      if (d < bestD) { bestD = d; best = e; }
-    }
-    return best ? { x: best.x, y: best.y } : null;
-  }
-  const t = obj.target;
-  if (!t || !isTargetAlive(t) || t === boss) return null;
-  // Moving targets (convoys) update their x/y as they drive.
-  return { x: t.x, y: t.y };
-}
+function getObjectiveFocus() { return _getObjectiveFocus(world, boss, enemies, heli); }
 function damageWorldTarget(target, damage, x, y) {
   if (!isTargetAlive(target) || target.hp === undefined) return false;
 
@@ -1820,16 +1231,7 @@ function updateExtraction(dt) {
 }
 
 /** Nearest boundary exit from the helicopter, with compass cardinal. */
-function nearestExitPoint() {
-  const lim = WORLD_SIZE * 0.48;
-  const dL = heli.x + lim, dR = lim - heli.x;
-  const dT = heli.y + lim, dB = lim - heli.y;
-  const m = Math.min(dL, dR, dT, dB);
-  let x = clamp(heli.x, -lim, lim), y = clamp(heli.y, -lim, lim);
-  if (m === dL) x = -lim; else if (m === dR) x = lim; else if (m === dT) y = -lim; else y = lim;
-  const card = m === dT ? 'N' : m === dR ? 'E' : m === dB ? 'S' : 'W';
-  return { x, y, card };
-}
+function nearestExitPoint() { return _nearestExitPoint(heli); }
 
 function finishSortie(status) {
   if (sortieState.status !== 'active') return;
@@ -1873,12 +1275,7 @@ function updateHeat(dt) {
   if (sortieState.heat.eventTimer > 0) sortieState.heat.eventTimer -= dt;
 }
 
-function hunterClockRate() {
-  const difficulty = getDifficultyProfile(activeContract?.difficultyId);
-  const style = getStyle(activeContract?.styleId);
-  const heatFactor = 0.72 + sortieState.heat.value / 100 * 1.18;
-  return heatFactor * difficulty.hunterEtaMultiplier * (style.hunterRateMultiplier || 1);
-}
+function hunterClockRate() { return _hunterClockRate(sortieState, activeContract); }
 
 // ══════════════════════════════════════════════════════════════
 //  SCREENS
@@ -2506,6 +1903,7 @@ registerScreen('sortie', {
       terrainNoise = createNoise(seed);
       moistureNoise = createNoise(seed + 777);
       detailNoise = createNoise(seed + 333);
+      _setTerrain(null, terrainNoise, moistureNoise, detailNoise);
     }
     if (world) {
       for (const v of world.sites) {
@@ -4432,7 +3830,6 @@ canvas.addEventListener('click', (e) => {
   const cam = camera;
   const w = cam.screenW * cam.dpr;
   const h = cam.screenH * cam.dpr;
-
   if (currentScreen === screens.hangar) {
     const r = handleHangarClick(pos.x, pos.y, cam.dpr);
     if (r === 'back') switchScreen(metaReturnScreen);
@@ -4453,15 +3850,6 @@ canvas.addEventListener('click', (e) => {
       }
     }
     return;
-  } else if (currentScreen === screens.contracts) {
-    for (let i = 0; i < contractBoard.length; i++) {
-      const r = contractCardRect(i, w / cam.dpr, h / cam.dpr);
-      const scaled = { x: r.x * cam.dpr, y: r.y * cam.dpr, w: r.w * cam.dpr, h: r.h * cam.dpr };
-      if (pointInRect(pos.x, pos.y, scaled)) {
-        switchScreen('briefing', contractBoard[i]);
-        break;
-      }
-    }
   } else if (currentScreen === screens.contracts) {
     if (posInBox(pos, contractsBackBox, cam.dpr)) { switchScreen('title'); return; }
     for (let i = 0; i < contractBoard.length; i++) {

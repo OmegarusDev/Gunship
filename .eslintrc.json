@@ -1,0 +1,22 @@
+{
+  "env": {
+    "browser": true,
+    "es2022": true,
+    "node": true
+  },
+  "parserOptions": {
+    "ecmaVersion": 2022,
+    "sourceType": "module"
+  },
+  "extends": ["eslint:recommended"],
+  "rules": {
+    "no-unused-vars": ["warn", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_", "caughtErrors": "none" }],
+    "no-undef": "error",
+    "no-redeclare": "error",
+    "no-dupe-else-if": "error",
+    "no-duplicate-imports": "warn",
+    "prefer-const": "warn",
+    "no-var": "warn"
+  },
+  "ignorePatterns": ["node_modules/"]
+}

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const suites = ['meta-check.mjs', 'sortie-smoke.mjs'];
+const suites = ['lint.mjs', 'meta-check.mjs', 'sortie-smoke.mjs'];
 
 let failed = false;
 for (const s of suites) {

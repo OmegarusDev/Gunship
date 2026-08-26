@@ -56,19 +56,25 @@ export const HUD = {
   narrowBreakpoint: 720,     // W below this = stacked HUD layout
 };
 
+/**
+ * Hunter ETA — live timer. Base time is scaled by difficulty/style/heat via
+ * hunterClockRate() in sim/state.js. Some GDD fields are legacy (jammer etc.)
+ * and kept for save compat but not wired to gameplay yet.
+ */
 export const TIMER = {
-  baseTime: 180,
-  jammerBonus: 60,
-  maxJammerLevel: 3,
-  clearPenalties: { rural: 15, town: 30, camp: 20, base: 45 },
-  fuelTankBonus: 20,
-  fuelTankerBonus: 10,
-  commandBuildingBonus: 30,
-  radarTowerBonus: 30,
-  bossSpawnDistance: 80,
-  bossWarningTime: 5,
+  baseTime: 180, // live — multiplied by difficulty.hunterEtaMultiplier & heatFactor
+  jammerBonus: 60, // legacy — jammer meta upgrade not yet implemented
+  maxJammerLevel: 3, // legacy
+  clearPenalties: { rural: 15, town: 30, camp: 20, base: 45 }, // legacy — now drives Heat, not direct timer
+  fuelTankBonus: 20, // live — fuel depot chain explosion extends timer
+  fuelTankerBonus: 10, // legacy — tanker subtype not separately spawned
+  commandBuildingBonus: 30, // legacy — now merged into objective flow
+  radarTowerBonus: 30, // legacy — radar disable reduces Heat instead
+  bossSpawnDistance: 80, // legacy — Hunter now spawns via world-size ratio
+  bossWarningTime: 5, // live — seconds of INCOMING warning
 };
 
+/** @deprecated — use FEAR_THRESHOLDS in sim/state.js. Kept for reference; values mirror live thresholds. */
 export const INFAMY = [
   { level: 0, threshold: 0 },
   { level: 1, threshold: 10 },

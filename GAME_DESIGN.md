@@ -253,78 +253,54 @@ Certain structures have a reddish tint to distinguish them:
 ## 4. TECHNICAL ARCHITECTURE
 
 ### 4.1 Project Structure
+
+> **Note (2026-08 SHIPPED vs GDD):** The tree below is the *aspirational* GDD v2. The *shipped* tree follows it. Where they differ, code is truth.
+
+**Aspirational (GDD v2):**
 ```
 gunship/
   index.html
-  css/
-    main.css
+  css/main.css
   js/
-    app.js                   # Bootstrap, screen routing, game loop
-    config.js                # All tunable constants
-    rng.js                   # mulberry32 PRNG, seeded streams
-    input.js                 # Touch/mouse/keyboard abstraction
-    camera.js                # World camera, scroll, zoom, follow
-    view25.js                # Faux-3D projection (adapted from TD)
-    prims25.js               # 2.5D drawing primitives
-    drawUtil.js              # shade(), withAlpha(), matsFrom(), hash21()
-    fx.js                    # Particle/VFX system
-    palette.js               # Procedural color palettes
-    terrain.js               # Terrain chunk generation + rendering
-    settlements.js           # Settlement archetype generation
-    buildings.js             # Building procedural rendering
-    entities.js              # Entity factory
-    helicopter.js            # Helicopter physics, movement, rendering
-    gunships.js              # Gunship definitions, stats, upgrade trees
-    enemies.js               # Enemy AI, types, behaviors
-    projectiles.js           # Projectile system
-    combat.js                # Damage calculation, hit detection
-    infamy.js                # Infamy meter, level-up system
-    boss.js                  # Boss entity, AI, spawning, combat
-    signal.js                # Boss timer / threat system
-    pilots.js                # Pilot generation, stats, leveling, respec
-    pilotSkills.js           # Pilot skill grid (5 branches x 6 nodes)
-    equipment.js             # Equipment definitions, usage, cooldowns
-    modifiers.js             # Run modifier selection + application
-    rewards.js               # Settlement clear rewards, chest system
-    loot.js                  # Loot drop tables, spawning
-    minimap.js               # Expandable military radar minimap
-    hud.js                   # Contextual HUD elements
-    lore.js                  # Settlement names, radio chatter, flavor text
-    save.js                  # localStorage save/load
-    screens/
-      title.js               # Main menu
-      briefing.js            # Pre-sortie briefing
-      hangar.js              # Meta-progression gunship upgrades
-      pilotRecord.js         # Pilot skill grid + respec
-      sortieSummary.js       # End-of-sortie summary
-      infamyLevelUp.js       # Infamy level-up card selection popup
-    data/
-      gunships.js            # Gunship definitions
-      weapons.js             # Weapon upgrade pool
-      enemies.js             # Enemy type definitions
-      bosses.js              # Boss type definitions
-      settlements.js         # Settlement archetype rules
-      buildings.js           # Building type definitions
-      pilotSkills.js         # Pilot skill grid
-      pilotNames.js          # Name pools for pilot generation
-      equipment.js           # Equipment definitions
-      modifiers.js           # Run modifier definitions
-      loot.js                # Loot tables
-      lore.js                # Chatter lines, settlement name parts
-      balance.js             # ALL balance numbers centralized
+    app.js, config.js, rng.js, input.js, camera.js, view25.js, prims25.js, drawUtil.js,
+    fx.js, palette.js, terrain.js, settlements.js, buildings.js, entities.js, helicopter.js,
+    gunships.js, enemies.js, projectiles.js, combat.js, infamy.js, boss.js, signal.js,
+    pilots.js, pilotSkills.js, equipment.js, modifiers.js, rewards.js, loot.js, minimap.js,
+    hud.js, lore.js, save.js
+    screens/title.js, briefing.js, hangar.js, pilotRecord.js, sortieSummary.js, infamyLevelUp.js
+    data/...
+    sim/world.js, sim.js, systems/movement.js, combat.js, ai.js, boss.js, signal.js, ...
+```
+
+**Shipped (2026-08) — actual filesystem:**
+```
+gunship/
+  index.html
+  css/main.css
+  js/
+    app.js                   # Bootstrap, screen router, loop (now delegates to sim/render)
+    config.js                # Tunables + TIMER/INFAMY (some fields legacy, see §11)
+    rng.js, noise.js, input.js, camera.js, view25.js, prims25.js, drawUtil.js, palette.js
+    terrain.js               # SSOT desert model (dip→wadis→oases)
+    world.js                 # Roads (A* MST), sites, convoys, decorations
+    contracts.js             # Scenario×Style×Difficulty orthogonal contracts
+    meta.js                  # Career, pilot, skill grid, hangar, persistence
+    upgrades.js              # Fear field-upgrade cards (8)
+    data/enemies.js          # Class→loadout resolution
+    screens_meta.js          # Hangar + Pilot Record canvas screens
+    appBridge.js             # Shared corner-bracket / back-button helpers
     sim/
-      world.js               # World state, chunk management
-      sim.js                 # Fixed-timestep simulation tick
-      systems/
-        movement.js          # Entity movement (physics, collision)
-        combat.js            # Combat resolution, damage application
-        ai.js                # Enemy AI behavior ticks
-        projectiles.js       # Projectile movement + hit detection
-        boss.js              # Boss AI tick, spawn logic
-        signal.js            # Timer countdown, threshold checks
-        infamy.js            # Infamy gain, level-up trigger
-        equipment.js         # Equipment cooldown management
-        loot.js              # Loot drop spawning
+      state.js               # SimState factories + FEAR/HEAT constants + hunterClockRate
+      movement.js            # Road-aware steering, terrain speed, convoy arc-length
+      objectives.js          # isTargetAlive, objectiveComplete, canExtract, focus
+    render/
+      terrain.js             # GPU-blitted terrain grid + grain/mottle/macro overlays
+      roads.js               # Hierarchy-aware road overdraw + minimap cache
+      hud.js                 # hudPlate, plateHeader, hudBar, offscreen markers
+  tools/
+    check.mjs                # Gate: lint + meta-check + sortie-smoke
+    lint.mjs                 # Zero-dep syntax + invariants + optional eslint
+    meta-check.mjs, sortie-smoke.mjs
 ```
 
 ### 4.2 Game Loop
@@ -1480,6 +1456,10 @@ BOSS_TIMER = {
 }
 ```
 
+> **Shipped (2026-08):** Timer is now `Hunter ETA` driven by `hunterClockRate()` in `js/sim/state.js`:
+> `clockRate = (0.72 + heat/100*1.18) * difficulty.hunterEtaMultiplier * style.hunterRateMultiplier`
+> `timeRemaining -= dt * clockRate`. `baseTime` and `fuelTankBonus` are live; `clearPenalties` now feed Heat (see `js/app.js:applyClearPenalty`) not direct subtraction. Jammer/radar bonuses are legacy (not wired). `bossWarningTime 5s` unchanged. `TIMER` table in `js/config.js` is annotated legacy/live.
+
 ### 11.3 Boss Spawning
 
 ```javascript
@@ -1703,6 +1683,9 @@ INFAMY_LEVELS = [
 
 // KEY TENSION: Infamy = stronger weapon upgrades BUT stronger boss
 ```
+
+> **Shipped (2026-08):** Infamy is now split into **Fear** (field upgrades) and **Heat** (Hunter ETA). Thresholds are identical to `FEAR_THRESHOLDS` in `js/sim/state.js:1` and `INFAMY` alias in `js/config.js:72` (deprecated). Fear levels show `FEAR GROWS` overlay with 3 cards from `js/upgrades.js:5` (AP_ROUNDS etc., 8 cards). Heat tiers (`QUIET…CRITICAL`) scale aggro `COMBAT.aggroPerHeatTier` and `hunterClockRate`. The tension is preserved: more Fear = stronger gun, more Heat = faster Hunter.
+
 
 ### 12.4 Level-Up Flow
 

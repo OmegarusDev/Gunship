@@ -37,7 +37,7 @@ your persistent career.
 
 ## Development
 
-It's a static site — no build step.
+It's a static site — no build step (ES modules, zero runtime deps).
 
 ```bash
 # from the repo root
@@ -45,11 +45,26 @@ python3 -m http.server 8000
 # then open http://localhost:8000
 ```
 
-Run the headless verification gate:
+Run the verification gate (lint + meta + sortie smoke):
 
 ```bash
 node tools/check.mjs
+# or individually:
+node tools/lint.mjs
+node tools/meta-check.mjs
+node tools/sortie-smoke.mjs
 ```
+
+With dev deps installed, you also get `eslint` + `prettier`:
+
+```bash
+npm install
+npm run lint          # eslint + node --check
+npm run format        # prettier
+npm run check         # same as node tools/check.mjs
+```
+
+**Code layout:** `js/app.js` is the thin bootstrap/loop; sim logic lives in `js/sim/` (`state.js`, `movement.js`, `objectives.js`), world-gen in `js/terrain.js` + `js/world.js`, rendering in `js/render/` (`terrain.js`, `roads.js`, `hud.js`), career in `js/meta.js`.
 
 ## Design
 

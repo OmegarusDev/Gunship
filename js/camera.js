@@ -70,14 +70,16 @@ export class WorldCamera {
     this.shakeDuration = duration;
   }
 
-  /** Update camera (call once per sim tick). */
+  /** Update camera (call once per frame, dt in seconds). */
   tick(dt) {
-    // Smooth follow
-    this.x = lerp(this.x, this.targetX, CAMERA.lerpSpeed);
-    this.y = lerp(this.y, this.targetY, CAMERA.lerpSpeed);
+    // Frame-rate-independent exponential smoothing.
+    // At dt = 1/60, t equals the legacy lerpSpeed so feel is preserved.
+    const followT = 1 - Math.pow(1 - CAMERA.lerpSpeed, dt * 60);
+    const zoomT = 1 - Math.pow(1 - CAMERA.zoomLerp, dt * 60);
+    this.x = lerp(this.x, this.targetX, followT);
+    this.y = lerp(this.y, this.targetY, zoomT);
 
-    // Smooth zoom
-    this.zoom = lerp(this.zoom, this.targetZoom, CAMERA.zoomLerp);
+    this.zoom = lerp(this.zoom, this.targetZoom, zoomT);
 
     // Screen shake
     if (this.shakeDuration > 0) {
