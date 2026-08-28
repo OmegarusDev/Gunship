@@ -10,7 +10,9 @@
     "lint:eslint": "eslint js --ext .js,.mjs",
     "format": "prettier --write \"**/*.{js,mjs,json,css,md}\"",
     "format:check": "prettier --check \"**/*.{js,mjs,json,css,md}\"",
-    "dev": "python3 -m http.server 8000"
+    "dev": "python3 -m http.server 8000",
+    "prepare": "git config core.hooksPath .githooks || true",
+    "test": "node tools/check.mjs"
   },
   "devDependencies": {
     "eslint": "^8.57.0",

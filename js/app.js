@@ -312,7 +312,9 @@ function checkSettlementClear(settlement) {
       if (arch && ARCHETYPES[arch.archetype]) {
         const range = ARCHETYPES[arch.archetype].dollars;
         sortieDollarsEarned += Math.floor(range[0] + Math.random() * (range[1] - range[0]));
+        GameState.setSortieDollars(sortieDollarsEarned);
         sortieXpEarned += 30;
+        GameState.setSortieXp(sortieXpEarned);
       }
       floatingTexts.push({
         x: settlement.x,
@@ -566,7 +568,9 @@ function damageWorldTarget(target, damage, x, y) {
       // burning tailings drop salvage.
       heli.score += 150;
       sortieXpEarned += 40;
+      GameState.setSortieXp(sortieXpEarned);
       sortieDollarsEarned += 60;
+      GameState.setSortieDollars(sortieDollarsEarned);
       addFear(3, 'convoy ambushed');
       spawnFloatingText(target.x, target.y - 30, 'CONVOY DESTROYED', '#aaff88');
       spawnFloatingText(target.x, target.y - 48, '+150', '#ffcc44');
@@ -1262,6 +1266,7 @@ registerScreen('contracts', {
   enter() {
     const seed = (mulberry32(Date.now())() * 0xffffffff) >>> 0;
     contractBoard = createContractBoard(seed, { act: 1, sortie: 1 });
+    GameState.setContractBoard(contractBoard);
   },
   draw(ctx, cam) {
     const w = cam.screenW;
@@ -1384,6 +1389,7 @@ registerScreen('briefing', {
 registerScreen('sortie', {
   enter(contract) {
     activeContract = contract || activeContract;
+    GameState.setActiveContract(activeContract);
     resetSortieState();
     enemies.length = 0;
     projectiles.length = 0;
@@ -2042,6 +2048,7 @@ registerScreen('sortie', {
               bossState.active = false;
               sortieState.rewards.hunter += 300;
               sortieDollarsEarned += 250;
+              GameState.setSortieDollars(sortieDollarsEarned);
               heli.score += 500;
               addFear(12, 'Hunter destroyed');
               reduceHeat(18, 'Hunter destroyed');
@@ -2065,6 +2072,7 @@ registerScreen('sortie', {
               e.deathTimer = 0.5;
               heli.score += e.points;
               sortieXpEarned += e.points;
+              GameState.setSortieXp(sortieXpEarned);
               sortieState.stats.kills++;
               // Award fear based on enemy type
               let fearGain = 1;

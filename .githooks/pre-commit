@@ -1,0 +1,8 @@
+#!/bin/sh
+# Run verification gate before commit
+echo "Running verification gate..."
+node tools/check.mjs
+if [ $? -ne 0 ]; then
+  echo "❌ Gate failed — commit aborted. Fix lint/meta/sortie checks first."
+  exit 1
+fi
