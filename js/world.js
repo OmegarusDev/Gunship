@@ -1849,6 +1849,44 @@ export function generateWorld(input) {
   // ground, scatter) — then the road network connects them across terrain.
   const sites = generateSites(seed, [], worldSize, terrain);
   const roads = generateRoads(seed + 7, worldSize, terrain, sites);
+  // Street-graph post-process for WORLD_GEN_VERSION 2 (feature/streets)
+  const version = context.worldGenVersion ?? WORLD_GEN_VERSION;
+  if (version === 2) {
+    for (const site of sites) {
+      const siteSeed = (seed + site.x * 0.1 + site.y * 0.1 + site.id.charCodeAt(0)) >>> 0;
+      const sg = generateStreetsForSite(site, roads, siteSeed);
+      if (!sg || !sg.edges.length) continue;
+      // Add street edges to world roads as local hierarchy
+      for (const e of sg.edges) {
+        const an = sg.nodes.find(n => n.id === e.a);
+        const bn = sg.nodes.find(n => n.id === e.b);
+        if (!an || !bn) continue;
+        roads.push({
+          points: [{ x: an.x, y: an.y }, { x: bn.x, y: bn.y }],
+          width: e.width,
+          surface: e.kind === 'alley' ? 'track' : e.kind === 'perimeter' ? 'dirt' : 'dirt',
+          hierarchy: 'local',
+        });
+      }
+      // Replace buildings with street-based footprints
+      const bbox = sg.bbox;
+      const buildingCount = site.buildings.length;
+      const parcels = subdivideParcels(sg, bbox, buildingCount, siteSeed + 1);
+      const footprints = footprintsFromParcels(parcels, site.archetype, siteSeed + 2);
+      // Keep same count, but replace positions/types
+      site.buildings = footprints.map((f, i) => ({
+        x: f.x,
+        y: f.y,
+        type: f.type,
+        polygon: f.polygon,
+        doorDir: f.doorDir,
+        parcelId: f.parcelId,
+      }));
+      // Store street graph for debugging/rendering
+      site.streetGraph = sg;
+      site.parcels = parcels;
+    }
+  }
   const decorations = generateDecorations(seed, worldSize, roads, sites, terrain);
   const convoys = generateConvoys(seed, roads, sites, worldSize);
 

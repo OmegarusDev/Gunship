@@ -9,7 +9,7 @@ export const CHUNK_SIZE = 32;
 export const CHUNKS_PER_AXIS = Math.ceil(WORLD_SIZE / CHUNK_SIZE);
 
 /** World-gen version — safe fork for the streets rebuild. 1 = blobs-on-roads (prototype, main), 2 = streets form settlements (feature/streets). */
-export const WORLD_GEN_VERSION = 1;
+export const WORLD_GEN_VERSION = 2;
 
 export const PITCH_DEG = 24;
 
