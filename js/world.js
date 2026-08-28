@@ -4,10 +4,13 @@
  * Villages are first-class objects with archetypes and enemy garrisons.
  */
 
-import { WORLD_SIZE } from './config.js';
+import { WORLD_SIZE, WORLD_GEN_VERSION } from './config.js';
 import { getDifficulty, getScenario, getStyle } from './contracts.js';
 import { mulberry32, randInt, randFloat, pick, clamp, weightedPick } from './rng.js';
 import { createTerrain } from './terrain.js';
+// Street-graph stubs for feature/streets (flag-gated, no effect on main)
+import { generateStreetsForSite } from './world/streets.js';
+import { subdivideParcels, footprintsFromParcels } from './world/parcels.js';
 
 // ══════════════════════════════════════════════════════════════
 //  SURFACE TYPES — affects ground vehicle speed
@@ -797,7 +800,13 @@ export function classToEnemyType(className) {
 //  VILLAGE GENERATION — with archetypes and enemy rosters
 // ══════════════════════════════════════════════════════════════
 
-export function generateSites(seed, roads, worldSize, terrain) {
+export function generateSites(seed, roads, worldSize, terrain, opts = {}) {
+  const version = opts.worldGenVersion ?? WORLD_GEN_VERSION;
+  // Safe fork: v2 is the streets rebuild (feature/streets). Stubbed on this branch so main stays playable.
+  if (version === 2) {
+    void generateStreetsForSite; void subdivideParcels; void footprintsFromParcels;
+    // TODO(feature/streets): return generateStreetsSites(seed, roads, worldSize, terrain);
+  }
   const rng = mulberry32(seed + 1000);
   const sites = [];
 

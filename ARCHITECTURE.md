@@ -91,6 +91,17 @@ tools/
 - **Shared state.** Mutate `GameState.world`/`heli`/`boss`/`sortieState` via setters or the imported object (`heli.x = ...` is fine — same object). Don't duplicate `let world` elsewhere.
 - **Render caches.** `render/terrain.js` (`tgCanvas`, grain/mottle/macro), `render/roads.js` (`WeakMap` roadCache, `_miniRoadsCache`), `render/world.js` (`setWorldState`) own their caches — call `setTerrain`/`setWorldState`/`setBoss` before drawing.
 
+## Streets — next architectural draft (feature/streets, safe fork)
+
+`main` stays at `WORLD_GEN=1` (current blobs-on-roads, playable). `feature/streets` builds `WORLD_GEN=2` behind a flag so the prototype is never destroyed. See `docs/STREETS_SPEC.md` for the full spec.
+
+**Method (fork, not destroy):**
+- Branch `feature/streets` off `6c9e1d2`. All street work there; `main` stays deployable.
+- Flag `WORLD_GEN_VERSION` in `js/config.js` (default `1` on `main`, `2` on the feature branch). `js/world.js:generateSites` dispatches: `if (v===2) return generateStreetsSites(...)` else `generateLegacySites(...)` (current body verbatim).
+- Parallel impl in `js/world/streets.js` + `parcels.js` — `js/world.js` only gains the dispatch. `Site.buildings` shape (`{x,y,type}`) is unchanged so `js/render/*` and `js/sim/*` see no break. New streets are appended to `world.roads` as `local` so `steerAlongRoads` already makes vehicles follow them.
+- Tests run both versions: `tools/sortie-smoke.mjs` will loop `WORLD_GEN 1/2` × 3 seeds × 5 scenarios and assert determinism + “every building inside its parcel, every parcel touches a street”.
+- Merge when `node tools/check.mjs` passes and a manual `http://localhost:8000` fly-through reads as streets (town grid, camp perimeter). Flip default to `2` and merge via PR.
+
 ## Rebuilding notes
 
 - **Add a gunship:** add entry in `meta.js` `HANGAR_SLOTS` and `createCareer` `unlocked`, plus rendering in `render/entities.js` `drawGunship` if you want a new silhouette.
