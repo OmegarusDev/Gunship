@@ -138,8 +138,9 @@ export class WorldCamera {
   /** Check if world position is visible (with margin). */
   isVisible(wx, wy, margin = 64) {
     const b = this.getVisibleBounds();
-    return wx > b.left - margin && wx < b.right + margin &&
-           wy > b.top - margin && wy < b.bottom + margin;
+    return (
+      wx > b.left - margin && wx < b.right + margin && wy > b.top - margin && wy < b.bottom + margin
+    );
   }
 
   /** Clear canvas with background color. */

@@ -38,7 +38,7 @@ export function hash21(x, y) {
   let n = Math.imul(x | 0, 374761393) + Math.imul(y | 0, 668265263);
   n = (n ^ (n >>> 13)) | 0;
   n = Math.imul(n, 1274126177);
-  return ((n ^ (n >>> 16)) >>> 0) / 4294967295 * 2 - 1;
+  return (((n ^ (n >>> 16)) >>> 0) / 4294967295) * 2 - 1;
 }
 
 /** Rounded rectangle path. */

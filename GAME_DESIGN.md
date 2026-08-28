@@ -31,6 +31,7 @@
 20. [Balance Formulas](#20-balance-formulas)
 
 **Appendices:**
+
 - A. [Architecture Decisions Log](#appendix-a-architecture-decisions-log)
 - B. [Enemy Type Dossier (Unified)](#appendix-b-enemy-type-dossier)
 - C. [Save Data Schema](#appendix-c-save-data-schema)
@@ -40,9 +41,11 @@
 ## 1. GAME OVERVIEW
 
 ### 1.1 Core Concept
+
 A 2D top-down/isometric roguelite helicopter combat game. The player pilots attack helicopters for the Coalition for Democratic Liberation (CDL), conducting deep-penetration operations in a fictional desert country. The game hybridizes **Desert Strike** (open-world helicopter combat), **Vampire Survivors** (auto-fire, Infamy-based weapon evolution), and **Roguelite** (permadeath per pilot, permanent meta-progression).
 
 ### 1.2 Platform
+
 - **Target:** Web (mobile + desktop)
 - **Rendering:** 2D Canvas (faux-3D projection, no WebGL)
 - **Orientation:** Portrait-first on mobile, landscape equally supported, desktop reactive
@@ -50,21 +53,24 @@ A 2D top-down/isometric roguelite helicopter combat game. The player pilots atta
 - **Assets:** Zero external assets. All graphics procedurally generated via Canvas primitives.
 
 ### 1.3 Campaign Structure
+
 - **4 Acts** per campaign
 - **4 Sorties per Act** (3 normal Sorties + 1 Stronghold act boss)
 - **16 Sorties total** per campaign
 - **Prestige loop** after beating the final boss (Act 4, Sortie 16)
 
 ### 1.4 Gunship Progression
-| Act | Gunship | Unlock Condition |
-|-----|---------|-----------------|
-| Act 1 | AH-1 Cobra | Default (start game) |
-| Act 2 | AH-1W SuperCobra | Reach Act 2 |
-| Act 3 | AH-64 Apache | Reach Act 3 |
-| Act 4 | AH-64D Longbow | Reach Act 4 |
-| Post-game | RAH-66 Comanche | Beat final boss (prestige reward) |
+
+| Act       | Gunship          | Unlock Condition                  |
+| --------- | ---------------- | --------------------------------- |
+| Act 1     | AH-1 Cobra       | Default (start game)              |
+| Act 2     | AH-1W SuperCobra | Reach Act 2                       |
+| Act 3     | AH-64 Apache     | Reach Act 3                       |
+| Act 4     | AH-64D Longbow   | Reach Act 4                       |
+| Post-game | RAH-66 Comanche  | Beat final boss (prestige reward) |
 
 ### 1.5 Key Design Pillars
+
 1. **Zero assets** — everything procedurally generated on 2D canvas
 2. **Data-driven entities** — adding content = adding data entries, no new classes
 3. **Risk/reward** — clearing settlements makes boss come faster but gives loot
@@ -116,6 +122,7 @@ A 2D top-down/isometric roguelite helicopter combat game. The player pilots atta
 ```
 
 ### 2.1 Sortie Structure
+
 - Each Sortie = one procedurally generated world
 - World exists until the player dies OR defeats the boss
 - Boss arrives after a timer (base time + modifiers)
@@ -159,7 +166,7 @@ BOSS_TIMER = {
 
   bossSpawnDistance: 80,
   bossWarningTime: 5,
-}
+};
 ```
 
 ---
@@ -167,6 +174,7 @@ BOSS_TIMER = {
 ## 3. LORE & TONE
 
 ### 3.1 The Coalition for Democratic Liberation (CDL)
+
 **Callsign:** "Guardian Angel"
 **Self-image:** We're bringing freedom. Democracy. Stability.
 **Reality:** We're leveling entire neighborhoods to "neutralize threats."
@@ -174,6 +182,7 @@ BOSS_TIMER = {
 The CDL is a coalition of advanced military powers who genuinely believe their intervention is justified. Their propaganda is immaculate. Every destroyed building was a "terrorist stronghold." Every killed enemy was a "confirmed hostile." Their pilots are young, idealistic, and completely bought in.
 
 **The sardonic frame:** The player IS the villain, but the game never explicitly tells you. The evidence is environmental:
+
 - Settlements you clear have no weapons in many of them
 - "Confirmed hostiles" who were fleeing (the unarmed enemy type)
 - The Infamy mechanic — the locals are afraid of YOU
@@ -181,8 +190,10 @@ The CDL is a coalition of advanced military powers who genuinely believe their i
 - Post-sortie summaries using sanitized military language
 
 ### 3.2 The Crescent (Al-Hilal)
+
 **Meaning:** "The Crescent" — a reference to the region's cultural identity
 **Reality:** Not one unified group. Disparate local militias.
+
 - Some are genuinely defending their homes (self-defense force)
 - Some are the actual terrorists the CDL claims to fight
 - The CDL can't tell the difference (or doesn't care)
@@ -191,9 +202,11 @@ The CDL is a coalition of advanced military powers who genuinely believe their i
 **The dark truth:** The Crescent started as a legitimate self-defense force against foreign occupation. Some factions turned to terrorism. The CDL uses the terrorists as justification to occupy everything.
 
 ### 3.3 Environmental Storytelling (Radio Chatter)
+
 Text pop-ups that appear at key moments. Zero assets, pure flavor.
 
 **On discovering a settlement:**
+
 ```
 "SECTOR 7: Al-Hilal checkpoint. Radio chatter: 'They're coming. Hold position.'"
 "SECTOR 12: Abandoned village. Signs of recent habitation. Evacuated 72 hours ago."
@@ -202,6 +215,7 @@ Text pop-ups that appear at key moments. Zero assets, pure flavor.
 ```
 
 **On clearing a settlement:**
+
 ```
 "Area secured. Freedom index updated. No civilian casualties reported."
 "Hostile resistance neutralized. Local threat level: REDUCED."
@@ -210,6 +224,7 @@ Text pop-ups that appear at key moments. Zero assets, pure flavor.
 ```
 
 **On approaching boss:**
+
 ```
 "INCOMING: Heavy armored vehicle detected. Direction: [compass bearing]."
 "Command, we have a bogey. Large. Tank-class. Moving to intercept."
@@ -217,6 +232,7 @@ Text pop-ups that appear at key moments. Zero assets, pure flavor.
 ```
 
 **On pilot death:**
+
 ```
 "Pilot KIA. Sector [X] has been liberated."
 "Guardian Angel [name] completed their mission. Freedom prevails."
@@ -224,18 +240,20 @@ Text pop-ups that appear at key moments. Zero assets, pure flavor.
 ```
 
 ### 3.4 Settlement Naming
+
 Arabic-sounding procedural names. Generated from syllable combinations:
 
 ```javascript
 SYLLABLES = {
   prefix: ['al', 'bi', 'kha', 'sha', 'mal', 'dar', 'kar', 'bur', 'suk', 'qal'],
-  root:   ['am', 'ir', 'an', 'id', 'uk', 'ur', 'is', 'ah', 'un', 'at'],
+  root: ['am', 'ir', 'an', 'id', 'uk', 'ur', 'is', 'ah', 'un', 'at'],
   suffix: ['abad', 'istan', 'iya', 'ani', 'pur', 'garh', 'abad', 'iyya'],
-}
+};
 // Generate: prefix + root + suffix = "al-amabad", "kar-irani", "suk-istan"
 ```
 
 Settlement TYPE labels:
+
 - Rural: "hamlet", "settlement", "outpost"
 - Town: "town", "district", "quarter"
 - Camp: "camp", "bivouac", "position"
@@ -243,7 +261,9 @@ Settlement TYPE labels:
 - Fuel Depot: "depot", "fuel point", "storage"
 
 ### 3.5 High-Priority Targets
+
 Certain structures have a reddish tint to distinguish them:
+
 - **Command buildings** (destroying them +30s to boss timer)
 - **Radar towers** (destroying them +30s to boss timer)
 - These are "high-value targets" — the player learns to recognize them visually
@@ -254,9 +274,10 @@ Certain structures have a reddish tint to distinguish them:
 
 ### 4.1 Project Structure
 
-> **Note (2026-08 SHIPPED vs GDD):** The tree below is the *aspirational* GDD v2. The *shipped* tree follows it. Where they differ, code is truth.
+> **Note (2026-08 SHIPPED vs GDD):** The tree below is the _aspirational_ GDD v2. The _shipped_ tree follows it. Where they differ, code is truth.
 
 **Aspirational (GDD v2):**
+
 ```
 gunship/
   index.html
@@ -273,6 +294,7 @@ gunship/
 ```
 
 **Shipped (2026-08) — actual filesystem:**
+
 ```
 gunship/
   index.html
@@ -391,8 +413,10 @@ function createEntity(type, x, y, overrides = {}) {
   if (!template) throw new Error(`Unknown entity type: ${type}`);
   return {
     ...template,
-    x, y,
-    vx: 0, vy: 0,
+    x,
+    y,
+    vx: 0,
+    vy: 0,
     id: nextId++,
     type,
     ...overrides,
@@ -429,9 +453,9 @@ function clampToWorld(entity) {
 
 COLLISION_SHAPES = {
   helicopter: { type: 'circle', radius: 8 },
-  infantry:   { type: 'circle', radius: 4 },
-  vehicle:    { type: 'aabb', width: 16, height: 20 },
-  building:   { type: 'aabb', width: null, height: null }, // per-building
+  infantry: { type: 'circle', radius: 4 },
+  vehicle: { type: 'aabb', width: 16, height: 20 },
+  building: { type: 'aabb', width: null, height: null }, // per-building
   projectile: { type: 'circle', radius: 2 },
 };
 ```
@@ -472,11 +496,7 @@ const SETTLEMENT_DETECTION_RADIUS = 80; // tiles
 
 function onSettlementDiscovered(settlement, player, difficulty) {
   settlement.discovered = true;
-  settlement.enemies = generateEnemyRoster(
-    settlement.archetype,
-    difficulty,
-    player.infamyLevel
-  );
+  settlement.enemies = generateEnemyRoster(settlement.archetype, difficulty, player.infamyLevel);
 }
 ```
 
@@ -515,23 +535,23 @@ const VIEW25 = {
 ### 5.2 Drawing Primitives (from Tower Defence)
 
 ```javascript
-cyl25(ctx, camera, params)       // Cylinder (helicopter body, buildings)
-box25(ctx, camera, params)       // Box with 3 visible faces (vehicles)
-frustum25(ctx, camera, params)   // Tapered cylinder (turrets)
-diamondPrism25(ctx, camera, params) // Diamond prism (tents)
-ring25(ctx, camera, params)      // Ground-plane ring (craters)
-vz(s, k)                         // Vertical measure scaled by pitch factor
+cyl25(ctx, camera, params); // Cylinder (helicopter body, buildings)
+box25(ctx, camera, params); // Box with 3 visible faces (vehicles)
+frustum25(ctx, camera, params); // Tapered cylinder (turrets)
+diamondPrism25(ctx, camera, params); // Diamond prism (tents)
+ring25(ctx, camera, params); // Ground-plane ring (craters)
+vz(s, k); // Vertical measure scaled by pitch factor
 ```
 
 ### 5.3 Color/Material System (from Tower Defence)
 
 ```javascript
-shade(hex, amount)        // Brighten (+) or darken (-) hex color
-withAlpha(hex, a)         // Convert hex to rgba string
-matsFrom(col)             // Returns { top, topHi, side, sideDark, sideDeep, rim, accent }
-hash21(x, y)              // Deterministic noise per tile
-roundRect(ctx, x, y, w, h, r) // Rounded rectangle path
-facePoly(ctx, points)     // Polygon from point array
+shade(hex, amount); // Brighten (+) or darken (-) hex color
+withAlpha(hex, a); // Convert hex to rgba string
+matsFrom(col); // Returns { top, topHi, side, sideDark, sideDeep, rim, accent }
+hash21(x, y); // Deterministic noise per tile
+roundRect(ctx, x, y, w, h, r); // Rounded rectangle path
+facePoly(ctx, points); // Polygon from point array
 ```
 
 ### 5.4 Particle/VFX System (from Tower Defence)
@@ -612,13 +632,13 @@ const CHUNKS_PER_AXIS = Math.ceil(WORLD_SIZE / CHUNK_SIZE); // ~16
 
 ```javascript
 const TERRAIN = {
-  SAND:     { id: 0, color: '#d4a76a', speedMod: 1.0 },
+  SAND: { id: 0, color: '#d4a76a', speedMod: 1.0 },
   HARDPACK: { id: 1, color: '#c4975a', speedMod: 1.0 },
-  ROCK:     { id: 2, color: '#8b7355', speedMod: 0.8 },
-  ROAD:     { id: 3, color: '#6b5b4a', speedMod: 1.3 },
-  WADI:     { id: 4, color: '#7a9bb5', speedMod: 0.5 },
-  OASIS:    { id: 5, color: '#4a8b5a', speedMod: 0.7 },
-  DUNES:    { id: 6, color: '#e8c88a', speedMod: 0.6 },
+  ROCK: { id: 2, color: '#8b7355', speedMod: 0.8 },
+  ROAD: { id: 3, color: '#6b5b4a', speedMod: 1.3 },
+  WADI: { id: 4, color: '#7a9bb5', speedMod: 0.5 },
+  OASIS: { id: 5, color: '#4a8b5a', speedMod: 0.7 },
+  DUNES: { id: 6, color: '#e8c88a', speedMod: 0.6 },
 };
 ```
 
@@ -668,8 +688,13 @@ ARCHETYPES = {
     enemyCount: [10, 40],
     enemyComposition: { unarmed: 0.5, rifleman: 0.35, rocketeer: 0.15 },
     buildingTypes: ['house', 'shop', 'market', 'mosque', 'apartment'],
-    layoutRules: { spacing: [1, 2], organic: false, roads: true, clustering: 0.6,
-      coreBuilding: ['mosque', 'market'] },
+    layoutRules: {
+      spacing: [1, 2],
+      organic: false,
+      roads: true,
+      clustering: 0.6,
+      coreBuilding: ['mosque', 'market'],
+    },
     fearReward: [20, 60],
     dollarReward: [50, 200],
     clearBonus: [10, 25],
@@ -681,8 +706,13 @@ ARCHETYPES = {
     enemyCount: [5, 15],
     enemyComposition: { unarmed: 0, rifleman: 0.6, rocketeer: 0.4 },
     buildingTypes: ['tent', 'commandTent', 'watchtower', 'vehicleBay', 'sandbagWall'],
-    layoutRules: { spacing: [1, 2], organic: false, roads: false,
-      perimeter: true, center: 'commandTent' },
+    layoutRules: {
+      spacing: [1, 2],
+      organic: false,
+      roads: false,
+      perimeter: true,
+      center: 'commandTent',
+    },
     fearReward: [15, 40],
     dollarReward: [30, 120],
     clearBonus: [8, 15],
@@ -692,12 +722,31 @@ ARCHETYPES = {
     name: 'Military Base',
     buildingCount: [8, 30],
     enemyCount: [20, 80],
-    enemyComposition: { unarmed: 0, rifleman: 0.4, rocketeer: 0.3, technical: 0.15,
-      aa_gun: 0.1, artillery: 0.05 },
-    buildingTypes: ['bunker', 'commandCenter', 'barracks', 'hangar', 'ammoDump',
-      'radarDish', 'motorPool'],
-    layoutRules: { spacing: [1, 1], organic: false, roads: true, perimeter: true,
-      grid: true, gate: true },
+    enemyComposition: {
+      unarmed: 0,
+      rifleman: 0.4,
+      rocketeer: 0.3,
+      technical: 0.15,
+      aa_gun: 0.1,
+      artillery: 0.05,
+    },
+    buildingTypes: [
+      'bunker',
+      'commandCenter',
+      'barracks',
+      'hangar',
+      'ammoDump',
+      'radarDish',
+      'motorPool',
+    ],
+    layoutRules: {
+      spacing: [1, 1],
+      organic: false,
+      roads: true,
+      perimeter: true,
+      grid: true,
+      gate: true,
+    },
     fearReward: [40, 120],
     dollarReward: [100, 500],
     clearBonus: [20, 50],
@@ -715,42 +764,69 @@ ARCHETYPES = {
     clearBonus: [5, 12],
     specialMechanic: 'fuelDepot',
   },
-}
+};
 ```
 
 ### 7.2 Building Definitions
 
 ```javascript
 BUILDINGS = {
-  hovel:        { width: 2, height: 2, hp: 10, destructible: true },
-  mosque:       { width: 4, height: 4, hp: 30, destructible: true },
-  fuelTank:     { width: 2, height: 2, hp: 15, destructible: true, explosive: true,
-                  explosionRadius: 60, explosionDamage: 50, onDeath: 'extendBossTimer' },
-  watchtower:   { width: 1, height: 1, hp: 20, destructible: true, spawnsEnemy: 'rocketeer' },
-  commandCenter:{ width: 3, height: 3, hp: 40, destructible: true, highPriority: true,
-                  timerBonus: 30 },
-  radarDish:    { width: 2, height: 2, hp: 25, destructible: true, highPriority: true,
-                  timerBonus: 30 },
-  bunker:       { width: 3, height: 3, hp: 60, destructible: true },
-  barracks:     { width: 4, height: 3, hp: 35, destructible: true },
-  hangar:       { width: 5, height: 4, hp: 45, destructible: true },
-  ammoDump:     { width: 2, height: 2, hp: 20, destructible: true, explosive: true,
-                  explosionRadius: 80, explosionDamage: 80 },
-  tent:         { width: 2, height: 2, hp: 8, destructible: true },
-  commandTent:  { width: 3, height: 3, hp: 15, destructible: true, highPriority: true },
-  sandbagWall:  { width: 1, height: 1, hp: 25, destructible: true },
-  motorPool:    { width: 4, height: 3, hp: 30, destructible: true },
-  storageShed:  { width: 2, height: 2, hp: 12, destructible: true },
-  pipeNetwork:  { width: 1, height: 1, hp: 8, destructible: true },
-  vehicleBay:   { width: 3, height: 3, hp: 20, destructible: true },
-  house:        { width: 2, height: 2, hp: 15, destructible: true },
-  shop:         { width: 2, height: 2, hp: 12, destructible: true },
-  market:       { width: 3, height: 3, hp: 20, destructible: true },
-  apartment:    { width: 3, height: 4, hp: 30, destructible: true },
-  well:         { width: 1, height: 1, hp: 10, destructible: true },
-  pen:          { width: 2, height: 2, hp: 5, destructible: true },
-  shed:         { width: 1, height: 1, hp: 8, destructible: true },
-}
+  hovel: { width: 2, height: 2, hp: 10, destructible: true },
+  mosque: { width: 4, height: 4, hp: 30, destructible: true },
+  fuelTank: {
+    width: 2,
+    height: 2,
+    hp: 15,
+    destructible: true,
+    explosive: true,
+    explosionRadius: 60,
+    explosionDamage: 50,
+    onDeath: 'extendBossTimer',
+  },
+  watchtower: { width: 1, height: 1, hp: 20, destructible: true, spawnsEnemy: 'rocketeer' },
+  commandCenter: {
+    width: 3,
+    height: 3,
+    hp: 40,
+    destructible: true,
+    highPriority: true,
+    timerBonus: 30,
+  },
+  radarDish: {
+    width: 2,
+    height: 2,
+    hp: 25,
+    destructible: true,
+    highPriority: true,
+    timerBonus: 30,
+  },
+  bunker: { width: 3, height: 3, hp: 60, destructible: true },
+  barracks: { width: 4, height: 3, hp: 35, destructible: true },
+  hangar: { width: 5, height: 4, hp: 45, destructible: true },
+  ammoDump: {
+    width: 2,
+    height: 2,
+    hp: 20,
+    destructible: true,
+    explosive: true,
+    explosionRadius: 80,
+    explosionDamage: 80,
+  },
+  tent: { width: 2, height: 2, hp: 8, destructible: true },
+  commandTent: { width: 3, height: 3, hp: 15, destructible: true, highPriority: true },
+  sandbagWall: { width: 1, height: 1, hp: 25, destructible: true },
+  motorPool: { width: 4, height: 3, hp: 30, destructible: true },
+  storageShed: { width: 2, height: 2, hp: 12, destructible: true },
+  pipeNetwork: { width: 1, height: 1, hp: 8, destructible: true },
+  vehicleBay: { width: 3, height: 3, hp: 20, destructible: true },
+  house: { width: 2, height: 2, hp: 15, destructible: true },
+  shop: { width: 2, height: 2, hp: 12, destructible: true },
+  market: { width: 3, height: 3, hp: 20, destructible: true },
+  apartment: { width: 3, height: 4, hp: 30, destructible: true },
+  well: { width: 1, height: 1, hp: 10, destructible: true },
+  pen: { width: 2, height: 2, hp: 5, destructible: true },
+  shed: { width: 1, height: 1, hp: 8, destructible: true },
+};
 ```
 
 ### 7.3 Settlement Placement Algorithm
@@ -798,13 +874,13 @@ Pass 2: Fill
 
 5 real historical gunships. Each is an objective upgrade over the previous. Higher-tier gunships are plainly superior in every way when fully upgraded.
 
-| # | Gunship | Year | Unlock | Role |
-|---|---------|------|--------|------|
-| 1 | AH-1 Cobra | 1967 | Start game | Light attack — fast, agile, limited weapons |
-| 2 | AH-1W SuperCobra | 1986 | Reach Act 2 | Medium attack — twin engines, more hardpoints |
-| 3 | AH-64 Apache | 1986 | Reach Act 3 | Heavy attack — chain gun, Hellfire, devastating |
-| 4 | AH-64D Longbow | 1997 | Reach Act 4 | Advanced attack — mast-mounted radar, fire-and-forget |
-| 5 | RAH-66 Comanche | 1996 | Beat final boss | Stealth — experimental, cutting-edge, ultimate gunship |
+| #   | Gunship          | Year | Unlock          | Role                                                   |
+| --- | ---------------- | ---- | --------------- | ------------------------------------------------------ |
+| 1   | AH-1 Cobra       | 1967 | Start game      | Light attack — fast, agile, limited weapons            |
+| 2   | AH-1W SuperCobra | 1986 | Reach Act 2     | Medium attack — twin engines, more hardpoints          |
+| 3   | AH-64 Apache     | 1986 | Reach Act 3     | Heavy attack — chain gun, Hellfire, devastating        |
+| 4   | AH-64D Longbow   | 1997 | Reach Act 4     | Advanced attack — mast-mounted radar, fire-and-forget  |
+| 5   | RAH-66 Comanche  | 1996 | Beat final boss | Stealth — experimental, cutting-edge, ultimate gunship |
 
 ### 8.2 Gunship Base Stats
 
@@ -813,12 +889,14 @@ GUNSHIPS = {
   cobra: {
     name: 'AH-1 Cobra',
     year: 1967,
-    description: 'Light attack helicopter. First purpose-built gunship. Fast and agile but lightly armed.',
+    description:
+      'Light attack helicopter. First purpose-built gunship. Fast and agile but lightly armed.',
     stats: {
-      hp: 150, maxHp: 150,
+      hp: 150,
+      maxHp: 150,
       speed: 260,
-      handling: 1.1,       // turn rate multiplier
-      armor: 1.0,          // damage multiplier received (lower = better)
+      handling: 1.1, // turn rate multiplier
+      armor: 1.0, // damage multiplier received (lower = better)
       weaponSlots: 1,
       rocketCapacity: 8,
     },
@@ -830,7 +908,8 @@ GUNSHIPS = {
     year: 1986,
     description: 'Medium attack helicopter. Twin engines, more weapons, more armor.',
     stats: {
-      hp: 220, maxHp: 220,
+      hp: 220,
+      maxHp: 220,
       speed: 240,
       handling: 1.0,
       armor: 0.9,
@@ -845,7 +924,8 @@ GUNSHIPS = {
     year: 1986,
     description: 'Heavy attack helicopter. The definitive modern gunship. Chain gun + Hellfire.',
     stats: {
-      hp: 300, maxHp: 300,
+      hp: 300,
+      maxHp: 300,
       speed: 220,
       handling: 0.9,
       armor: 0.8,
@@ -860,7 +940,8 @@ GUNSHIPS = {
     year: 1997,
     description: 'Apache with mast-mounted radar. Fire-and-forget Hellfire missiles.',
     stats: {
-      hp: 320, maxHp: 320,
+      hp: 320,
+      maxHp: 320,
       speed: 215,
       handling: 0.9,
       armor: 0.75,
@@ -875,7 +956,8 @@ GUNSHIPS = {
     year: 1996,
     description: 'Stealth reconnaissance/attack helicopter. The ultimate gunship.',
     stats: {
-      hp: 280, maxHp: 280,
+      hp: 280,
+      maxHp: 280,
       speed: 280,
       handling: 1.2,
       armor: 0.7,
@@ -884,7 +966,7 @@ GUNSHIPS = {
     },
     // Rendering: stealth faceted body, internal weapons bay, 5-blade bearingless rotor
   },
-}
+};
 ```
 
 ### 8.3 Gunship Upgrade Trees
@@ -897,46 +979,46 @@ COBRA_UPGRADES = {
   engine: {
     name: 'Engine',
     levels: [
-      { cost: 100, effect: { speed: +10, handling: +0.02 } },   // Turbine
-      { cost: 250, effect: { speed: +20, handling: +0.05 } },   // Upgraded Turbine
-    ]
+      { cost: 100, effect: { speed: +10, handling: +0.02 } }, // Turbine
+      { cost: 250, effect: { speed: +20, handling: +0.05 } }, // Upgraded Turbine
+    ],
   },
   armor: {
     name: 'Armor',
     levels: [
-      { cost: 150, effect: { hp: +20, armor: -0.05 } },        // Skid Plates
-      { cost: 350, effect: { hp: +40, armor: -0.10 } },        // Ballistic Armor
-    ]
+      { cost: 150, effect: { hp: +20, armor: -0.05 } }, // Skid Plates
+      { cost: 350, effect: { hp: +40, armor: -0.1 } }, // Ballistic Armor
+    ],
   },
   weaponMount: {
     name: 'Weapon Mount',
     levels: [
-      { cost: 200, effect: { weaponSlots: +1 } },              // Pod Rail
-      { cost: 500, effect: { weaponSlots: +1 } },              // Dual Rail
-    ]
+      { cost: 200, effect: { weaponSlots: +1 } }, // Pod Rail
+      { cost: 500, effect: { weaponSlots: +1 } }, // Dual Rail
+    ],
   },
   rotor: {
     name: 'Rotor',
     levels: [
-      { cost: 120, effect: { handling: +0.05 } },              // 2-Blade Improved
-      { cost: 300, effect: { handling: +0.10 } },              // 4-Blade Retrofit
-    ]
+      { cost: 120, effect: { handling: +0.05 } }, // 2-Blade Improved
+      { cost: 300, effect: { handling: +0.1 } }, // 4-Blade Retrofit
+    ],
   },
   fuel: {
     name: 'Fuel Tank',
     levels: [
-      { cost: 100, effect: { /* extends boss timer bonus */ } }, // Standard
-      { cost: 250, effect: { /* extends boss timer bonus */ } }, // Extended
-    ]
+      { cost: 100, effect: {/* extends boss timer bonus */} }, // Standard
+      { cost: 250, effect: {/* extends boss timer bonus */} }, // Extended
+    ],
   },
   countermeasures: {
     name: 'Countermeasures',
     levels: [
-      { cost: 200, effect: { /* flare capacity +1 */ } },       // Flare Dispenser
-      { cost: 500, effect: { /* flare capacity +2 */ } },       // Advanced CM
-    ]
+      { cost: 200, effect: {/* flare capacity +1 */} }, // Flare Dispenser
+      { cost: 500, effect: {/* flare capacity +2 */} }, // Advanced CM
+    ],
   },
-}
+};
 
 // SuperCobra adds: Twin Engine slot
 // Apache adds: Chain Gun Upgrade slot
@@ -991,7 +1073,7 @@ Through Infamy upgrades, it evolves into something devastating.
 ```javascript
 weaponState = {
   damage: 10,
-  fireRate: 3,           // shots per second
+  fireRate: 3, // shots per second
   bulletSpeed: 400,
   burstCount: 1,
   burstDelay: 0.06,
@@ -1012,7 +1094,7 @@ weaponState = {
   ricochet: false,
   ricochetCount: 0,
   appliedUpgrades: new Set(),
-}
+};
 ```
 
 ### 9.3 Weapon Upgrade Pool
@@ -1020,29 +1102,149 @@ weaponState = {
 ```javascript
 WEAPON_UPGRADES = {
   // === TIER 1 (Common) ===
-  damage_up:        { name: 'AP Rounds',       desc: '+25% damage',                    tier: 1, apply: w => w.damage *= 1.25 },
-  fire_rate_up:     { name: 'Rapid Fire',       desc: '+20% fire rate',                tier: 1, apply: w => w.fireRate *= 1.20 },
-  burst_2:          { name: 'Double Tap',       desc: 'Fire 2 rounds in burst',        tier: 1, apply: w => { w.burstCount = 2; w.burstDelay = 0.05; } },
-  double_barrel:    { name: 'Dual Barrel',      desc: '2 barrels side-by-side',        tier: 1, apply: w => w.barrels += 1 },
-  spread_narrow:    { name: 'Tight Spread',     desc: 'Narrower spread',               tier: 1, apply: w => w.spreadAngle *= 0.6 },
-  spread_wide:      { name: 'Wide Spread',      desc: 'Wider spread, more coverage',   tier: 1, apply: w => { w.spreadAngle *= 1.5; w.damage *= 0.85; } },
-  pierce_1:         { name: 'Armor Piercing',   desc: 'Bullets pierce 1 enemy',         tier: 1, apply: w => w.pierce += 1 },
+  damage_up: { name: 'AP Rounds', desc: '+25% damage', tier: 1, apply: (w) => (w.damage *= 1.25) },
+  fire_rate_up: {
+    name: 'Rapid Fire',
+    desc: '+20% fire rate',
+    tier: 1,
+    apply: (w) => (w.fireRate *= 1.2),
+  },
+  burst_2: {
+    name: 'Double Tap',
+    desc: 'Fire 2 rounds in burst',
+    tier: 1,
+    apply: (w) => {
+      w.burstCount = 2;
+      w.burstDelay = 0.05;
+    },
+  },
+  double_barrel: {
+    name: 'Dual Barrel',
+    desc: '2 barrels side-by-side',
+    tier: 1,
+    apply: (w) => (w.barrels += 1),
+  },
+  spread_narrow: {
+    name: 'Tight Spread',
+    desc: 'Narrower spread',
+    tier: 1,
+    apply: (w) => (w.spreadAngle *= 0.6),
+  },
+  spread_wide: {
+    name: 'Wide Spread',
+    desc: 'Wider spread, more coverage',
+    tier: 1,
+    apply: (w) => {
+      w.spreadAngle *= 1.5;
+      w.damage *= 0.85;
+    },
+  },
+  pierce_1: {
+    name: 'Armor Piercing',
+    desc: 'Bullets pierce 1 enemy',
+    tier: 1,
+    apply: (w) => (w.pierce += 1),
+  },
 
   // === TIER 2 (Uncommon — requires T1 prereq) ===
-  damage_up_2:      { name: 'HE Rounds',        desc: '+50% damage',                    tier: 2, prereq: 'damage_up',     apply: w => w.damage *= 1.50 },
-  fire_rate_up_2:   { name: 'Minigun Barrel',   desc: '+40% fire rate',                tier: 2, prereq: 'fire_rate_up',  apply: w => w.fireRate *= 1.40 },
-  burst_3:          { name: 'Triple Burst',     desc: '3 rounds in burst',             tier: 2, prereq: 'burst_2',       apply: w => { w.burstCount = 3; w.burstDelay = 0.04; } },
-  triple_barrel:    { name: 'Tri-Barrel',       desc: '3 barrels',                     tier: 2, prereq: 'double_barrel', apply: w => w.barrels = 3 },
-  pierce_2:         { name: 'Depleted Uranium', desc: 'Bullets pierce 2 enemies',       tier: 2, prereq: 'pierce_1',     apply: w => w.pierce += 1 },
-  explosive_rounds: { name: 'Explosive Rounds', desc: 'Bullets explode on hit (AoE)',   tier: 2, apply: w => { w.explosive = true; w.explosiveRadius = 30; } },
-  homing:           { name: 'Homing Rounds',    desc: 'Bullets curve toward enemies',   tier: 2, apply: w => { w.homing = true; w.homingStrength = 2; } },
-  ricochet:         { name: 'Ricochet',         desc: 'Bullets bounce to 1 enemy',      tier: 2, apply: w => { w.ricochet = true; w.ricochetCount = 1; } },
+  damage_up_2: {
+    name: 'HE Rounds',
+    desc: '+50% damage',
+    tier: 2,
+    prereq: 'damage_up',
+    apply: (w) => (w.damage *= 1.5),
+  },
+  fire_rate_up_2: {
+    name: 'Minigun Barrel',
+    desc: '+40% fire rate',
+    tier: 2,
+    prereq: 'fire_rate_up',
+    apply: (w) => (w.fireRate *= 1.4),
+  },
+  burst_3: {
+    name: 'Triple Burst',
+    desc: '3 rounds in burst',
+    tier: 2,
+    prereq: 'burst_2',
+    apply: (w) => {
+      w.burstCount = 3;
+      w.burstDelay = 0.04;
+    },
+  },
+  triple_barrel: {
+    name: 'Tri-Barrel',
+    desc: '3 barrels',
+    tier: 2,
+    prereq: 'double_barrel',
+    apply: (w) => (w.barrels = 3),
+  },
+  pierce_2: {
+    name: 'Depleted Uranium',
+    desc: 'Bullets pierce 2 enemies',
+    tier: 2,
+    prereq: 'pierce_1',
+    apply: (w) => (w.pierce += 1),
+  },
+  explosive_rounds: {
+    name: 'Explosive Rounds',
+    desc: 'Bullets explode on hit (AoE)',
+    tier: 2,
+    apply: (w) => {
+      w.explosive = true;
+      w.explosiveRadius = 30;
+    },
+  },
+  homing: {
+    name: 'Homing Rounds',
+    desc: 'Bullets curve toward enemies',
+    tier: 2,
+    apply: (w) => {
+      w.homing = true;
+      w.homingStrength = 2;
+    },
+  },
+  ricochet: {
+    name: 'Ricochet',
+    desc: 'Bullets bounce to 1 enemy',
+    tier: 2,
+    apply: (w) => {
+      w.ricochet = true;
+      w.ricochetCount = 1;
+    },
+  },
 
   // === TIER 3 (Rare — requires T2 prereq) ===
-  spread_360:       { name: 'Ring of Death',    desc: 'Bullets fire in all directions', tier: 3, prereq: 'spread_wide',   apply: w => { w.spreadType = 'radial'; w.spreadAngle = Math.PI * 2; } },
-  chain_lightning:  { name: 'Chain Lightning',  desc: 'Bullets arc to nearby enemies',  tier: 3, apply: w => { w.chainLightning = true; w.chainCount = 2; w.chainRange = 60; } },
-  napalm_trail:     { name: 'Napalm Trail',     desc: 'Bullets leave burning trail',    tier: 3, apply: w => { w.napalmTrail = true; w.napalmDuration = 2; w.napalmDamage = 5; } },
-}
+  spread_360: {
+    name: 'Ring of Death',
+    desc: 'Bullets fire in all directions',
+    tier: 3,
+    prereq: 'spread_wide',
+    apply: (w) => {
+      w.spreadType = 'radial';
+      w.spreadAngle = Math.PI * 2;
+    },
+  },
+  chain_lightning: {
+    name: 'Chain Lightning',
+    desc: 'Bullets arc to nearby enemies',
+    tier: 3,
+    apply: (w) => {
+      w.chainLightning = true;
+      w.chainCount = 2;
+      w.chainRange = 60;
+    },
+  },
+  napalm_trail: {
+    name: 'Napalm Trail',
+    desc: 'Bullets leave burning trail',
+    tier: 3,
+    apply: (w) => {
+      w.napalmTrail = true;
+      w.napalmDuration = 2;
+      w.napalmDamage = 5;
+    },
+  },
+};
 ```
 
 ### 9.4 Level-Up Card Selection
@@ -1064,7 +1266,7 @@ function generateUpgradeChoices(weaponState, infamyLevel) {
     if (up.tier === 1) weight = 6;
     if (up.tier === 2) weight = 3;
     if (up.tier === 3) weight = 1;
-    weight *= (1 + infamyLevel * 0.05 * up.tier);
+    weight *= 1 + infamyLevel * 0.05 * up.tier;
     return { key, upgrade: up, weight };
   });
 
@@ -1078,23 +1280,32 @@ function generateUpgradeChoices(weaponState, infamyLevel) {
 ROCKET_TYPES = {
   dumbfire: {
     name: 'Unguided Rockets',
-    damage: 80, speed: 350, radius: 40,
+    damage: 80,
+    speed: 350,
+    radius: 40,
     ammoPerPickup: 4,
     behavior: 'straight',
   },
   guided: {
     name: 'Guided Missiles',
-    damage: 50, speed: 250, radius: 35,
+    damage: 50,
+    speed: 250,
+    radius: 35,
     ammoPerPickup: 6,
-    behavior: 'lockOn', lockRange: 300, turnRate: 4,
+    behavior: 'lockOn',
+    lockRange: 300,
+    turnRate: 4,
   },
   area: {
     name: 'Cluster Rockets',
-    damage: 25, speed: 300, radius: 120,
+    damage: 25,
+    speed: 300,
+    radius: 120,
     ammoPerPickup: 3,
-    behavior: 'area', submunitions: 8,
+    behavior: 'area',
+    submunitions: 8,
   },
-}
+};
 ```
 
 ---
@@ -1110,33 +1321,57 @@ ENEMY_TYPES = {
   // === TIER 0: ORDINARY INFANTRY ===
   rifleman: {
     name: 'Rifleman',
-    hp: 30, speed: 35, damage: 3, fireRate: 0.5, range: 150,
-    fearWeight: 2, dollarWeight: 2,
-    armed: true, weapon: 'rifle',
+    hp: 30,
+    speed: 35,
+    damage: 3,
+    fireRate: 0.5,
+    range: 150,
+    fearWeight: 2,
+    dollarWeight: 2,
+    armed: true,
+    weapon: 'rifle',
     behavior: 'guard',
     render: { radius: 4, color: '#6b4914' },
   },
   assaultRifle: {
     name: 'Assault Rifle Soldier',
-    hp: 25, speed: 40, damage: 2, fireRate: 1.5, range: 140,
-    fearWeight: 2, dollarWeight: 2,
-    armed: true, weapon: 'assault_rifle',
+    hp: 25,
+    speed: 40,
+    damage: 2,
+    fireRate: 1.5,
+    range: 140,
+    fearWeight: 2,
+    dollarWeight: 2,
+    armed: true,
+    weapon: 'assault_rifle',
     behavior: 'patrol',
     render: { radius: 4, color: '#5b4914' },
   },
   mgTeam: {
     name: 'Machine Gun Team',
-    hp: 40, speed: 25, damage: 5, fireRate: 2, range: 200,
-    fearWeight: 4, dollarWeight: 4,
-    armed: true, weapon: 'lmg',
+    hp: 40,
+    speed: 25,
+    damage: 5,
+    fireRate: 2,
+    range: 200,
+    fearWeight: 4,
+    dollarWeight: 4,
+    armed: true,
+    weapon: 'lmg',
     behavior: 'guard',
     render: { radius: 5, color: '#4a3a2a' },
   },
   hmg: {
     name: 'Heavy Machine Gun',
-    hp: 50, speed: 0, damage: 8, fireRate: 1.5, range: 300,
-    fearWeight: 6, dollarWeight: 6,
-    armed: true, weapon: 'hmg',
+    hp: 50,
+    speed: 0,
+    damage: 8,
+    fireRate: 1.5,
+    range: 300,
+    fearWeight: 6,
+    dollarWeight: 6,
+    armed: true,
+    weapon: 'hmg',
     behavior: 'fixed',
     render: { radius: 6, color: '#3a3a3a' },
   },
@@ -1144,9 +1379,15 @@ ENEMY_TYPES = {
   // === TIER 1: LIGHT AA ===
   lightAA: {
     name: 'Light AA Gun',
-    hp: 60, speed: 0, damage: 6, fireRate: 3, range: 280,
-    fearWeight: 8, dollarWeight: 8,
-    armed: true, weapon: 'aa_light',
+    hp: 60,
+    speed: 0,
+    damage: 6,
+    fireRate: 3,
+    range: 280,
+    fearWeight: 8,
+    dollarWeight: 8,
+    armed: true,
+    weapon: 'aa_light',
     behavior: 'fixed',
     airThreat: true,
     threatRadius: 150,
@@ -1154,9 +1395,15 @@ ENEMY_TYPES = {
   },
   twin23: {
     name: 'Twin 23mm AA',
-    hp: 80, speed: 0, damage: 12, fireRate: 4, range: 250,
-    fearWeight: 10, dollarWeight: 10,
-    armed: true, weapon: 'aa_23mm',
+    hp: 80,
+    speed: 0,
+    damage: 12,
+    fireRate: 4,
+    range: 250,
+    fearWeight: 10,
+    dollarWeight: 10,
+    armed: true,
+    weapon: 'aa_23mm',
     behavior: 'fixed',
     airThreat: true,
     threatRadius: 180,
@@ -1166,9 +1413,15 @@ ENEMY_TYPES = {
   // === TIER 2: MAN-PORTABLE MISSILES ===
   manpads: {
     name: 'MANPADS Team',
-    hp: 25, speed: 30, damage: 30, fireRate: 0.1, range: 350,
-    fearWeight: 12, dollarWeight: 12,
-    armed: true, weapon: 'missile_manpad',
+    hp: 25,
+    speed: 30,
+    damage: 30,
+    fireRate: 0.1,
+    range: 350,
+    fearWeight: 12,
+    dollarWeight: 12,
+    armed: true,
+    weapon: 'missile_manpad',
     behavior: 'ambush',
     airThreat: true,
     threatRadius: 200,
@@ -1178,9 +1431,15 @@ ENEMY_TYPES = {
   // === TIER 3: HEAVY AA ===
   shilka: {
     name: 'Shilka (ZSU-23-4)',
-    hp: 150, speed: 45, damage: 15, fireRate: 6, range: 250,
-    fearWeight: 15, dollarWeight: 15,
-    armed: true, weapon: 'aa_shilka',
+    hp: 150,
+    speed: 45,
+    damage: 15,
+    fireRate: 6,
+    range: 250,
+    fearWeight: 15,
+    dollarWeight: 15,
+    armed: true,
+    weapon: 'aa_shilka',
     behavior: 'mobile_defense',
     airThreat: true,
     threatRadius: 220,
@@ -1188,9 +1447,15 @@ ENEMY_TYPES = {
   },
   heavyAA: {
     name: 'Heavy 57mm AA',
-    hp: 200, speed: 0, damage: 40, fireRate: 0.5, range: 400,
-    fearWeight: 18, dollarWeight: 18,
-    armed: true, weapon: 'aa_57mm',
+    hp: 200,
+    speed: 0,
+    damage: 40,
+    fireRate: 0.5,
+    range: 400,
+    fearWeight: 18,
+    dollarWeight: 18,
+    armed: true,
+    weapon: 'aa_57mm',
     behavior: 'fixed',
     airThreat: true,
     threatRadius: 300,
@@ -1200,9 +1465,15 @@ ENEMY_TYPES = {
   // === TIER 4: MOBILE SAM ===
   mobileSAM: {
     name: 'Mobile SAM',
-    hp: 120, speed: 40, damage: 50, fireRate: 0.15, range: 500,
-    fearWeight: 20, dollarWeight: 20,
-    armed: true, weapon: 'missile_sam',
+    hp: 120,
+    speed: 40,
+    damage: 50,
+    fireRate: 0.15,
+    range: 500,
+    fearWeight: 20,
+    dollarWeight: 20,
+    armed: true,
+    weapon: 'missile_sam',
     behavior: 'mobile_defense',
     airThreat: true,
     threatRadius: 400,
@@ -1212,25 +1483,43 @@ ENEMY_TYPES = {
   // === TIER 5: VEHICLES ===
   tank: {
     name: 'Main Battle Tank',
-    hp: 250, speed: 30, damage: 25, fireRate: 0.3, range: 300,
-    fearWeight: 12, dollarWeight: 15,
-    armed: true, weapon: 'main_gun',
+    hp: 250,
+    speed: 30,
+    damage: 25,
+    fireRate: 0.3,
+    range: 300,
+    fearWeight: 12,
+    dollarWeight: 15,
+    armed: true,
+    weapon: 'main_gun',
     behavior: 'escort',
     render: { radius: 12, color: '#2a2a2a' },
   },
   apc: {
     name: 'Armored Personnel Carrier',
-    hp: 120, speed: 50, damage: 5, fireRate: 1, range: 200,
-    fearWeight: 6, dollarWeight: 8,
-    armed: true, weapon: 'mounted_gun',
+    hp: 120,
+    speed: 50,
+    damage: 5,
+    fireRate: 1,
+    range: 200,
+    fearWeight: 6,
+    dollarWeight: 8,
+    armed: true,
+    weapon: 'mounted_gun',
     behavior: 'patrol',
     render: { radius: 10, color: '#3a3a2a' },
   },
   technical: {
     name: 'Technical (Gun Truck)',
-    hp: 60, speed: 70, damage: 4, fireRate: 2, range: 180,
-    fearWeight: 4, dollarWeight: 5,
-    armed: true, weapon: 'mounted_gun',
+    hp: 60,
+    speed: 70,
+    damage: 4,
+    fireRate: 2,
+    range: 180,
+    fearWeight: 4,
+    dollarWeight: 5,
+    armed: true,
+    weapon: 'mounted_gun',
     behavior: 'patrol',
     render: { radius: 8, color: '#4a3a2a' },
   },
@@ -1238,35 +1527,47 @@ ENEMY_TYPES = {
   // === TIER 6: AIR ===
   attackHeli: {
     name: 'Enemy Attack Helicopter',
-    hp: 180, speed: 120, damage: 15, fireRate: 2, range: 300,
-    fearWeight: 20, dollarWeight: 25,
-    armed: true, weapon: 'air_cannon',
+    hp: 180,
+    speed: 120,
+    damage: 15,
+    fireRate: 2,
+    range: 300,
+    fearWeight: 20,
+    dollarWeight: 25,
+    armed: true,
+    weapon: 'air_cannon',
     behavior: 'air_interceptor',
     render: { radius: 10, color: '#555555' },
   },
   fighter: {
     name: 'Enemy Fighter',
-    hp: 100, speed: 300, damage: 40, fireRate: 4, range: 350,
-    fearWeight: 25, dollarWeight: 30,
-    armed: true, weapon: 'air_cannon',
+    hp: 100,
+    speed: 300,
+    damage: 40,
+    fireRate: 4,
+    range: 350,
+    fearWeight: 25,
+    dollarWeight: 30,
+    armed: true,
+    weapon: 'air_cannon',
     behavior: 'air_interceptor',
     render: { radius: 8, color: '#666666' },
   },
-}
+};
 ```
 
 ### 10.2 AI Behavior Classes (8 Classes)
 
-| Class | Name | Examples | Behavior |
-|-------|------|----------|----------|
-| **A** | Guard | Rifleman, MG Team, checkpoint guard | Stay near position, react to helicopter, seek cover |
-| **B** | Patrol | Assault Rifle, gun truck, scout vehicle | Follow route, investigate disturbances, return to route |
-| **C** | Ambush | MANPADS team, RPG team, HMG | Hide, wait, attack, relocate |
-| **D** | Mobile Defense | Shilka, mobile SAM, armored AA truck | Follow formation, stop, engage, relocate |
-| **E** | Fixed Defense | S-60 battery, AA battery, SAM site, radar | Never move, track targets, engage inside zone |
-| **F** | Escort | Tank, APC, AA vehicle | Protect high-value units |
-| **G** | Reinforcement | Transport helicopter, troop truck | Enter battlefield, deploy, withdraw |
-| **H** | Air Interceptor | Attack helicopter, fighter | Enter combat, attack, disengage, potentially return |
+| Class | Name            | Examples                                  | Behavior                                                |
+| ----- | --------------- | ----------------------------------------- | ------------------------------------------------------- |
+| **A** | Guard           | Rifleman, MG Team, checkpoint guard       | Stay near position, react to helicopter, seek cover     |
+| **B** | Patrol          | Assault Rifle, gun truck, scout vehicle   | Follow route, investigate disturbances, return to route |
+| **C** | Ambush          | MANPADS team, RPG team, HMG               | Hide, wait, attack, relocate                            |
+| **D** | Mobile Defense  | Shilka, mobile SAM, armored AA truck      | Follow formation, stop, engage, relocate                |
+| **E** | Fixed Defense   | S-60 battery, AA battery, SAM site, radar | Never move, track targets, engage inside zone           |
+| **F** | Escort          | Tank, APC, AA vehicle                     | Protect high-value units                                |
+| **G** | Reinforcement   | Transport helicopter, troop truck         | Enter battlefield, deploy, withdraw                     |
+| **H** | Air Interceptor | Attack helicopter, fighter                | Enter combat, attack, disengage, potentially return     |
 
 ### 10.3 AI Behavior Code
 
@@ -1275,7 +1576,7 @@ AI_BEHAVIORS = {
   guard: (enemy, heli) => {
     const dx = heli.x - enemy.x;
     const dy = heli.y - enemy.y;
-    const dist = Math.sqrt(dx*dx + dy*dy);
+    const dist = Math.sqrt(dx * dx + dy * dy);
     enemy.angle = Math.atan2(dy, dx);
     if (dist <= enemy.range && enemy.fireCooldown <= 0) {
       fireAt(enemy, heli);
@@ -1293,7 +1594,7 @@ AI_BEHAVIORS = {
     // Fires immediately, then relocates
     const dx = heli.x - enemy.x;
     const dy = heli.y - enemy.y;
-    const dist = Math.sqrt(dx*dx + dy*dy);
+    const dist = Math.sqrt(dx * dx + dy * dy);
     if (dist <= enemy.threatRadius && !enemy.engaged) {
       enemy.engaged = true;
       fireAt(enemy, heli); // immediate first shot
@@ -1311,7 +1612,7 @@ AI_BEHAVIORS = {
     // Follow formation, stop to engage, relocate after firing
     const dx = heli.x - enemy.x;
     const dy = heli.y - enemy.y;
-    const dist = Math.sqrt(dx*dx + dy*dy);
+    const dist = Math.sqrt(dx * dx + dy * dy);
     if (dist <= enemy.range) {
       // Stop and engage
       enemy.vx = 0;
@@ -1324,8 +1625,8 @@ AI_BEHAVIORS = {
       }
     } else {
       // Move toward engagement range
-      enemy.vx = (dx/dist) * enemy.speed * 0.5;
-      enemy.vy = (dy/dist) * enemy.speed * 0.5;
+      enemy.vx = (dx / dist) * enemy.speed * 0.5;
+      enemy.vy = (dy / dist) * enemy.speed * 0.5;
     }
   },
 
@@ -1333,7 +1634,7 @@ AI_BEHAVIORS = {
     // Never move. Track and engage.
     const dx = heli.x - enemy.x;
     const dy = heli.y - enemy.y;
-    const dist = Math.sqrt(dx*dx + dy*dy);
+    const dist = Math.sqrt(dx * dx + dy * dy);
     enemy.angle = Math.atan2(dy, dx);
     if (dist <= enemy.range && enemy.fireCooldown <= 0) {
       fireAt(enemy, heli);
@@ -1355,29 +1656,29 @@ AI_BEHAVIORS = {
     // Then circle around for another pass
     const dx = heli.x - enemy.x;
     const dy = heli.y - enemy.y;
-    const dist = Math.sqrt(dx*dx + dy*dy);
+    const dist = Math.sqrt(dx * dx + dy * dy);
     if (dist <= enemy.range && enemy.fireCooldown <= 0) {
       fireAt(enemy, heli);
       enemy.fireCooldown = 1 / enemy.fireRate;
     }
     // Flyby pattern: approach, attack, disengage, return
   },
-}
+};
 ```
 
 ### 10.4 Air Defense Bubble System
 
 Every serious AA unit has an invisible threat radius. NOT shown on minimap. Player learns through gameplay cues.
 
-| Unit | Threat Radius | Cues |
-|------|--------------|------|
-| HMG | Small (100) | Tracer fire direction |
-| Light AA | Medium (150) | Wall of tracer fire |
-| Twin 23mm | Medium (180) | Cannon flash, heavy tracers |
-| Shilka | Large (220) | Radar tracking sound, sweeping tracers |
-| Heavy 57mm | Large (300) | Heavy thumping report, explosions |
-| MANPADS | Medium (200) | Missile launch smoke trail (hidden until firing) |
-| Mobile SAM | Very Large (400) | Missile warning alarm |
+| Unit       | Threat Radius    | Cues                                             |
+| ---------- | ---------------- | ------------------------------------------------ |
+| HMG        | Small (100)      | Tracer fire direction                            |
+| Light AA   | Medium (150)     | Wall of tracer fire                              |
+| Twin 23mm  | Medium (180)     | Cannon flash, heavy tracers                      |
+| Shilka     | Large (220)      | Radar tracking sound, sweeping tracers           |
+| Heavy 57mm | Large (300)      | Heavy thumping report, explosions                |
+| MANPADS    | Medium (200)     | Missile launch smoke trail (hidden until firing) |
+| Mobile SAM | Very Large (400) | Missile warning alarm                            |
 
 ### 10.5 Convoy/Patrol System
 
@@ -1388,10 +1689,10 @@ CONVOY_TYPES = {
   supply: {
     name: 'Supply Convoy',
     composition: [
-      { type: 'technical', count: 1 },      // escort
-      { type: 'apc', count: 1 },             // escort
-      { type: 'truck', count: 2 },           // supply trucks (loot)
-      { type: 'rifleman', count: 4 },        // infantry
+      { type: 'technical', count: 1 }, // escort
+      { type: 'apc', count: 1 }, // escort
+      { type: 'truck', count: 2 }, // supply trucks (loot)
+      { type: 'rifleman', count: 4 }, // infantry
     ],
     speed: 30,
     lootBonus: 1.5, // better loot from supply trucks
@@ -1415,7 +1716,7 @@ CONVOY_TYPES = {
     ],
     speed: 20,
   },
-}
+};
 ```
 
 ---
@@ -1453,7 +1754,7 @@ BOSS_TIMER = {
 
   bossSpawnDistance: 80,
   bossWarningTime: 5,
-}
+};
 ```
 
 > **Shipped (2026-08):** Timer is now `Hunter ETA` driven by `hunterClockRate()` in `js/sim/state.js`:
@@ -1472,8 +1773,10 @@ function spawnBoss(player, worldSize) {
   const bossX = worldCenter.x + Math.cos(angle) * spawnDist;
   const bossY = worldCenter.y + Math.sin(angle) * spawnDist;
   return {
-    x: bossX, y: bossY,
-    targetX: player.x, targetY: player.y,
+    x: bossX,
+    y: bossY,
+    targetX: player.x,
+    targetY: player.y,
     ...getBossType(difficulty),
   };
 }
@@ -1490,8 +1793,13 @@ BOSS_PROGRESSION = {
     sortie1: { name: 'Armored Patrol', type: 'light_tank', hp: 300, bodyguards: 1 },
     sortie2: { name: 'Convoy Escort', type: 'medium_tank', hp: 400, bodyguards: 2 },
     sortie3: { name: 'Armored Column', type: 'heavy_tank', hp: 500, bodyguards: 3 },
-    stronghold: { name: 'Fortified Checkpoint', type: 'fortified', hp: 600, bodyguards: 4,
-      composition: 'checkpoint_with_aa' },
+    stronghold: {
+      name: 'Fortified Checkpoint',
+      type: 'fortified',
+      hp: 600,
+      bodyguards: 4,
+      composition: 'checkpoint_with_aa',
+    },
   },
 
   // Act 2 (Sorties 5-8): Harder ground/vehicle bosses
@@ -1499,8 +1807,13 @@ BOSS_PROGRESSION = {
     sortie1: { name: 'SAM Convoy', type: 'sam_vehicle', hp: 500, bodyguards: 3 },
     sortie2: { name: 'AA Battery', type: 'aa_complex', hp: 600, bodyguards: 4 },
     sortie3: { name: 'Armored Brigade', type: 'heavy_column', hp: 700, bodyguards: 5 },
-    stronghold: { name: 'Air Defense Complex', type: 'ad_complex', hp: 800, bodyguards: 6,
-      composition: 'sam_site_with_aa' },
+    stronghold: {
+      name: 'Air Defense Complex',
+      type: 'ad_complex',
+      hp: 800,
+      bodyguards: 6,
+      composition: 'sam_site_with_aa',
+    },
   },
 
   // Act 3 (Sorties 9-12): Air bosses start appearing
@@ -1508,20 +1821,35 @@ BOSS_PROGRESSION = {
     sortie1: { name: 'Attack Helicopter', type: 'attack_heli', hp: 400, bodyguards: 2 },
     sortie2: { name: 'SAM Network', type: 'sam_network', hp: 800, bodyguards: 5 },
     sortie3: { name: 'Heavy Armor + Air', type: 'combined_arms', hp: 900, bodyguards: 6 },
-    stronghold: { name: 'Strategic SAM Site', type: 'strategic_sam', hp: 1000, bodyguards: 8,
-      composition: 'full_sam_site' },
+    stronghold: {
+      name: 'Strategic SAM Site',
+      type: 'strategic_sam',
+      hp: 1000,
+      bodyguards: 8,
+      composition: 'full_sam_site',
+    },
   },
 
   // Act 4 (Sorties 13-16): Final escalation
   act4: {
-    sortie1: { name: 'Fighter Intercept', type: 'fighter', hp: 300, bodyguards: 0,
-      special: 'flyby_boss' },
+    sortie1: {
+      name: 'Fighter Intercept',
+      type: 'fighter',
+      hp: 300,
+      bodyguards: 0,
+      special: 'flyby_boss',
+    },
     sortie2: { name: 'Heavy Air Defense', type: 'heavy_ad', hp: 1100, bodyguards: 8 },
     sortie3: { name: 'Armored Air Raid', type: 'combined_elite', hp: 1200, bodyguards: 10 },
-    stronghold: { name: 'FINAL BOSS: Supergunship', type: 'supergunship', hp: 2000,
-      bodyguards: 12, special: 'bullet_hell' },
+    stronghold: {
+      name: 'FINAL BOSS: Supergunship',
+      type: 'supergunship',
+      hp: 2000,
+      bodyguards: 12,
+      special: 'bullet_hell',
+    },
   },
-}
+};
 ```
 
 ### 11.5 Boss Types
@@ -1531,18 +1859,24 @@ BOSS_TYPES = {
   // Ground bosses
   light_tank: {
     name: 'Light Tank',
-    hp: 300, speed: 80, armor: 1.2,
-    damage: 20, fireRate: 0.5, range: 350,
-    phases: [
-      { hpThreshold: 0.5, behavior: 'aggressive' },
-    ],
+    hp: 300,
+    speed: 80,
+    armor: 1.2,
+    damage: 20,
+    fireRate: 0.5,
+    range: 350,
+    phases: [{ hpThreshold: 0.5, behavior: 'aggressive' }],
     loot: { xpBonus: 100, dollarBonus: 200 },
   },
 
   heavy_tank: {
     name: 'Heavy Tank',
-    hp: 500, speed: 60, armor: 1.5,
-    damage: 35, fireRate: 0.3, range: 400,
+    hp: 500,
+    speed: 60,
+    armor: 1.5,
+    damage: 35,
+    fireRate: 0.3,
+    range: 400,
     phases: [
       { hpThreshold: 0.5, behavior: 'aggressive' },
       { hpThreshold: 0.25, behavior: 'berserk' },
@@ -1553,32 +1887,40 @@ BOSS_TYPES = {
   // AA boss
   aa_complex: {
     name: 'AA Battery',
-    hp: 600, speed: 0, armor: 1.0,
-    damage: 15, fireRate: 6, range: 350,
+    hp: 600,
+    speed: 0,
+    armor: 1.0,
+    damage: 15,
+    fireRate: 6,
+    range: 350,
     special: 'multiple_barrels',
-    phases: [
-      { hpThreshold: 0.5, behavior: 'burst_fire' },
-    ],
+    phases: [{ hpThreshold: 0.5, behavior: 'burst_fire' }],
     loot: { xpBonus: 250, dollarBonus: 500 },
   },
 
   // Air boss
   attack_heli: {
     name: 'Enemy Attack Helicopter',
-    hp: 400, speed: 150, armor: 0.8,
-    damage: 20, fireRate: 3, range: 300,
+    hp: 400,
+    speed: 150,
+    armor: 0.8,
+    damage: 20,
+    fireRate: 3,
+    range: 300,
     special: 'aerial_duel',
-    phases: [
-      { hpThreshold: 0.5, behavior: 'aggressive_strafe' },
-    ],
+    phases: [{ hpThreshold: 0.5, behavior: 'aggressive_strafe' }],
     loot: { xpBonus: 300, dollarBonus: 600 },
   },
 
   // FINAL BOSS
   supergunship: {
     name: 'Supergunship "Guardian"',
-    hp: 2000, speed: 100, armor: 1.0,
-    damage: 30, fireRate: 4, range: 400,
+    hp: 2000,
+    speed: 100,
+    armor: 1.0,
+    damage: 30,
+    fireRate: 4,
+    range: 400,
     special: 'bullet_hell',
     phases: [
       { hpThreshold: 0.75, behavior: 'spread_patterns' },
@@ -1590,7 +1932,7 @@ BOSS_TYPES = {
     // Fires complex bullet patterns (inspired by bullet hell shooters)
     // Destroying the final boss = campaign complete = prestige unlock
   },
-}
+};
 ```
 
 ### 11.6 Boss Bodyguard Scaling
@@ -1668,24 +2010,23 @@ function calculateClearBonus(settlement) {
 ```javascript
 // Exponential scaling — each level requires more Infamy than the last
 INFAMY_LEVELS = [
-  { level: 0,  threshold: 0 },
-  { level: 1,  threshold: 10 },
-  { level: 2,  threshold: 25 },
-  { level: 3,  threshold: 50 },
-  { level: 4,  threshold: 85 },
-  { level: 5,  threshold: 130 },
-  { level: 6,  threshold: 190 },
-  { level: 7,  threshold: 270 },
-  { level: 8,  threshold: 370 },
-  { level: 9,  threshold: 500 },
+  { level: 0, threshold: 0 },
+  { level: 1, threshold: 10 },
+  { level: 2, threshold: 25 },
+  { level: 3, threshold: 50 },
+  { level: 4, threshold: 85 },
+  { level: 5, threshold: 130 },
+  { level: 6, threshold: 190 },
+  { level: 7, threshold: 270 },
+  { level: 8, threshold: 370 },
+  { level: 9, threshold: 500 },
   { level: 10, threshold: 660 },
-]
+];
 
 // KEY TENSION: Infamy = stronger weapon upgrades BUT stronger boss
 ```
 
 > **Shipped (2026-08):** Infamy is now split into **Fear** (field upgrades) and **Heat** (Hunter ETA). Thresholds are identical to `FEAR_THRESHOLDS` in `js/sim/state.js:1` and `INFAMY` alias in `js/config.js:72` (deprecated). Fear levels show `FEAR GROWS` overlay with 3 cards from `js/upgrades.js:5` (AP_ROUNDS etc., 8 cards). Heat tiers (`QUIET…CRITICAL`) scale aggro `COMBAT.aggroPerHeatTier` and `hunterClockRate`. The tension is preserved: more Fear = stronger gun, more Heat = faster Hunter.
-
 
 ### 12.4 Level-Up Flow
 
@@ -1723,11 +2064,11 @@ When the pilot dies, the career is over — new pilot starts fresh.
 function generatePilot() {
   const name = generatePilotName();
   const stats = {
-    accuracy: 1 + Math.random() * 3,   // 1-4, weapon accuracy/damage
-    control:  1 + Math.random() * 3,   // 1-4, handling/stability
-    awareness: 1 + Math.random() * 3,  // 1-4, minimap range/detection
-    speed:    1 + Math.random() * 3,   // 1-4, acceleration/max speed
-    grit:     1 + Math.random() * 3,   // 1-4, damage resistance/red screen
+    accuracy: 1 + Math.random() * 3, // 1-4, weapon accuracy/damage
+    control: 1 + Math.random() * 3, // 1-4, handling/stability
+    awareness: 1 + Math.random() * 3, // 1-4, minimap range/detection
+    speed: 1 + Math.random() * 3, // 1-4, acceleration/max speed
+    grit: 1 + Math.random() * 3, // 1-4, damage resistance/red screen
   };
   return {
     name,
@@ -1747,20 +2088,20 @@ function generatePilot() {
 PILOT_STAT_EFFECTS = {
   accuracy: {
     effect: (stat) => ({
-      damageMultiplier: 1 + (stat - 1) * 0.1,   // +10% damage per point above 1
+      damageMultiplier: 1 + (stat - 1) * 0.1, // +10% damage per point above 1
       spreadMultiplier: 1 / (1 + (stat - 1) * 0.05), // less spread
     }),
   },
   control: {
     effect: (stat) => ({
-      handlingMultiplier: 1 + (stat - 1) * 0.08,  // +8% handling per point
+      handlingMultiplier: 1 + (stat - 1) * 0.08, // +8% handling per point
       turnRateMultiplier: 1 + (stat - 1) * 0.05,
     }),
   },
   awareness: {
     effect: (stat) => ({
-      minimapRange: 200 + (stat - 1) * 50,  // +50 tiles per point
-      detectionBonus: (stat - 1) * 0.05,     // +5% detection per point
+      minimapRange: 200 + (stat - 1) * 50, // +50 tiles per point
+      detectionBonus: (stat - 1) * 0.05, // +5% detection per point
     }),
   },
   speed: {
@@ -1771,11 +2112,11 @@ PILOT_STAT_EFFECTS = {
   },
   grit: {
     effect: (stat) => ({
-      damageReduction: 1 - (1 / (1 + (stat - 1) * 0.15)),
+      damageReduction: 1 - 1 / (1 + (stat - 1) * 0.15),
       redScreenReduction: (stat - 1) * 0.1, // -10% red screen per point
     }),
   },
-}
+};
 ```
 
 ### 13.4 Pilot Leveling
@@ -1796,7 +2137,7 @@ PILOT_XP = [
   { level: 8, xpToNext: 2600 },
   { level: 9, xpToNext: 3500 },
   { level: 10, xpToNext: 5000 },
-]
+];
 
 // XP persists if pilot survives the Sortie
 // XP is LOST if pilot dies
@@ -1808,11 +2149,13 @@ PILOT_XP = [
 Path of Exile-style allocation. 30 total nodes. Pilots earn **1 skill point per level**. Free respec between Sorties.
 
 #### Marksman Branch (Accuracy)
+
 ```
 [+5% Damage] -> [+10% Damage] -> [+15% Damage]
        |               |               |
 [+5% Fire Rate] -> [+10% Fire Rate] -> [Double Tap]
 ```
+
 - Stabilizer: +5% accuracy
 - Marksman: +10% damage
 - Dead Eye: +15% critical hit chance
@@ -1821,11 +2164,13 @@ Path of Exile-style allocation. 30 total nodes. Pilots earn **1 skill point per 
 - Double Tap: 15% chance for projectiles to fire twice
 
 #### Pilot Branch (Control)
+
 ```
 [+10% Handling] -> [+15% Lock-On] -> [+20% Tracking]
        |               |               |
 [-15% Spread] -> [+10% Turn Rate] -> [Targeting Computer]
 ```
+
 - Steady Hands: +10% handling
 - Locked On: +15% lock-on speed
 - Interceptor: +20% tracking accuracy
@@ -1834,11 +2179,13 @@ Path of Exile-style allocation. 30 total nodes. Pilots earn **1 skill point per 
 - Targeting Computer: auto-lead targets
 
 #### Recon Branch (Awareness)
+
 ```
 [+20% Minimap] -> [+15% Detection] -> [Full Spectrum]
        |               |               |
 [Missile Warning] -> [+10% Dmg Detected] -> [Recon Flyover]
 ```
+
 - Sharp Eyes: +20% minimap range
 - Intel Network: +15% threat detection radius
 - Full Spectrum: reveal hidden enemies (MANPADS, ambush)
@@ -1847,11 +2194,13 @@ Path of Exile-style allocation. 30 total nodes. Pilots earn **1 skill point per 
 - Recon Flyover: reveal entire minimap for 10 seconds (30s cooldown)
 
 #### Thrust Branch (Speed)
+
 ```
 [+10% Acceleration] -> [+15% Max Speed] -> [+20% Boost Duration]
        |               |               |
 [-20% Boost CD] -> [+25% Accel Boost] -> [Maximum Overdrive]
 ```
+
 - Light Frame: +10% acceleration
 - Turbo: +15% max speed
 - Afterburner: +20% boost duration
@@ -1860,11 +2209,13 @@ Path of Exile-style allocation. 30 total nodes. Pilots earn **1 skill point per 
 - Maximum Overdrive: temporary +50% speed for 5 seconds (30s cooldown)
 
 #### Fortitude Branch (Grit)
+
 ```
 [+10% Dmg Resist] -> [+15% Dmg Resist] -> [+20% Dmg Resist]
        |               |               |
 [-20% Red Screen] -> [+25% HP] -> [Last Stand]
 ```
+
 - Hardened: +10% damage resistance
 - Iron Skin: +15% damage resistance
 - Bulletproof: +20% damage resistance
@@ -1900,11 +2251,39 @@ DEATH TEXT: "Pilot KIA. Sector [X] has been liberated."
 
 ```javascript
 NAME_PARTS = {
-  first: ['Ahmad', 'Mohammed', 'Omar', 'Yusuf', 'Ali', 'Hassan', 'Hussein',
-          'Ibrahim', 'Khalid', 'Abdullah', 'Rashid', 'Tariq', 'Jamal', 'Faris'],
-  callsigns: ['Viper', 'Hawk', 'Eagle', 'Phoenix', 'Shadow', 'Ghost', 'Storm',
-              'Raven', 'Falcon', 'Cobra', 'Wolf', 'Lynx', 'Panther', 'Blade'],
-}
+  first: [
+    'Ahmad',
+    'Mohammed',
+    'Omar',
+    'Yusuf',
+    'Ali',
+    'Hassan',
+    'Hussein',
+    'Ibrahim',
+    'Khalid',
+    'Abdullah',
+    'Rashid',
+    'Tariq',
+    'Jamal',
+    'Faris',
+  ],
+  callsigns: [
+    'Viper',
+    'Hawk',
+    'Eagle',
+    'Phoenix',
+    'Shadow',
+    'Ghost',
+    'Storm',
+    'Raven',
+    'Falcon',
+    'Cobra',
+    'Wolf',
+    'Lynx',
+    'Panther',
+    'Blade',
+  ],
+};
 
 function generatePilotName() {
   const first = random(NAME_PARTS.first);
@@ -1971,7 +2350,7 @@ EQUIPMENT = {
     healAmount: 0.25,
     healDuration: 10,
   },
-}
+};
 ```
 
 ---
@@ -2016,25 +2395,25 @@ Each gunship has its own upgrade tree. Upgrades are permanent across pilots.
 GUNSHIP_UNLOCKS = {
   supercobra: {
     name: 'AH-1W SuperCobra',
-    condition: 'reach_act_2',  // beat Act 1 Stronghold
+    condition: 'reach_act_2', // beat Act 1 Stronghold
     flavorText: 'Command has approved your request for upgraded hardware.',
   },
   apache: {
     name: 'AH-64 Apache',
-    condition: 'reach_act_3',  // beat Act 2 Stronghold
+    condition: 'reach_act_3', // beat Act 2 Stronghold
     flavorText: 'Your performance has earned you access to the Apache platform.',
   },
   longbow: {
     name: 'AH-64D Longbow',
-    condition: 'reach_act_4',  // beat Act 3 Stronghold
+    condition: 'reach_act_4', // beat Act 3 Stronghold
     flavorText: 'Longbow radar systems have been assigned to your unit.',
   },
   comanche: {
     name: 'RAH-66 Comanche',
-    condition: 'beat_final_boss',  // beat Act 4 final boss
+    condition: 'beat_final_boss', // beat Act 4 final boss
     flavorText: 'The Comanche program has been declassified for your unit.',
   },
-}
+};
 ```
 
 ### 15.4 Prestige / NG+ System
@@ -2068,12 +2447,12 @@ After 3 prestiges:
 ```javascript
 // Meta-progression: upgrade the level your pilot starts at
 STARTING_LEVEL_COSTS = {
-  1: 0,      // always start at level 1
+  1: 0, // always start at level 1
   2: 500,
   3: 1500,
   4: 4000,
   5: 10000,
-}
+};
 ```
 
 ### 15.6 Sortie Summary Screen
@@ -2236,7 +2615,7 @@ RUN_MODIFIERS = {
     effect: { speedMod: 0.85 },
     unlockCondition: null,
   },
-}
+};
 ```
 
 ---
@@ -2264,6 +2643,7 @@ Planned sounds:
 ## 19. IMPLEMENTATION PHASES
 
 ### Phase 1: Foundation (Week 1)
+
 1. Project scaffolding (index.html, css, module structure)
 2. Game loop (rAF + fixed timestep, 120fps detection)
 3. Canvas setup + responsive scaling (DPR-aware)
@@ -2274,6 +2654,7 @@ Planned sounds:
 8. Color/material utilities (adapted from TD: drawUtil.js)
 
 ### Phase 2: World (Week 2)
+
 9. Terrain generation (noise-based, chunk system)
 10. Terrain rendering (cached chunk canvases)
 11. Settlement archetype data definitions
@@ -2282,6 +2663,7 @@ Planned sounds:
 14. Settlement discovery system
 
 ### Phase 3: Helicopter (Week 2-3)
+
 15. Helicopter entity + physics (momentum movement)
 16. Helicopter rendering (procedural 2.5D)
 17. Primary weapon auto-fire system
@@ -2290,6 +2672,7 @@ Planned sounds:
 20. Collision detection (bullets vs enemies, rockets vs ground)
 
 ### Phase 4: Enemies (Week 3)
+
 21. Enemy entity system + entity factory
 22. Enemy AI behaviors (all 8 classes)
 23. Enemy rendering (silhouette system)
@@ -2299,6 +2682,7 @@ Planned sounds:
 27. Air defense bubble system
 
 ### Phase 5: Combat & Infamy (Week 3-4)
+
 28. Damage calculation
 29. Health system (player + enemies)
 30. Death/explosion effects
@@ -2309,6 +2693,7 @@ Planned sounds:
 35. Settlement clear detection + rewards
 
 ### Phase 6: Boss (Week 4)
+
 36. Boss timer system (signal.js)
 37. Boss entity + physics
 38. Boss AI (approach, attack phases)
@@ -2319,6 +2704,7 @@ Planned sounds:
 43. Stronghold Sortie type (command building timer)
 
 ### Phase 7: Pilot & Meta (Week 4-5)
+
 44. Pilot generation (name, stats)
 45. Pilot stat effects on gameplay
 46. Pilot leveling (XP thresholds)
@@ -2332,6 +2718,7 @@ Planned sounds:
 54. Pre-sortie briefing screen
 
 ### Phase 8: Equipment & Modifiers (Week 5)
+
 55. Equipment definitions + data
 56. Equipment usage + cooldowns + limited uses
 57. Equipment UI (3rd button)
@@ -2339,6 +2726,7 @@ Planned sounds:
 59. Modifier UI display
 
 ### Phase 9: UI Polish (Week 5-6)
+
 60. HUD rendering (HP, Infamy, timer, ammo)
 61. Minimap (military radar style)
 62. Expandable minimap behavior
@@ -2350,6 +2738,7 @@ Planned sounds:
 68. Pause menu
 
 ### Phase 10: Content & VFX (Week 6)
+
 69. Particle system (adapted from TD: fx.js)
 70. Explosion effects
 71. Bullet trails
@@ -2365,6 +2754,7 @@ Planned sounds:
 81. Convoy/patrol system
 
 ### Phase 11: Responsive & Mobile (Week 6-7)
+
 82. Touch control refinement
 83. Portrait/landscape layout adaptation
 84. Performance optimization (object pooling, spatial hashing)
@@ -2383,9 +2773,9 @@ Planned sounds:
 ```javascript
 // Three-factor difficulty multiplier
 function getDifficultyMultiplier(distance, metaLevel, infamyLevel) {
-  const distanceFactor = 1 + (distance / 500);      // 1.0 at center, 2.0 at 500 tiles
-  const metaFactor = 1 + (metaLevel * 0.03);          // +3% per meta upgrade
-  const infamyFactor = 1 + (infamyLevel * 0.1);       // +10% per Infamy level
+  const distanceFactor = 1 + distance / 500; // 1.0 at center, 2.0 at 500 tiles
+  const metaFactor = 1 + metaLevel * 0.03; // +3% per meta upgrade
+  const infamyFactor = 1 + infamyLevel * 0.1; // +10% per Infamy level
   return distanceFactor * metaFactor * infamyFactor;
 }
 ```
@@ -2429,7 +2819,7 @@ function getInfamyGain(baseInfamyWeight, pilotAccuracyStat) {
 ```javascript
 function getBossStats(bossType, infamyLevel, prestigeLevel) {
   const infamyMult = 1 + infamyLevel * 0.05;
-  const prestigeMult = 1 + prestigeLevel * 0.20;
+  const prestigeMult = 1 + prestigeLevel * 0.2;
   return {
     hp: bossType.hp * infamyMult * prestigeMult,
     damage: bossType.damage * prestigeMult,
@@ -2442,23 +2832,23 @@ function getBossStats(bossType, infamyLevel, prestigeLevel) {
 
 ## APPENDIX A: KEY ARCHITECTURE DECISIONS LOG
 
-| Decision | Chosen | Rejected | Why |
-|----------|--------|----------|-----|
-| Sim/render coupling | Fixed timestep (60Hz) sim + decoupled render | Coupled sim/render | Deterministic sim regardless of display refresh rate |
-| Canvas DPR | DPR-aware scaling | 1:1 pixel mapping | Crisp on Retina/HiDPI displays |
-| Controls | Canvas-drawn virtual joystick | DOM elements | Resolution-independent, same coord space as game |
-| Terrain | Tile-based + chunk caching | Full world render | O(1) render for visited chunks, memory efficient |
-| Settlement generation | Rule-based procedural | Template-based | Infinite variation, maintainable archetype identity |
-| Weapon system | Single evolving weapon | Multiple loadout slots | Faster gameplay, deeper decisions (Vampire Survivors model) |
-| Boss timer | Real-time countdown + settlement penalties + fuel depot bonuses | Distance-based trigger | Player controls pacing through risk/reward choices |
-| Infamy mechanic | Pause + card choice | Slow-mo overlay | Clear decision moment, mobile-friendly reading time |
-| Pilot system | Single pilot per career | Roster of pilots | Simple, focused, the pilot IS the career |
-| Equipment | Single slot + cooldown + limited uses | Multiple loadout | One meaningful choice, no management overhead |
-| Settlement naming | Procedural Arabic syllables | Static name list | Infinite variety, authentic feel |
-| Lore delivery | Environmental text popups | Cutscenes/dialogue | Zero assets, integrates with gameplay flow |
-| Entity system | Data-driven (factory + templates) | Class-based inheritance | Adding content = adding data, never new classes |
-| Gunships | 5 real historical gunships | Fictional designs | Historically grounded, recognizable, meaningful progression |
-| Fear -> Infamy | Renamed "Infamy" (we instill fear) | Keep "Fear" | Clearer for player — THEY are feared, not afraid |
+| Decision              | Chosen                                                          | Rejected                | Why                                                         |
+| --------------------- | --------------------------------------------------------------- | ----------------------- | ----------------------------------------------------------- |
+| Sim/render coupling   | Fixed timestep (60Hz) sim + decoupled render                    | Coupled sim/render      | Deterministic sim regardless of display refresh rate        |
+| Canvas DPR            | DPR-aware scaling                                               | 1:1 pixel mapping       | Crisp on Retina/HiDPI displays                              |
+| Controls              | Canvas-drawn virtual joystick                                   | DOM elements            | Resolution-independent, same coord space as game            |
+| Terrain               | Tile-based + chunk caching                                      | Full world render       | O(1) render for visited chunks, memory efficient            |
+| Settlement generation | Rule-based procedural                                           | Template-based          | Infinite variation, maintainable archetype identity         |
+| Weapon system         | Single evolving weapon                                          | Multiple loadout slots  | Faster gameplay, deeper decisions (Vampire Survivors model) |
+| Boss timer            | Real-time countdown + settlement penalties + fuel depot bonuses | Distance-based trigger  | Player controls pacing through risk/reward choices          |
+| Infamy mechanic       | Pause + card choice                                             | Slow-mo overlay         | Clear decision moment, mobile-friendly reading time         |
+| Pilot system          | Single pilot per career                                         | Roster of pilots        | Simple, focused, the pilot IS the career                    |
+| Equipment             | Single slot + cooldown + limited uses                           | Multiple loadout        | One meaningful choice, no management overhead               |
+| Settlement naming     | Procedural Arabic syllables                                     | Static name list        | Infinite variety, authentic feel                            |
+| Lore delivery         | Environmental text popups                                       | Cutscenes/dialogue      | Zero assets, integrates with gameplay flow                  |
+| Entity system         | Data-driven (factory + templates)                               | Class-based inheritance | Adding content = adding data, never new classes             |
+| Gunships              | 5 real historical gunships                                      | Fictional designs       | Historically grounded, recognizable, meaningful progression |
+| Fear -> Infamy        | Renamed "Infamy" (we instill fear)                              | Keep "Fear"             | Clearer for player — THEY are feared, not afraid            |
 
 ---
 
@@ -2467,6 +2857,7 @@ function getBossStats(bossType, infamyLevel, prestigeLevel) {
 ### Historical Foundation
 
 The enemy military is inspired by Iraqi air defense doctrine (1980s-1991). Key characteristics:
+
 - Soviet-supplied equipment (tanks, AA, missiles)
 - Layered air defense (MANPADS -> light AA -> heavy AA -> SAM)
 - Mixed regular/irregular forces
@@ -2475,67 +2866,75 @@ The enemy military is inspired by Iraqi air defense doctrine (1980s-1991). Key c
 ### Enemy Type Categories
 
 #### Tier 0: Ordinary Infantry (5 types)
-| Type | Weapon | HP | Speed | Behavior | Fear Weight |
-|------|--------|-----|-------|----------|-------------|
-| Pistol Soldier | 9mm pistol | 15 | 35 | Guard | 1 |
-| Rifleman | 7.62mm assault rifle | 30 | 35 | Guard | 2 |
-| Assault Rifle Soldier | AK-pattern rifle | 25 | 40 | Patrol | 2 |
-| Machine Gun Team | Belt-fed 7.62mm LMG | 40 | 25 | Guard | 4 |
-| Heavy Machine Gun | 12.7mm/14.5mm HMG | 50 | 0 | Guard/Ambush | 6 |
+
+| Type                  | Weapon               | HP  | Speed | Behavior     | Fear Weight |
+| --------------------- | -------------------- | --- | ----- | ------------ | ----------- |
+| Pistol Soldier        | 9mm pistol           | 15  | 35    | Guard        | 1           |
+| Rifleman              | 7.62mm assault rifle | 30  | 35    | Guard        | 2           |
+| Assault Rifle Soldier | AK-pattern rifle     | 25  | 40    | Patrol       | 2           |
+| Machine Gun Team      | Belt-fed 7.62mm LMG  | 40  | 25    | Guard        | 4           |
+| Heavy Machine Gun     | 12.7mm/14.5mm HMG    | 50  | 0     | Guard/Ambush | 6           |
 
 #### Tier 1: Light AA (3 types)
-| Type | Weapon | HP | Speed | Behavior | Fear Weight |
-|------|--------|-----|-------|----------|-------------|
-| Light AA Gun | Twin/quad heavy MG AA | 60 | 0 | Fixed | 8 |
-| Twin 23mm AA | Twin 23mm cannon | 80 | 0 | Fixed | 10 |
-| Mobile AA Truck | Twin 23mm truck-mounted | 70 | 45 | Mobile Defense | 10 |
+
+| Type            | Weapon                  | HP  | Speed | Behavior       | Fear Weight |
+| --------------- | ----------------------- | --- | ----- | -------------- | ----------- |
+| Light AA Gun    | Twin/quad heavy MG AA   | 60  | 0     | Fixed          | 8           |
+| Twin 23mm AA    | Twin 23mm cannon        | 80  | 0     | Fixed          | 10          |
+| Mobile AA Truck | Twin 23mm truck-mounted | 70  | 45    | Mobile Defense | 10          |
 
 #### Tier 2: Heavy AA (3 types)
-| Type | Weapon | HP | Speed | Behavior | Fear Weight |
-|------|--------|-----|-------|----------|-------------|
-| Shilka | Quad 23mm (ZSU-23-4) | 150 | 45 | Mobile Defense | 15 |
-| Heavy 57mm AA | Twin 57mm cannon | 200 | 0 | Fixed | 18 |
-| Heavy AA Battery | 57mm artillery (S-60) | 180 | 0 | Fixed | 18 |
+
+| Type             | Weapon                | HP  | Speed | Behavior       | Fear Weight |
+| ---------------- | --------------------- | --- | ----- | -------------- | ----------- |
+| Shilka           | Quad 23mm (ZSU-23-4)  | 150 | 45    | Mobile Defense | 15          |
+| Heavy 57mm AA    | Twin 57mm cannon      | 200 | 0     | Fixed          | 18          |
+| Heavy AA Battery | 57mm artillery (S-60) | 180 | 0     | Fixed          | 18          |
 
 #### Tier 3: Man-Portable Missiles (2 types)
-| Type | Weapon | HP | Speed | Behavior | Fear Weight |
-|------|--------|-----|-------|----------|-------------|
-| MANPADS Team | SA-7/SA-14 class | 25 | 30 | Ambush | 12 |
-| Veteran Missile Team | Improved MANPADS | 30 | 30 | Ambush | 14 |
+
+| Type                 | Weapon           | HP  | Speed | Behavior | Fear Weight |
+| -------------------- | ---------------- | --- | ----- | -------- | ----------- |
+| MANPADS Team         | SA-7/SA-14 class | 25  | 30    | Ambush   | 12          |
+| Veteran Missile Team | Improved MANPADS | 30  | 30    | Ambush   | 14          |
 
 #### Tier 4: Mobile SAM (1 type)
-| Type | Weapon | HP | Speed | Behavior | Fear Weight |
-|------|--------|-----|-------|----------|-------------|
-| Mobile SAM | SA-9/SA-13 class | 120 | 40 | Mobile Defense | 20 |
+
+| Type       | Weapon           | HP  | Speed | Behavior       | Fear Weight |
+| ---------- | ---------------- | --- | ----- | -------------- | ----------- |
+| Mobile SAM | SA-9/SA-13 class | 120 | 40    | Mobile Defense | 20          |
 
 #### Tier 5: Vehicles (3 types)
-| Type | Weapon | HP | Speed | Behavior | Fear Weight |
-|------|--------|-----|-------|----------|-------------|
-| Technical | MG or light AA | 60 | 70 | Patrol | 5 |
-| APC | Machine gun | 120 | 50 | Patrol/Escort | 8 |
-| Main Battle Tank | Main gun + MG | 250 | 30 | Escort | 12 |
+
+| Type             | Weapon         | HP  | Speed | Behavior      | Fear Weight |
+| ---------------- | -------------- | --- | ----- | ------------- | ----------- |
+| Technical        | MG or light AA | 60  | 70    | Patrol        | 5           |
+| APC              | Machine gun    | 120 | 50    | Patrol/Escort | 8           |
+| Main Battle Tank | Main gun + MG  | 250 | 30    | Escort        | 12          |
 
 #### Tier 6: Aircraft (2 types)
-| Type | Weapon | HP | Speed | Behavior | Fear Weight |
-|------|--------|-----|-------|----------|-------------|
-| Attack Helicopter | Rockets, cannon | 180 | 120 | Air Interceptor | 20 |
-| Fighter | Full armament | 100 | 300 | Air Interceptor | 25 |
+
+| Type              | Weapon          | HP  | Speed | Behavior        | Fear Weight |
+| ----------------- | --------------- | --- | ----- | --------------- | ----------- |
+| Attack Helicopter | Rockets, cannon | 180 | 120   | Air Interceptor | 20          |
+| Fighter           | Full armament   | 100 | 300   | Air Interceptor | 25          |
 
 ### Air Defense Bubble System
 
 Every serious AA unit has an invisible threat radius. NOT shown on minimap.
 
-| Unit | Threat Radius | Visual Cues |
-|------|--------------|-------------|
-| HMG | 100 | Tracer fire direction |
-| Light AA | 150 | Wall of tracer fire |
-| Twin 23mm | 180 | Cannon flash, heavy tracers |
-| Shilka | 220 | Radar tracking sound, sweeping tracers |
-| Heavy 57mm | 300 | Heavy thumping report, explosions |
-| MANPADS | 200 | Missile launch smoke trail (hidden until firing) |
-| Mobile SAM | 400 | Missile warning alarm |
+| Unit       | Threat Radius | Visual Cues                                      |
+| ---------- | ------------- | ------------------------------------------------ |
+| HMG        | 100           | Tracer fire direction                            |
+| Light AA   | 150           | Wall of tracer fire                              |
+| Twin 23mm  | 180           | Cannon flash, heavy tracers                      |
+| Shilka     | 220           | Radar tracking sound, sweeping tracers           |
+| Heavy 57mm | 300           | Heavy thumping report, explosions                |
+| MANPADS    | 200           | Missile launch smoke trail (hidden until firing) |
+| Mobile SAM | 400           | Missile warning alarm                            |
 
 ### Design Principles
+
 1. Each weapon answers a different gameplay question
 2. Visual and mechanical distinction — recognize by sight and sound
 3. Fixed guns need environmental protection (sandbags, revetments)
@@ -2564,8 +2963,15 @@ SAVE_DATA = {
   // Hangar (permanent, per-gunship)
   hangar: {
     cobra: { engine: 2, armor: 1, weaponMount: 2, rotor: 1, fuel: 0, countermeasures: 0 },
-    supercobra: { engine: 0, armor: 0, weaponMount: 0, rotor: 0, fuel: 0, countermeasures: 0,
-                  twinEngine: 0 },
+    supercobra: {
+      engine: 0,
+      armor: 0,
+      weaponMount: 0,
+      rotor: 0,
+      fuel: 0,
+      countermeasures: 0,
+      twinEngine: 0,
+    },
     apache: null,
     longbow: null,
     comanche: null,
@@ -2592,10 +2998,11 @@ SAVE_DATA = {
   totalPlaytime: 14400,
   totalKills: 342,
   totalSortiesCompleted: 8,
-}
+};
 ```
 
 ### Save Triggers
+
 - Auto-save after each Sortie completion
 - Auto-save after Hangar upgrades
 - Auto-save after pilot level-up (skill allocation)
@@ -2603,7 +3010,7 @@ SAVE_DATA = {
 
 ---
 
-*End of Document*
+_End of Document_
 
 ---
 
@@ -2639,178 +3046,178 @@ REFERENCE POINTS:
 PALETTE = {
   // === TERRAIN ===
   terrain: {
-    sand:       '#e8c87a',  // warm desert sand (brighter, more vibrant)
-    hardpack:   '#d4a860',  // packed earth
-    rock:       '#9a8060',  // dark rocky ground
-    road:       '#8a7050',  // worn dirt road
-    wadi:       '#6a9ab0',  // dry riverbed (blue-ish)
-    oasis:      '#4a9a5a',  // vegetation green (vibrant)
-    dunes:      '#f0d890',  // light sand dunes (sunny)
+    sand: '#e8c87a', // warm desert sand (brighter, more vibrant)
+    hardpack: '#d4a860', // packed earth
+    rock: '#9a8060', // dark rocky ground
+    road: '#8a7050', // worn dirt road
+    wadi: '#6a9ab0', // dry riverbed (blue-ish)
+    oasis: '#4a9a5a', // vegetation green (vibrant)
+    dunes: '#f0d890', // light sand dunes (sunny)
   },
 
   // === PLAYER GUNSHIPS ===
   // Olive drab — the classic 90s military green
   // Bold outlines, steel panel accents, visible rivets
   gunship: {
-    body:       '#5a7a3a',  // olive drab (main body — vibrant)
-    bodyHi:     '#6a8a4a',  // highlight (lighter olive)
-    bodyDark:   '#3a5a2a',  // shadow (darker olive)
-    steel:      '#8a8a7a',  // steel panel accent (gray-silver)
-    steelHi:    '#9a9a8a',  // steel highlight
-    steelDark:  '#6a6a5a',  // steel shadow
-    cockpit:    '#88ccdd',  // glass blue (tinted canopy — bright)
-    cockpitHi:  '#aaeeff',  // glass highlight (specular)
-    rotor:      '#555555',  // dark gray (spinning)
-    tail:       '#5a7a3a',  // same as body
-    weaponPod:  '#4a4a4a',  // dark gray (weapons)
-    weaponHi:   '#5a5a5a',  // weapon highlight
-    skid:       '#333333',  // black (landing skids)
-    shadow:     'rgba(0,0,0,0.35)', // ground shadow
-    outline:    '#222222',  // bold outline color
+    body: '#5a7a3a', // olive drab (main body — vibrant)
+    bodyHi: '#6a8a4a', // highlight (lighter olive)
+    bodyDark: '#3a5a2a', // shadow (darker olive)
+    steel: '#8a8a7a', // steel panel accent (gray-silver)
+    steelHi: '#9a9a8a', // steel highlight
+    steelDark: '#6a6a5a', // steel shadow
+    cockpit: '#88ccdd', // glass blue (tinted canopy — bright)
+    cockpitHi: '#aaeeff', // glass highlight (specular)
+    rotor: '#555555', // dark gray (spinning)
+    tail: '#5a7a3a', // same as body
+    weaponPod: '#4a4a4a', // dark gray (weapons)
+    weaponHi: '#5a5a5a', // weapon highlight
+    skid: '#333333', // black (landing skids)
+    shadow: 'rgba(0,0,0,0.35)', // ground shadow
+    outline: '#222222', // bold outline color
     // Comanche: darker, stealth coating
-    stealth:    '#3a5a3a',  // darker olive for stealth
-    stealthHi:  '#4a6a4a',  // stealth highlight
+    stealth: '#3a5a3a', // darker olive for stealth
+    stealthHi: '#4a6a4a', // stealth highlight
   },
 
   // === ENEMIES ===
   // Brown — simple, unified. All enemies are brown.
   // Player instantly recognizes ANY enemy by color: brown = bad.
   enemy: {
-    base:       '#8a6a4a',  // BROWN (all enemies)
-    baseHi:     '#9a7a5a',  // highlight
-    baseDark:   '#6a4a2a',  // shadow
-    outline:    '#3a2a1a',  // bold outline
+    base: '#8a6a4a', // BROWN (all enemies)
+    baseHi: '#9a7a5a', // highlight
+    baseDark: '#6a4a2a', // shadow
+    outline: '#3a2a1a', // bold outline
     // Vehicles get a slightly different brown (warmer)
-    vehicle:    '#7a6040',  // darker brown (vehicles)
-    vehicleHi:  '#8a7050',  // vehicle highlight
-    vehicleDark:'#5a4020',  // vehicle shadow
+    vehicle: '#7a6040', // darker brown (vehicles)
+    vehicleHi: '#8a7050', // vehicle highlight
+    vehicleDark: '#5a4020', // vehicle shadow
     // Aircraft: gray-brown
-    aircraft:   '#7a7a6a',  // gray-brown (aircraft)
-    aircraftHi: '#8a8a7a',  // aircraft highlight
+    aircraft: '#7a7a6a', // gray-brown (aircraft)
+    aircraftHi: '#8a8a7a', // aircraft highlight
   },
 
   // === BUILDINGS ===
   // Concrete, steel, wood — military construction materials
   building: {
-    concrete:   '#c0b898',  // concrete/mud brick (warm)
-    concreteHi: '#d0c8a8',  // highlight
-    concreteDark:'#a09878', // shadow
-    steel:      '#8a8a7a',  // steel panels (gray)
-    steelHi:    '#9a9a8a',  // steel highlight
-    steelDark:  '#6a6a5a',  // steel shadow
-    wood:       '#a08050',  // wood crate texture
-    woodHi:     '#b09060',  // wood highlight
-    woodDark:   '#806030',  // wood shadow
-    tent:       '#9a8060',  // canvas tent
-    tentHi:     '#aa9070',  // highlight
-    sandbag:    '#b0a070',  // sandbag color
-    sandbagHi:  '#c0b080',  // highlight
-    fuel:       '#cc4433',  // fuel tank (RED — dangerous)
-    fuelHi:     '#dd5544',  // fuel highlight
-    fuelStripe: '#ffcc00',  // HAZARD STRIPE (yellow/black)
-    hazard:     '#ffcc00',  // hazard stripe color
-    hazardDark: '#222222',  // hazard stripe dark
-    radar:      '#6a7a6a',  // radar equipment
-    radarHi:    '#7a8a7a',  // highlight
-    antenna:    '#888888',  // antenna/metal
+    concrete: '#c0b898', // concrete/mud brick (warm)
+    concreteHi: '#d0c8a8', // highlight
+    concreteDark: '#a09878', // shadow
+    steel: '#8a8a7a', // steel panels (gray)
+    steelHi: '#9a9a8a', // steel highlight
+    steelDark: '#6a6a5a', // steel shadow
+    wood: '#a08050', // wood crate texture
+    woodHi: '#b09060', // wood highlight
+    woodDark: '#806030', // wood shadow
+    tent: '#9a8060', // canvas tent
+    tentHi: '#aa9070', // highlight
+    sandbag: '#b0a070', // sandbag color
+    sandbagHi: '#c0b080', // highlight
+    fuel: '#cc4433', // fuel tank (RED — dangerous)
+    fuelHi: '#dd5544', // fuel highlight
+    fuelStripe: '#ffcc00', // HAZARD STRIPE (yellow/black)
+    hazard: '#ffcc00', // hazard stripe color
+    hazardDark: '#222222', // hazard stripe dark
+    radar: '#6a7a6a', // radar equipment
+    radarHi: '#7a8a7a', // highlight
+    antenna: '#888888', // antenna/metal
   },
 
   // === HIGH-PRIORITY TARGETS ===
   // Red glow + hazard stripes — unmistakable
   highPriority: {
-    base:       '#cc4433',  // red base
-    highlight:  '#ee6655',  // bright red
-    glow:       'rgba(220,60,40,0.4)', // red glow aura
-    stripe:     '#ffcc00',  // hazard stripe accent
-    pulse:      'rgba(220,60,40,0.2)', // pulsing glow
+    base: '#cc4433', // red base
+    highlight: '#ee6655', // bright red
+    glow: 'rgba(220,60,40,0.4)', // red glow aura
+    stripe: '#ffcc00', // hazard stripe accent
+    pulse: 'rgba(220,60,40,0.2)', // pulsing glow
   },
 
   // === UI/HUD ===
   // Military90s radar aesthetic — diegetic (part of helicopter dashboard)
   ui: {
-    bg:         'rgba(10,15,10,0.75)', // dark green-black (CRT feel)
-    bgSolid:    '#0a100a',  // solid dark background
-    border:     '#3a5a2a',  // olive border
-    borderHi:   '#5a7a3a',  // bright olive border
-    scanline:   'rgba(50,80,50,0.1)', // CRT scanline effect
-    text:       '#88cc66',  // green text (radar green)
-    textBright: '#aaff88',  // bright green text
-    textDim:    '#446633',  // dim green text
+    bg: 'rgba(10,15,10,0.75)', // dark green-black (CRT feel)
+    bgSolid: '#0a100a', // solid dark background
+    border: '#3a5a2a', // olive border
+    borderHi: '#5a7a3a', // bright olive border
+    scanline: 'rgba(50,80,50,0.1)', // CRT scanline effect
+    text: '#88cc66', // green text (radar green)
+    textBright: '#aaff88', // bright green text
+    textDim: '#446633', // dim green text
     // HP bar: green when healthy, red when critical
-    hp:         '#44aa44',  // green (healthy)
-    hpMed:      '#ccaa33',  // yellow (medium)
-    hpLow:      '#cc3333',  // red (critical)
-    hpBar:      '#1a2a1a',  // dark background
-    hpBorder:   '#3a5a2a',  // olive border
+    hp: '#44aa44', // green (healthy)
+    hpMed: '#ccaa33', // yellow (medium)
+    hpLow: '#cc3333', // red (critical)
+    hpBar: '#1a2a1a', // dark background
+    hpBorder: '#3a5a2a', // olive border
     // Infamy: orange-amber (warning color)
-    infamy:     '#cc8833',  // amber (Infamy)
-    infamyBar:  '#1a1a0a',  // dark background
-    infamyBorder:'#5a4a2a', // amber border
+    infamy: '#cc8833', // amber (Infamy)
+    infamyBar: '#1a1a0a', // dark background
+    infamyBorder: '#5a4a2a', // amber border
     // Ammo/Equipment: cyan (electronics)
-    rocket:     '#44cccc',  // cyan (rocket ammo)
-    rocketEmpty:'#224444',  // dim cyan (empty)
-    equipment:  '#44cccc',  // cyan (equipment)
-    equipEmpty: '#224444',  // dim cyan (empty)
-    equipCooldown:'#666633', // olive (recharging)
+    rocket: '#44cccc', // cyan (rocket ammo)
+    rocketEmpty: '#224444', // dim cyan (empty)
+    equipment: '#44cccc', // cyan (equipment)
+    equipEmpty: '#224444', // dim cyan (empty)
+    equipCooldown: '#666633', // olive (recharging)
     // Minimap: military radar
-    minimap:    '#0a120a',  // very dark green-black
-    minimapGrid:'#1a2a1a',  // subtle green grid
-    minimapSweep:'rgba(50,200,50,0.1)', // radar sweep line
-    player:     '#44ff44',  // bright green dot
-    enemy:      '#ff4444',  // bright red dot
-    settlement: '#ffcc44',  // yellow diamond
-    boss:       '#ff2222',  // bright red triangle
+    minimap: '#0a120a', // very dark green-black
+    minimapGrid: '#1a2a1a', // subtle green grid
+    minimapSweep: 'rgba(50,200,50,0.1)', // radar sweep line
+    player: '#44ff44', // bright green dot
+    enemy: '#ff4444', // bright red dot
+    settlement: '#ffcc44', // yellow diamond
+    boss: '#ff2222', // bright red triangle
     // Timer
-    timer:      '#88cc66',  // green (normal)
-    timerLow:   '#ff4444',  // red (low time, pulsing)
+    timer: '#88cc66', // green (normal)
+    timerLow: '#ff4444', // red (low time, pulsing)
     // Direction arrow
-    arrow:      '#ff4444',  // red (boss direction)
+    arrow: '#ff4444', // red (boss direction)
   },
 
   // === PROJECTILES ===
   projectile: {
-    bullet:     '#ffdd44',  // bright yellow (tracer — very visible)
-    bulletTrail:'#ffaa33',  // orange (trail)
-    rocket:     '#ff6633',  // orange-red (rocket body)
-    rocketFlame:'#ffcc33',  // yellow (exhaust flame)
-    rocketTrail:'#aa6633',  // brown (smoke)
-    missile:    '#ff4444',  // red (missile body)
-    missileTrail:'#aa3333', // darker (smoke)
-    enemy:      '#ff8866',  // light red-orange (enemy bullets)
-    enemyTrail: '#cc5533',  // darker trail
+    bullet: '#ffdd44', // bright yellow (tracer — very visible)
+    bulletTrail: '#ffaa33', // orange (trail)
+    rocket: '#ff6633', // orange-red (rocket body)
+    rocketFlame: '#ffcc33', // yellow (exhaust flame)
+    rocketTrail: '#aa6633', // brown (smoke)
+    missile: '#ff4444', // red (missile body)
+    missileTrail: '#aa3333', // darker (smoke)
+    enemy: '#ff8866', // light red-orange (enemy bullets)
+    enemyTrail: '#cc5533', // darker trail
   },
 
   // === VFX ===
   vfx: {
-    explosion:  ['#ffdd44', '#ff8833', '#cc3333', '#663333'], // flash->fire->smoke->ash
-    muzzle:     '#ffdd44',  // muzzle flash (bright yellow)
-    spark:      '#ffdd44',  // spark (yellow)
-    sparkHi:    '#ffffff',  // white-hot spark center
-    smoke:      '#777777',  // gray smoke
-    smokeDark:  '#444444',  // dark smoke
-    fire:       '#ff6633',  // fire orange
-    fireBright: '#ffaa33',  // bright fire
-    chainLight: '#44ddff',  // cyan-blue (chain lightning)
-    napalm:     '#ff6633',  // orange (burning)
-    napalmBright:'#ffaa33', // bright napalm
-    damageNum:  '#ffffff',  // white (damage numbers)
-    damageCrit: '#ffdd44',  // yellow (critical hit)
-    healNum:    '#44ff44',  // green (heal numbers)
-    infamyUp:   '#ffaa33',  // amber (Infamy gain)
+    explosion: ['#ffdd44', '#ff8833', '#cc3333', '#663333'], // flash->fire->smoke->ash
+    muzzle: '#ffdd44', // muzzle flash (bright yellow)
+    spark: '#ffdd44', // spark (yellow)
+    sparkHi: '#ffffff', // white-hot spark center
+    smoke: '#777777', // gray smoke
+    smokeDark: '#444444', // dark smoke
+    fire: '#ff6633', // fire orange
+    fireBright: '#ffaa33', // bright fire
+    chainLight: '#44ddff', // cyan-blue (chain lightning)
+    napalm: '#ff6633', // orange (burning)
+    napalmBright: '#ffaa33', // bright napalm
+    damageNum: '#ffffff', // white (damage numbers)
+    damageCrit: '#ffdd44', // yellow (critical hit)
+    healNum: '#44ff44', // green (heal numbers)
+    infamyUp: '#ffaa33', // amber (Infamy gain)
   },
 
   // === TERRAIN DECORATION ===
   deco: {
-    crater:     '#7a6a4a',  // dark crater
-    craterRim:  '#9a8a5a',  // crater rim (lighter)
-    stain:      'rgba(100,60,20,0.3)', // ground stain (death mark)
-    bush:       '#4a8a3a',  // desert bush (vibrant green)
-    rock:       '#8a7a5a',  // small rock
-    crate:      '#a08050',  // wood crate
-    crateHi:    '#b09060',  // crate highlight
-    crateStripe:'#cc3333',  // crate marking (red)
+    crater: '#7a6a4a', // dark crater
+    craterRim: '#9a8a5a', // crater rim (lighter)
+    stain: 'rgba(100,60,20,0.3)', // ground stain (death mark)
+    bush: '#4a8a3a', // desert bush (vibrant green)
+    rock: '#8a7a5a', // small rock
+    crate: '#a08050', // wood crate
+    crateHi: '#b09060', // crate highlight
+    crateStripe: '#cc3333', // crate marking (red)
   },
-}
+};
 ```
 
 ### R2. Gunship Rendering (5 Types)

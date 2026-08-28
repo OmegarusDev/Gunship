@@ -20,7 +20,9 @@ function walk(dir, out = []) {
 
 let files = [];
 for (const r of roots) {
-  try { files.push(...walk(r)); } catch {}
+  try {
+    files.push(...walk(r));
+  } catch {}
 }
 // also check top-level js files
 files = [...new Set(files)].sort();
@@ -39,8 +41,10 @@ for (const f of files) {
 // Project invariants
 console.log('— lint: project invariants —');
 const check = (cond, msg) => {
-  if (!cond) { fail++; console.error(`  ✗ ${msg}`); }
-  else console.log(`  ✓ ${msg}`);
+  if (!cond) {
+    fail++;
+    console.error(`  ✗ ${msg}`);
+  } else console.log(`  ✓ ${msg}`);
 };
 
 // No duplicate else-if chains like the old app.js bug (two identical else if screens.contracts)
@@ -49,9 +53,18 @@ try {
   const app = readFileSync('js/app.js', 'utf8');
   const dups = (app.match(/else if \(currentScreen === screens\.contracts\)/g) || []).length;
   check(dups <= 1, `no duplicate contracts else-if (found ${dups}, want ≤1)`);
-  check(!app.includes('accumulator = 0;') || app.includes('Preserve sub-tick'), 'timestep preserves remainder (no unconditional accumulator=0)');
-  check(app.includes('_drawSmoothTerrain') || app.includes('render/terrain'), 'terrain delegated to render/terrain.js');
-  check(app.includes('_drawRoads') || app.includes('render/roads'), 'roads delegated to render/roads.js');
+  check(
+    !app.includes('accumulator = 0;') || app.includes('Preserve sub-tick'),
+    'timestep preserves remainder (no unconditional accumulator=0)'
+  );
+  check(
+    app.includes('_drawSmoothTerrain') || app.includes('render/terrain'),
+    'terrain delegated to render/terrain.js'
+  );
+  check(
+    app.includes('_drawRoads') || app.includes('render/roads'),
+    'roads delegated to render/roads.js'
+  );
 } catch (e) {
   console.error('  (could not read js/app.js for invariants)', e.message);
 }
@@ -64,7 +77,9 @@ try {
 } catch {}
 if (hasEslint) {
   console.log('— lint: eslint —');
-  const r = spawnSync('npx', ['eslint', 'js', '--ext', '.js,.mjs', '--max-warnings', '100'], { stdio: 'inherit' });
+  const r = spawnSync('npx', ['eslint', 'js', '--ext', '.js,.mjs', '--max-warnings', '100'], {
+    stdio: 'inherit',
+  });
   if (r.status !== 0) {
     // Don't fail gate on eslint warnings yet — just report
     console.log('(eslint reported issues — fix warnings to tighten gate)');

@@ -15,7 +15,7 @@ export const HELI = {
   drag: 0.91,
   maxSpeed: 400,
   turnSpeed: 3.5,
-  brakeDrag: 0.80,
+  brakeDrag: 0.8,
   fireRate: 3,
   bulletSpeed: 500,
   bulletDamage: 10,
@@ -30,30 +30,30 @@ export const CAMERA = {
   zoomExplore: 0.8,
   zoomLerp: 0.04,
   // Dynamic speed/combat zoom (sim tick)
-  zoomSpeedNear: 1.1,      // stationary / slow
-  zoomSpeedFar: 0.75,      // full speed
-  zoomCombatFloor: 0.95,   // minimum while firing at a target
+  zoomSpeedNear: 1.1, // stationary / slow
+  zoomSpeedFar: 0.75, // full speed
+  zoomCombatFloor: 0.95, // minimum while firing at a target
 };
 
 /** Ground-combat tuning — aggro, leashes, civilian panic. */
 export const COMBAT = {
-  aggroBase: 330,            // attack range at Heat tier 0
-  aggroPerHeatTier: 25,      // extra range per Heat tier
-  alertExtra: 200,           // alert band beyond aggro range
-  leashInfantry: 480,        // how far infantry pursue from their post
-  leashVehicle: 900,         // vehicles roam further
-  leashGrace: 120,           // alert grace beyond the leash
-  returnHomeDist: 130,       // beyond this, lost units walk back to post
-  civilianPanicRadius: 500,  // helo proximity that triggers panic (with combat)
-  gunfireMemorySec: 4,       // how long recent gunfire keeps civilians scared
-  gunfireRadius: 900,        // radius of that gunfire panic
+  aggroBase: 330, // attack range at Heat tier 0
+  aggroPerHeatTier: 25, // extra range per Heat tier
+  alertExtra: 200, // alert band beyond aggro range
+  leashInfantry: 480, // how far infantry pursue from their post
+  leashVehicle: 900, // vehicles roam further
+  leashGrace: 120, // alert grace beyond the leash
+  returnHomeDist: 130, // beyond this, lost units walk back to post
+  civilianPanicRadius: 500, // helo proximity that triggers panic (with combat)
+  gunfireMemorySec: 4, // how long recent gunfire keeps civilians scared
+  gunfireRadius: 900, // radius of that gunfire panic
 };
 
 /** HUD layout tuning. */
 export const HUD = {
-  scaleDivisor: 720,         // uiScale = clamp(min(w,h)/this, 1, scaleMax)
+  scaleDivisor: 720, // uiScale = clamp(min(w,h)/this, 1, scaleMax)
   scaleMax: 1.7,
-  narrowBreakpoint: 720,     // W below this = stacked HUD layout
+  narrowBreakpoint: 720, // W below this = stacked HUD layout
 };
 
 /**

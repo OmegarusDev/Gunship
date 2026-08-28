@@ -64,8 +64,18 @@ npm run format        # prettier
 npm run check         # same as node tools/check.mjs
 ```
 
-**Code layout:** `js/app.js` is the thin bootstrap/loop; sim logic lives in `js/sim/` (`state.js`, `movement.js`, `objectives.js`), world-gen in `js/terrain.js` + `js/world.js`, rendering in `js/render/` (`terrain.js`, `roads.js`, `hud.js`), career in `js/meta.js`.
+**Code layout:** `js/app.js` is the thin bootstrap/loop; sim logic lives in `js/sim/` (`state.js`, `movement.js`, `objectives.js`, `gameState.js`), world-gen in `js/terrain.js` + `js/world.js`, rendering in `js/render/` (`terrain.js`, `roads.js`, `hud.js`, `world.js`, `entities.js`), career in `js/meta.js`. See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the rebuild map.
+
+## Rebuild
+
+```bash
+git clone https://github.com/OmegarusDev/Gunship.git && cd Gunship
+npm ci && node tools/check.mjs   # 33 files lint + 82 meta + 99 sortie
+python3 -m http.server 8000      # http://localhost:8000
+```
+
+`npm run dev` does the same. Push to `main` triggers `deploy-pages.yml` (setup-node → gate → deploy). See [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Design
 
-See [`GAME_DESIGN.md`](GAME_DESIGN.md) for the full design doc.
+See [`GAME_DESIGN.md`](GAME_DESIGN.md) for the full design doc and [`ARCHITECTURE.md`](ARCHITECTURE.md) for how to extend it.

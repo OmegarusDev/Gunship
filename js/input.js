@@ -201,9 +201,13 @@ export class Input {
         }
 
         // A button (0) or right trigger (7) = fire (held)
-        const fireNow = gp.buttons[0]?.pressed || (gp.buttons[7]?.value > 0.5);
-        if (fireNow) { this.fireHeld = true; this.fire = true; }
-        else { this.fireHeld = false; }
+        const fireNow = gp.buttons[0]?.pressed || gp.buttons[7]?.value > 0.5;
+        if (fireNow) {
+          this.fireHeld = true;
+          this.fire = true;
+        } else {
+          this.fireHeld = false;
+        }
 
         // LB (4) = cycle target, RB (5) = cycle target mode (rising edge)
         const cycleNow = gp.buttons[4]?.pressed;
@@ -233,7 +237,10 @@ export class Input {
         if (this.keys['KeyW'] || this.keys['ArrowUp']) this.moveY = -1;
         if (this.keys['KeyS'] || this.keys['ArrowDown']) this.moveY = 1;
         const len = Math.hypot(this.moveX, this.moveY);
-        if (len > 1) { this.moveX /= len; this.moveY /= len; }
+        if (len > 1) {
+          this.moveX /= len;
+          this.moveY /= len;
+        }
       }
     }
 

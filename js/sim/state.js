@@ -19,10 +19,14 @@ export const EQUIPMENT = {
 
 export function createHeli() {
   return {
-    x: 0, y: 0, vx: 0, vy: 0,
+    x: 0,
+    y: 0,
+    vx: 0,
+    vy: 0,
     angle: -Math.PI / 2,
     bladeAngle: 0,
-    hp: 100, maxHp: 100,
+    hp: 100,
+    maxHp: 100,
     fireCooldown: 0,
     fireRate: 0.15,
     bulletSpeed: 500,
@@ -39,22 +43,44 @@ export function createHeli() {
     score: 0,
     fear: 0,
     // career-wired fields (filled by applyCareerToHeli)
-    turnMult: 1, spreadMult: 1, lockMult: 1, autoLead: false,
-    radarRange: 1, detectionMult: 1, fullSpectrum: false, reconPulse: false,
-    markedDmg: 0, dmgResist: 0, redScreenRed: 0,
-    boostDurMult: 1, boostPotency: 1, doubleTap: 0, critChance: 0, sniperBonus: 0,
-    lastStand: false, missileWarning: false, lastStandUsed: false,
+    turnMult: 1,
+    spreadMult: 1,
+    lockMult: 1,
+    autoLead: false,
+    radarRange: 1,
+    detectionMult: 1,
+    fullSpectrum: false,
+    reconPulse: false,
+    markedDmg: 0,
+    dmgResist: 0,
+    redScreenRed: 0,
+    boostDurMult: 1,
+    boostPotency: 1,
+    doubleTap: 0,
+    critChance: 0,
+    sniperBonus: 0,
+    lastStand: false,
+    missileWarning: false,
+    lastStandUsed: false,
     // per-sortie equipment
-    equipmentType: null, equipmentUsed: false, salvoShots: 0, salvoTimer: 0,
-    adrenalineT: 0, flareT: 0,
+    equipmentType: null,
+    equipmentUsed: false,
+    salvoShots: 0,
+    salvoTimer: 0,
+    adrenalineT: 0,
+    flareT: 0,
   };
 }
 
 export function createBoss() {
   return {
-    x: 0, y: 0, vx: 0, vy: 0,
+    x: 0,
+    y: 0,
+    vx: 0,
+    vy: 0,
     angle: 0,
-    hp: 0, maxHp: 0,
+    hp: 0,
+    maxHp: 0,
     speed: 0,
     damage: 0,
     range: 0,
@@ -149,6 +175,6 @@ export function getFearThreshold(fearLevel) {
 export function hunterClockRate(sortieState, activeContract) {
   const difficulty = getDifficultyProfile(activeContract?.difficultyId);
   const style = getStyle(activeContract?.styleId);
-  const heatFactor = 0.72 + sortieState.heat.value / 100 * 1.18;
+  const heatFactor = 0.72 + (sortieState.heat.value / 100) * 1.18;
   return heatFactor * (difficulty.hunterEtaMultiplier ?? 1) * (style.hunterRateMultiplier || 1);
 }

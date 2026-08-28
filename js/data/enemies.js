@@ -15,16 +15,26 @@ import { mulberry32, seededRng, weightedPick, randFloat } from '../rng.js';
 // Higher difficulty = better weapons
 
 const INFANTRY_WEAPONS = {
-  0: [ // Easy
+  0: [
+    // Easy
     { name: 'Pistol', damage: 2, range: 80, fireRate: 1.8, color: '#8a6a4a', bulletLife: 0.8 },
     { name: 'Rifle', damage: 3, range: 120, fireRate: 1.2, color: '#8a6a4a', bulletLife: 1.0 },
   ],
-  3: [ // Mid
-    { name: 'Assault Rifle', damage: 4, range: 150, fireRate: 0.8, color: '#7a5a3a', bulletLife: 1.1 },
+  3: [
+    // Mid
+    {
+      name: 'Assault Rifle',
+      damage: 4,
+      range: 150,
+      fireRate: 0.8,
+      color: '#7a5a3a',
+      bulletLife: 1.1,
+    },
     { name: 'MG', damage: 6, range: 200, fireRate: 0.4, color: '#6a5a3a', bulletLife: 1.3 },
     { name: 'RPG', damage: 15, range: 180, fireRate: 2.0, color: '#5a4a2a', bulletLife: 0.9 },
   ],
-  6: [ // Late
+  6: [
+    // Late
     { name: 'SAW', damage: 8, range: 220, fireRate: 0.25, color: '#6a5a3a', bulletLife: 1.4 },
     { name: 'ATGM', damage: 25, range: 250, fireRate: 3.0, color: '#4a3a1a', bulletLife: 1.3 },
     { name: 'MANPADS', damage: 20, range: 300, fireRate: 3.0, color: '#4a3a1a', bulletLife: 1.8 },
@@ -36,7 +46,14 @@ const VEHICLE_WEAPONS = {
     { name: 'MG Truck', damage: 5, range: 180, fireRate: 0.5, color: '#7a7a5a', bulletLife: 1.0 },
   ],
   3: [
-    { name: 'Cannon Truck', damage: 10, range: 250, fireRate: 0.3, color: '#5a5a4a', bulletLife: 1.3 },
+    {
+      name: 'Cannon Truck',
+      damage: 10,
+      range: 250,
+      fireRate: 0.3,
+      color: '#5a5a4a',
+      bulletLife: 1.3,
+    },
     { name: 'Shilka', damage: 10, range: 280, fireRate: 0.15, color: '#5a5a4a', bulletLife: 1.4 },
     { name: 'APC', damage: 8, range: 200, fireRate: 0.5, color: '#7a7a5a', bulletLife: 1.1 },
   ],
@@ -47,15 +64,9 @@ const VEHICLE_WEAPONS = {
 };
 
 const EMPLACEMENT_WEAPONS = {
-  0: [
-    { name: 'HMG', damage: 6, range: 200, fireRate: 0.4, color: '#6a5a3a', bulletLife: 1.2 },
-  ],
-  3: [
-    { name: 'ZU-23', damage: 8, range: 250, fireRate: 0.3, color: '#6a6a5a', bulletLife: 1.3 },
-  ],
-  6: [
-    { name: 'S-60', damage: 12, range: 300, fireRate: 0.2, color: '#5a6a5a', bulletLife: 1.5 },
-  ],
+  0: [{ name: 'HMG', damage: 6, range: 200, fireRate: 0.4, color: '#6a5a3a', bulletLife: 1.2 }],
+  3: [{ name: 'ZU-23', damage: 8, range: 250, fireRate: 0.3, color: '#6a6a5a', bulletLife: 1.3 }],
+  6: [{ name: 'S-60', damage: 12, range: 300, fireRate: 0.2, color: '#5a6a5a', bulletLife: 1.5 }],
 };
 
 const WEAPON_TABLES = {
@@ -106,7 +117,8 @@ export function createEnemy(className, x, y, difficulty, seed, entry = null) {
 
   return {
     className,
-    x, y,
+    x,
+    y,
     hp: cls.hp,
     maxHp: cls.hp,
     speed: cls.speed,
@@ -124,7 +136,8 @@ export function createEnemy(className, x, y, difficulty, seed, entry = null) {
     angle: seededRng(`enemy-angle:${seed}`)() * Math.PI * 2,
     id: entry?.id || `enemy-${Math.floor(x)}-${Math.floor(y)}-${className}`,
     objectiveTarget: Boolean(entry?.objectiveTarget),
-    vx: 0, vy: 0,
+    vx: 0,
+    vy: 0,
     state: 'idle',
     alertTimer: 0,
     deathTimer: 0,

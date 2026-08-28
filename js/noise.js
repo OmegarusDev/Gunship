@@ -158,8 +158,12 @@ export function voronoi(noise, x, y, scale = 0.01) {
       const px = cx + (h - 0.5);
       const py = cy + (h * 0.7 + 0.15);
       const dist = Math.hypot(x * scale - px, y * scale - py);
-      if (dist < minDist) { secondDist = minDist; minDist = dist; }
-      else if (dist < secondDist) { secondDist = dist; }
+      if (dist < minDist) {
+        secondDist = minDist;
+        minDist = dist;
+      } else if (dist < secondDist) {
+        secondDist = dist;
+      }
     }
   }
   // Edge detection: close to cell boundary = rocky

@@ -25,13 +25,13 @@ import { createNoise, fbm, ridged } from './noise.js';
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const TERRAIN_TYPES = {
-  WADI: 'wadi',        // dry riverbed — lowest, sandy/gravel, vehicles slow
-  OASIS: 'oasis',      // vegetated wet spot — settlement magnet
-  SAND: 'sand',        // standard desert floor
-  HARDPACK: 'hardpack',// compacted flat desert — fast travel
-  GRAVEL: 'gravel',    // rocky piedmont / fan apron
-  DUNES: 'dunes',      // soft rolling sand — slow travel
-  ROCK: 'rock',        // mountain / escarpment / outcrop
+  WADI: 'wadi', // dry riverbed — lowest, sandy/gravel, vehicles slow
+  OASIS: 'oasis', // vegetated wet spot — settlement magnet
+  SAND: 'sand', // standard desert floor
+  HARDPACK: 'hardpack', // compacted flat desert — fast travel
+  GRAVEL: 'gravel', // rocky piedmont / fan apron
+  DUNES: 'dunes', // soft rolling sand — slow travel
+  ROCK: 'rock', // mountain / escarpment / outcrop
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -56,10 +56,10 @@ function buildSkeleton(rng, half, worldSize) {
       const cand = {
         x: Math.cos(ang) * dist,
         y: Math.sin(ang) * dist,
-        peak: 700 + rng() * 1400,       // metres of prominence
-        radius: 500 + rng() * 1000,     // footprint radius
+        peak: 700 + rng() * 1400, // metres of prominence
+        radius: 500 + rng() * 1000, // footprint radius
       };
-      const tooClose = highs.some(h => Math.hypot(h.x - cand.x, h.y - cand.y) < minSep);
+      const tooClose = highs.some((h) => Math.hypot(h.x - cand.x, h.y - cand.y) < minSep);
       if (!tooClose) placed = cand;
     }
     if (placed) highs.push(placed);
@@ -85,7 +85,8 @@ function buildSkeleton(rng, half, worldSize) {
 
 function traceWadi(start, dip, basin, half, rng, noise, maxLen) {
   const pts = [{ x: start.x, y: start.y }];
-  let x = start.x, y = start.y;
+  let x = start.x,
+    y = start.y;
   let len = 0;
   const step = 110;
   let phase = rng() * Math.PI * 2;
@@ -216,7 +217,10 @@ export function createTerrain(seed, worldSize = 6000) {
       const px = s.a.x + t * dx;
       const py = s.a.y + t * dy;
       const d = Math.hypot(x - px, y - py);
-      if (d < best) { best = d; bestOrder = s.order; }
+      if (d < best) {
+        best = d;
+        bestOrder = s.order;
+      }
     }
     return { dist: best, order: bestOrder };
   }

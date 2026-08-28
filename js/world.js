@@ -14,12 +14,12 @@ import { createTerrain } from './terrain.js';
 // ══════════════════════════════════════════════════════════════
 
 export const SURFACE = {
-  paved:  { speedMod: 1.3, label: 'Paved' },
-  dirt:   { speedMod: 1.0, label: 'Dirt' },
-  track:  { speedMod: 0.8, label: 'Track' },
-  sand:   { speedMod: 1.0, label: 'Sand' },
-  dunes:  { speedMod: 0.6, label: 'Dunes' },
-  rock:   { speedMod: 0.8, label: 'Rock' },
+  paved: { speedMod: 1.3, label: 'Paved' },
+  dirt: { speedMod: 1.0, label: 'Dirt' },
+  track: { speedMod: 0.8, label: 'Track' },
+  sand: { speedMod: 1.0, label: 'Sand' },
+  dunes: { speedMod: 0.6, label: 'Dunes' },
+  rock: { speedMod: 0.8, label: 'Rock' },
   gravel: { speedMod: 0.9, label: 'Gravel' },
 };
 
@@ -30,7 +30,8 @@ export function getSpeedMod(x, y, roads) {
     for (let i = 0; i < road.points.length - 1; i++) {
       const p = road.points[i];
       const q = road.points[i + 1];
-      const dx = q.x - p.x, dy = q.y - p.y;
+      const dx = q.x - p.x,
+        dy = q.y - p.y;
       const lenSq = dx * dx + dy * dy;
       if (lenSq === 0) continue;
       let t = ((x - p.x) * dx + (y - p.y) * dy) / lenSq;
@@ -67,13 +68,27 @@ function getTerrainGrid(terrain, worldSize) {
       // Base traversal cost by ground: wadis are natural corridors,
       // dunes/rock are slow, settlements (oasis) avoided by through-roads.
       switch (ce.type) {
-        case 'hardpack': cost[idx] = 0.8; break;
-        case 'sand':     cost[idx] = 1.0; break;
-        case 'wadi':     cost[idx] = 0.85; break;
-        case 'gravel':   cost[idx] = 1.1; break;
-        case 'dunes':    cost[idx] = 2.4; break;
-        case 'rock':     cost[idx] = 7.0; break;
-        default:         cost[idx] = 3.5; break; // oasis
+        case 'hardpack':
+          cost[idx] = 0.8;
+          break;
+        case 'sand':
+          cost[idx] = 1.0;
+          break;
+        case 'wadi':
+          cost[idx] = 0.85;
+          break;
+        case 'gravel':
+          cost[idx] = 1.1;
+          break;
+        case 'dunes':
+          cost[idx] = 2.4;
+          break;
+        case 'rock':
+          cost[idx] = 7.0;
+          break;
+        default:
+          cost[idx] = 3.5;
+          break; // oasis
       }
     }
   }
@@ -89,11 +104,15 @@ function leastCostPath(ax, ay, bx, by, grid) {
     Math.max(0, Math.min(n - 1, Math.floor((x + grid.half) / cell))),
     Math.max(0, Math.min(n - 1, Math.floor((y + grid.half) / cell))),
   ];
-  let [sx, sy] = toGrid(ax, ay);
-  let [txx, tyy] = toGrid(bx, by);
+  const [sx, sy] = toGrid(ax, ay);
+  const [txx, tyy] = toGrid(bx, by);
   const start = sy * n + sx;
   const goal = tyy * n + txx;
-  if (start === goal) return [{ x: ax, y: ay }, { x: bx, y: by }];
+  if (start === goal)
+    return [
+      { x: ax, y: ay },
+      { x: bx, y: by },
+    ];
 
   const gScore = new Float32Array(n * n).fill(Infinity);
   const cameFrom = new Int32Array(n * n).fill(-1);
@@ -117,7 +136,8 @@ function leastCostPath(ax, ay, bx, by, grid) {
       heap[0] = last;
       let i = 0;
       for (;;) {
-        const l = i * 2 + 1, r = l + 1;
+        const l = i * 2 + 1,
+          r = l + 1;
         let m = i;
         if (l < heap.length && heap[l][0] < heap[m][0]) m = l;
         if (r < heap.length && heap[r][0] < heap[m][0]) m = r;
@@ -130,25 +150,41 @@ function leastCostPath(ax, ay, bx, by, grid) {
   };
 
   const h = (idx) => {
-    const x = idx % n, y = (idx / n) | 0;
-    const dx = x - txx, dy = y - tyy;
+    const x = idx % n,
+      y = (idx / n) | 0;
+    const dx = x - txx,
+      dy = y - tyy;
     return Math.sqrt(dx * dx + dy * dy) * cell * 0.8;
   };
 
   gScore[start] = 0;
   push(h(start), start);
 
-  const DIRS = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]];
+  const DIRS = [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+    [1, 1],
+    [1, -1],
+    [-1, 1],
+    [-1, -1],
+  ];
   let found = false;
   let guard = 0;
   while (heap.length && guard++ < 60000) {
     const [, cur] = pop();
-    if (cur === goal) { found = true; break; }
+    if (cur === goal) {
+      found = true;
+      break;
+    }
     if (closed[cur]) continue;
     closed[cur] = 1;
-    const cx = cur % n, cy = (cur / n) | 0;
+    const cx = cur % n,
+      cy = (cur / n) | 0;
     for (const [dx, dy] of DIRS) {
-      const nx = cx + dx, ny = cy + dy;
+      const nx = cx + dx,
+        ny = cy + dy;
       if (nx < 0 || ny < 0 || nx >= n || ny >= n) continue;
       const ni = ny * n + nx;
       if (closed[ni]) continue;
@@ -169,7 +205,8 @@ function leastCostPath(ax, ay, bx, by, grid) {
   const pts = [];
   let cur = goal;
   while (cur !== -1) {
-    const x = cur % n, y = (cur / n) | 0;
+    const x = cur % n,
+      y = (cur / n) | 0;
     pts.push({ x: -grid.half + (x + 0.5) * cell, y: -grid.half + (y + 0.5) * cell });
     if (cur === start) break;
     cur = cameFrom[cur];
@@ -191,15 +228,20 @@ function decimatePath(pts, spacing) {
   for (let i = 1; i < pts.length; i++) {
     const d = Math.hypot(pts[i].x - out[out.length - 1].x, pts[i].y - out[out.length - 1].y);
     acc += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
-    if (acc >= spacing) { out.push(pts[i]); acc = 0; }
+    if (acc >= spacing) {
+      out.push(pts[i]);
+      acc = 0;
+    }
   }
   const last = pts[pts.length - 1];
-  if (Math.hypot(last.x - out[out.length - 1].x, last.y - out[out.length - 1].y) > 30) out.push(last);
+  if (Math.hypot(last.x - out[out.length - 1].x, last.y - out[out.length - 1].y) > 30)
+    out.push(last);
   // One Chaikin pass on interior points
   if (out.length > 2) {
     const sm = [out[0]];
     for (let i = 0; i < out.length - 1; i++) {
-      const p = out[i], q = out[i + 1];
+      const p = out[i],
+        q = out[i + 1];
       sm.push({ x: p.x * 0.72 + q.x * 0.28, y: p.y * 0.72 + q.y * 0.28 });
       sm.push({ x: p.x * 0.28 + q.x * 0.72, y: p.y * 0.28 + q.y * 0.72 });
     }
@@ -212,10 +254,15 @@ function decimatePath(pts, spacing) {
 function delaunay(points) {
   const n = points.length;
   if (n < 3) return [];
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  let minX = Infinity,
+    minY = Infinity,
+    maxX = -Infinity,
+    maxY = -Infinity;
   for (const p of points) {
-    if (p.x < minX) minX = p.x; if (p.y < minY) minY = p.y;
-    if (p.x > maxX) maxX = p.x; if (p.y > maxY) maxY = p.y;
+    if (p.x < minX) minX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y > maxY) maxY = p.y;
   }
   const dx = maxX - minX || 1;
   const dy = maxY - minY || 1;
@@ -229,10 +276,13 @@ function delaunay(points) {
     { x: midx, y: midy + margin * 1.5 },
   ];
   const allPts = [...points, st[0], st[1], st[2]];
-  const si = n, sj = n + 1, sk = n + 2;
-  let tris = [[si, sj, sk]];
+  const si = n,
+    sj = n + 1,
+    sk = n + 2;
+  const tris = [[si, sj, sk]];
   for (let i = 0; i < n; i++) {
-    const px = allPts[i].x, py = allPts[i].y;
+    const px = allPts[i].x,
+      py = allPts[i].y;
     const bad = [];
     for (let t = 0; t < tris.length; t++) {
       const [a, b, c] = tris[t];
@@ -242,14 +292,25 @@ function delaunay(points) {
     const edges = [];
     for (const t of bad) {
       const [a, b, c] = tris[t];
-      for (const e of [[a, b], [b, c], [c, a]]) {
+      for (const e of [
+        [a, b],
+        [b, c],
+        [c, a],
+      ]) {
         const key = e[0] < e[1] ? `${e[0]}_${e[1]}` : `${e[1]}_${e[0]}`;
         let shared = false;
         for (const t2 of bad) {
           if (t2 === t) continue;
           const [a2, b2, c2] = tris[t2];
-          for (const e2 of [[a2, b2], [b2, c2], [c2, a2]]) {
-            if (key === (e2[0] < e2[1] ? `${e2[0]}_${e2[1]}` : `${e2[1]}_${e2[0]}`)) { shared = true; break; }
+          for (const e2 of [
+            [a2, b2],
+            [b2, c2],
+            [c2, a2],
+          ]) {
+            if (key === (e2[0] < e2[1] ? `${e2[0]}_${e2[1]}` : `${e2[1]}_${e2[0]}`)) {
+              shared = true;
+              break;
+            }
           }
           if (shared) break;
         }
@@ -265,12 +326,16 @@ function delaunay(points) {
 }
 
 function ptInCircumcircle(px, py, a, b, c) {
-  const ax = a.x - px, ay = a.y - py;
-  const bx = b.x - px, by = b.y - py;
-  const cx = c.x - px, cy = c.y - py;
-  const det = (ax * ax + ay * ay) * (bx * cy - cx * by)
-            - (bx * bx + by * by) * (ax * cy - cx * ay)
-            + (cx * cx + cy * cy) * (ax * by - bx * ay);
+  const ax = a.x - px,
+    ay = a.y - py;
+  const bx = b.x - px,
+    by = b.y - py;
+  const cx = c.x - px,
+    cy = c.y - py;
+  const det =
+    (ax * ax + ay * ay) * (bx * cy - cx * by) -
+    (bx * bx + by * by) * (ax * cy - cx * ay) +
+    (cx * cx + cy * cy) * (ax * by - bx * ay);
   return det > 1e-10;
 }
 
@@ -278,11 +343,18 @@ function triangulationEdges(triangles) {
   const edgeSet = new Set();
   const edges = [];
   for (const tri of triangles) {
-    for (const [p1, p2] of [[tri.a, tri.b], [tri.b, tri.c], [tri.c, tri.a]]) {
+    for (const [p1, p2] of [
+      [tri.a, tri.b],
+      [tri.b, tri.c],
+      [tri.c, tri.a],
+    ]) {
       const k1 = `${p1.x.toFixed(1)},${p1.y.toFixed(1)}`;
       const k2 = `${p2.x.toFixed(1)},${p2.y.toFixed(1)}`;
       const key = k1 < k2 ? k1 + '|' + k2 : k2 + '|' + k1;
-      if (!edgeSet.has(key)) { edgeSet.add(key); edges.push([p1, p2]); }
+      if (!edgeSet.has(key)) {
+        edgeSet.add(key);
+        edges.push([p1, p2]);
+      }
     }
   }
   return edges;
@@ -294,7 +366,10 @@ function triangulationEdges(triangles) {
 
 /** Union-find for MST construction. */
 function ufFind(parent, i) {
-  while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; }
+  while (parent[i] !== i) {
+    parent[i] = parent[parent[i]];
+    i = parent[i];
+  }
   return parent[i];
 }
 
@@ -317,7 +392,8 @@ export function generateRoads(seed, worldSize, terrain, sites) {
   const connectedCount = { n: 0 };
 
   for (const e of edges) {
-    const ra = ufFind(parent, e.a), rb = ufFind(parent, e.b);
+    const ra = ufFind(parent, e.a),
+      rb = ufFind(parent, e.b);
     if (ra === rb) continue;
     parent[ra] = rb;
     const path = leastCostPath(nodes[e.a].x, nodes[e.a].y, nodes[e.b].x, nodes[e.b].y, grid);
@@ -334,12 +410,16 @@ export function generateRoads(seed, worldSize, terrain, sites) {
 
   // ── Secondary dirt connectors: each site → nearest existing road ──
   const pointOnRoads = (x, y) => {
-    let best = null, bd = Infinity;
+    let best = null,
+      bd = Infinity;
     for (const r of roads) {
       if (r.hierarchy !== 'highway') continue;
       for (const p of r.points) {
         const d = Math.hypot(p.x - x, p.y - y);
-        if (d < bd) { bd = d; best = p; }
+        if (d < bd) {
+          bd = d;
+          best = p;
+        }
       }
     }
     return best ? { p: best, d: bd } : null;
@@ -348,10 +428,20 @@ export function generateRoads(seed, worldSize, terrain, sites) {
     const near = pointOnRoads(s.x, s.y);
     if (!near || near.d > 260) {
       // Not adjacent to the highway network — route a dirt spur.
-      const target = near ? near.p : { x: clamp(s.x * 0.5, -worldSize * 0.4, worldSize * 0.4), y: clamp(s.y * 0.5, -worldSize * 0.4, worldSize * 0.4) };
+      const target = near
+        ? near.p
+        : {
+            x: clamp(s.x * 0.5, -worldSize * 0.4, worldSize * 0.4),
+            y: clamp(s.y * 0.5, -worldSize * 0.4, worldSize * 0.4),
+          };
       const path = leastCostPath(s.x, s.y, target.x, target.y, grid);
       if (path && path.length >= 2) {
-        roads.push({ points: path, width: randFloat(14, 22, rng), surface: 'dirt', hierarchy: 'secondary' });
+        roads.push({
+          points: path,
+          width: randFloat(14, 22, rng),
+          surface: 'dirt',
+          hierarchy: 'secondary',
+        });
       }
     }
   }
@@ -384,15 +474,22 @@ export function generateRoads(seed, worldSize, terrain, sites) {
     for (const { i } of peripheral) {
       const s = sites[i];
       // Best edge point: far from all sites AND far from previous exits.
-      let best = null, bestScore = -Infinity;
+      let best = null,
+        bestScore = -Infinity;
       for (const e of edgePts) {
         let score = minDistToSites(e);
         for (const t of taken) {
           const d = Math.hypot(t.x - e.x, t.y - e.y);
-          if (d < 2600) { score = -Infinity; break; } // spread exits apart
+          if (d < 2600) {
+            score = -Infinity;
+            break;
+          } // spread exits apart
           score += d * 0.15;
         }
-        if (score > bestScore) { bestScore = score; best = e; }
+        if (score > bestScore) {
+          bestScore = score;
+          best = e;
+        }
       }
       if (!best) continue;
       const path = leastCostPath(s.x, s.y, best.x, best.y, grid);
@@ -410,17 +507,26 @@ export function generateRoads(seed, worldSize, terrain, sites) {
 
   // ── Local tracks: short organic spurs off the network (texture) ──
   for (let i = 0; i < randInt(8, 14, rng); i++) {
-    const parentRoad = pick(roads.filter(r => r.hierarchy !== 'local'), rng);
+    const parentRoad = pick(
+      roads.filter((r) => r.hierarchy !== 'local'),
+      rng
+    );
     if (!parentRoad || parentRoad.points.length < 2) continue;
     const idx = randInt(0, parentRoad.points.length - 2, rng);
-    const p1 = parentRoad.points[idx], p2 = parentRoad.points[idx + 1];
+    const p1 = parentRoad.points[idx],
+      p2 = parentRoad.points[idx + 1];
     const t = rng();
     const start = { x: p1.x + (p2.x - p1.x) * t, y: p1.y + (p2.y - p1.y) * t };
     const parentAngle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
     const growAngle = parentAngle + (rng() > 0.5 ? 1 : -1) * (0.5 + rng() * 1.6);
     const pts = growthRoad(start, growAngle, worldSize, roads, rng, 0.05);
     if (pts.length >= 3) {
-      roads.push({ points: pts, width: randFloat(6, 12, rng), surface: 'track', hierarchy: 'local' });
+      roads.push({
+        points: pts,
+        width: randFloat(6, 12, rng),
+        surface: 'track',
+        hierarchy: 'local',
+      });
     }
   }
 
@@ -429,10 +535,12 @@ export function generateRoads(seed, worldSize, terrain, sites) {
 
 function bezierRoad(a, b, rng, subdivisions) {
   const points = [];
-  const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+  const mx = (a.x + b.x) / 2,
+    my = (a.y + b.y) / 2;
   const angle = Math.atan2(b.y - a.y, b.x - a.x);
   const perpAngle = angle + Math.PI / 2;
-  const offsetDist = Math.hypot(b.x - a.x, b.y - a.y) * (0.1 + rng() * 0.2) * (rng() > 0.5 ? 1 : -1);
+  const offsetDist =
+    Math.hypot(b.x - a.x, b.y - a.y) * (0.1 + rng() * 0.2) * (rng() > 0.5 ? 1 : -1);
   const cp = { x: mx + Math.cos(perpAngle) * offsetDist, y: my + Math.sin(perpAngle) * offsetDist };
   for (let i = 0; i <= subdivisions; i++) {
     const t = i / subdivisions;
@@ -446,7 +554,9 @@ function bezierRoad(a, b, rng, subdivisions) {
 
 function growthRoad(start, startAngle, worldSize, existingRoads, rng, maxLenFrac) {
   const points = [{ ...start }];
-  let x = start.x, y = start.y, angle = startAngle;
+  let x = start.x,
+    y = start.y,
+    angle = startAngle;
   const totalLen = worldSize * (0.03 + rng() * maxLenFrac);
   let traveled = 0;
   while (traveled < totalLen) {
@@ -458,12 +568,16 @@ function growthRoad(start, startAngle, worldSize, existingRoads, rng, maxLenFrac
     let tooClose = false;
     for (const road of existingRoads) {
       for (const p of road.points) {
-        if (Math.hypot(nx - p.x, ny - p.y) < road.width + 10) { tooClose = true; break; }
+        if (Math.hypot(nx - p.x, ny - p.y) < road.width + 10) {
+          tooClose = true;
+          break;
+        }
       }
       if (tooClose) break;
     }
     if (tooClose) break;
-    x = nx; y = ny;
+    x = nx;
+    y = ny;
     points.push({ x, y });
     traveled += stepLen;
   }
@@ -480,12 +594,13 @@ export const ARCHETYPES = {
     enemyCount: [1, 8],
     // class → weight (resolved at worldgen)
     classes: { unarmed: 10, rifleman: 2, assault: 1 },
-    minArmed: 1,            // normally at least one gunman defends the village
+    minArmed: 1, // normally at least one gunman defends the village
     unarmedOnlyChance: 0.25, // ...but tiny hamlets may be wholly civilian
     buildings: ['hut', 'hut', 'sandbag', 'crate_stack'],
-    fear: [5, 15], dollars: [10, 50],
-    detectionRadius: 350,  // enemies start shooting from this distance
-    alertRadius: 500,      // reinforcements spawn when alerted
+    fear: [5, 15],
+    dollars: [10, 50],
+    detectionRadius: 350, // enemies start shooting from this distance
+    alertRadius: 500, // reinforcements spawn when alerted
     garrisonFraction: 0.3, // 30% always present
     clearPenalty: 15,
   },
@@ -495,7 +610,8 @@ export const ARCHETYPES = {
     classes: { unarmed: 5, rifleman: 3, assault: 2, mg: 1, rpg: 1 },
     minArmed: 2,
     buildings: ['hut', 'depot', 'tower', 'sandbag', 'barracks'],
-    fear: [20, 60], dollars: [50, 200],
+    fear: [20, 60],
+    dollars: [50, 200],
     detectionRadius: 400,
     alertRadius: 550,
     garrisonFraction: 0.25,
@@ -507,7 +623,8 @@ export const ARCHETYPES = {
     classes: { rifleman: 6, assault: 3, mg: 2, rpg: 2, manpads: 1 },
     minArmed: 3,
     buildings: ['sandbag', 'depot', 'tower', 'barracks', 'crate_stack'],
-    fear: [15, 40], dollars: [30, 120],
+    fear: [15, 40],
+    dollars: [30, 120],
     detectionRadius: 380,
     alertRadius: 520,
     garrisonFraction: 0.3,
@@ -516,10 +633,22 @@ export const ARCHETYPES = {
   base: {
     buildingCount: [8, 30],
     enemyCount: [20, 80],
-    classes: { unarmed: 1, rifleman: 3, assault: 3, mg: 2, rpg: 2, manpads: 1, lightAA: 1, shilka: 1, tank: 1, apc: 1 },
+    classes: {
+      unarmed: 1,
+      rifleman: 3,
+      assault: 3,
+      mg: 2,
+      rpg: 2,
+      manpads: 1,
+      lightAA: 1,
+      shilka: 1,
+      tank: 1,
+      apc: 1,
+    },
     minArmed: 4, // a couple of labourers at most; bases are heavily defended
     buildings: ['bunker', 'barracks', 'depot', 'tower', 'garage', 'sandbag', 'crate_stack'],
-    fear: [40, 120], dollars: [100, 500],
+    fear: [40, 120],
+    dollars: [100, 500],
     detectionRadius: 450,
     alertRadius: 600,
     garrisonFraction: 0.2,
@@ -534,18 +663,114 @@ export const ARCHETYPES = {
 // Enemy classes define the COUNT and CATEGORY of enemy.
 // Loadout (weapon type) is resolved on discovery based on difficulty.
 export const ENEMY_CLASSES = {
-  unarmed:    { hp: 8,  speed: 20, points: 5,  color: '#a08060', size: 3, behavior: 'patrol', category: 'infantry' },
-  rifleman:   { hp: 15, speed: 30, points: 10, color: '#8a6a4a', size: 4, behavior: 'patrol', category: 'infantry' },
-  assault:    { hp: 20, speed: 35, points: 15, color: '#7a5a3a', size: 4, behavior: 'ambush', category: 'infantry' },
-  mg:         { hp: 25, speed: 0,  points: 20, color: '#6a5a3a', size: 5, behavior: 'guard',  category: 'infantry' },
-  rpg:        { hp: 18, speed: 25, points: 25, color: '#5a4a2a', size: 4, behavior: 'ambush', category: 'infantry' },
-  manpads:    { hp: 15, speed: 20, points: 40, color: '#4a3a1a', size: 4, behavior: 'guard',  category: 'infantry' },
-  lightAA:    { hp: 40, speed: 0,  points: 30, color: '#6a6a5a', size: 6, behavior: 'fixed',  category: 'emplacement' },
-  shilka:     { hp: 60, speed: 40, points: 50, color: '#5a5a4a', size: 8, behavior: 'escort', category: 'vehicle' },
-  tank:       { hp: 120,speed: 25, points: 75, color: '#6a6a4a', size: 10,behavior: 'patrol', category: 'vehicle' },
-  apc:        { hp: 80, speed: 35, points: 40, color: '#7a7a5a', size: 9, behavior: 'escort', category: 'vehicle' },
-  sam:        { hp: 50, speed: 30, points: 60, color: '#5a6a5a', size: 8, behavior: 'mobile_def', category: 'vehicle' },
-  technical:  { hp: 45, speed: 55, points: 25, color: '#7a6040', size: 7, behavior: 'patrol', category: 'vehicle' },
+  unarmed: {
+    hp: 8,
+    speed: 20,
+    points: 5,
+    color: '#a08060',
+    size: 3,
+    behavior: 'patrol',
+    category: 'infantry',
+  },
+  rifleman: {
+    hp: 15,
+    speed: 30,
+    points: 10,
+    color: '#8a6a4a',
+    size: 4,
+    behavior: 'patrol',
+    category: 'infantry',
+  },
+  assault: {
+    hp: 20,
+    speed: 35,
+    points: 15,
+    color: '#7a5a3a',
+    size: 4,
+    behavior: 'ambush',
+    category: 'infantry',
+  },
+  mg: {
+    hp: 25,
+    speed: 0,
+    points: 20,
+    color: '#6a5a3a',
+    size: 5,
+    behavior: 'guard',
+    category: 'infantry',
+  },
+  rpg: {
+    hp: 18,
+    speed: 25,
+    points: 25,
+    color: '#5a4a2a',
+    size: 4,
+    behavior: 'ambush',
+    category: 'infantry',
+  },
+  manpads: {
+    hp: 15,
+    speed: 20,
+    points: 40,
+    color: '#4a3a1a',
+    size: 4,
+    behavior: 'guard',
+    category: 'infantry',
+  },
+  lightAA: {
+    hp: 40,
+    speed: 0,
+    points: 30,
+    color: '#6a6a5a',
+    size: 6,
+    behavior: 'fixed',
+    category: 'emplacement',
+  },
+  shilka: {
+    hp: 60,
+    speed: 40,
+    points: 50,
+    color: '#5a5a4a',
+    size: 8,
+    behavior: 'escort',
+    category: 'vehicle',
+  },
+  tank: {
+    hp: 120,
+    speed: 25,
+    points: 75,
+    color: '#6a6a4a',
+    size: 10,
+    behavior: 'patrol',
+    category: 'vehicle',
+  },
+  apc: {
+    hp: 80,
+    speed: 35,
+    points: 40,
+    color: '#7a7a5a',
+    size: 9,
+    behavior: 'escort',
+    category: 'vehicle',
+  },
+  sam: {
+    hp: 50,
+    speed: 30,
+    points: 60,
+    color: '#5a6a5a',
+    size: 8,
+    behavior: 'mobile_def',
+    category: 'vehicle',
+  },
+  technical: {
+    hp: 45,
+    speed: 55,
+    points: 25,
+    color: '#7a6040',
+    size: 7,
+    behavior: 'patrol',
+    category: 'vehicle',
+  },
 };
 
 /** Resolve a class name to an enemy type name (for backwards compat with app.js). */
@@ -583,7 +808,11 @@ export function generateSites(seed, roads, worldSize, terrain) {
   if (terrain) {
     // 1) Water anchors — oases get first claim (strongest sites).
     for (const o of terrain.oases) {
-      candidates.push({ x: o.x + randFloat(-90, 90, rng), y: o.y + randFloat(-90, 90, rng), kind: 'water' });
+      candidates.push({
+        x: o.x + randFloat(-90, 90, rng),
+        y: o.y + randFloat(-90, 90, rng),
+        kind: 'water',
+      });
     }
     // Wadi-bank hamlets along trunk channels.
     for (const w of terrain.wadis) {
@@ -592,8 +821,9 @@ export function generateSites(seed, roads, worldSize, terrain) {
         if (rng() < 0.55) continue;
         const p = w.points[Math.floor(t * (w.points.length - 1))];
         // Offset perpendicular off the channel bed.
-        const nxt = w.points[Math.min(w.points.length - 1, Math.floor(t * (w.points.length - 1)) + 1)];
-        const ang = Math.atan2(nxt.y - p.y, nxt.x - p.x) + Math.PI / 2 * (rng() > 0.5 ? 1 : -1);
+        const nxt =
+          w.points[Math.min(w.points.length - 1, Math.floor(t * (w.points.length - 1)) + 1)];
+        const ang = Math.atan2(nxt.y - p.y, nxt.x - p.x) + (Math.PI / 2) * (rng() > 0.5 ? 1 : -1);
         candidates.push({
           x: p.x + Math.cos(ang) * (w.width * 0.9 + 40),
           y: p.y + Math.sin(ang) * (w.width * 0.9 + 40),
@@ -605,7 +835,11 @@ export function generateSites(seed, roads, worldSize, terrain) {
     for (const t of terrain.wadis) {
       if (t.order !== 2) continue;
       const end = t.points[0];
-      candidates.push({ x: end.x + randFloat(-60, 60, rng), y: end.y + randFloat(-60, 60, rng), kind: 'junction' });
+      candidates.push({
+        x: end.x + randFloat(-60, 60, rng),
+        y: end.y + randFloat(-60, 60, rng),
+        kind: 'junction',
+      });
     }
     // 3) High-ground anchors — defensible spurs below peaks.
     for (const h of terrain.highs) {
@@ -631,7 +865,11 @@ export function generateSites(seed, roads, worldSize, terrain) {
   } else {
     // Fallback: legacy random centres (no terrain provided).
     for (let i = 0; i < 6; i++) {
-      candidates.push({ x: randFloat(-worldSize * 0.35, worldSize * 0.35, rng), y: randFloat(-worldSize * 0.35, worldSize * 0.35, rng), kind: 'scatter' });
+      candidates.push({
+        x: randFloat(-worldSize * 0.35, worldSize * 0.35, rng),
+        y: randFloat(-worldSize * 0.35, worldSize * 0.35, rng),
+        kind: 'scatter',
+      });
     }
   }
 
@@ -642,7 +880,7 @@ export function generateSites(seed, roads, worldSize, terrain) {
   const passesTypeCheck = (c) => {
     if (!terrain) return true;
     const ty = terrain.type(c.x, c.y);
-    if (ty === 'rock') return false;             // no villages on peaks
+    if (ty === 'rock') return false; // no villages on peaks
     if (ty === 'wadi' && c.kind !== 'water') return false; // not IN the channel
     return true;
   };
@@ -654,19 +892,23 @@ export function generateSites(seed, roads, worldSize, terrain) {
     let tooClose = false;
     for (const p of placed) {
       // Water sites may pack tighter (real oases chain closely).
-      const sep = (c.kind === 'water' && p.kind === 'water') ? minSep * 0.72 : minSep;
-      if (Math.hypot(c.x - p.x, c.y - p.y) < sep) { tooClose = true; break; }
+      const sep = c.kind === 'water' && p.kind === 'water' ? minSep * 0.72 : minSep;
+      if (Math.hypot(c.x - p.x, c.y - p.y) < sep) {
+        tooClose = true;
+        break;
+      }
     }
     if (!tooClose) placed.push(c);
   }
 
   // ── Waypoint hamlets: midpoints between distant water sites ─────────
   // Caravan logic — long crossings stop where the road says stop.
-  const waterSites = placed.filter(p => p.kind === 'water');
+  const waterSites = placed.filter((p) => p.kind === 'water');
   const waypoints = [];
   for (let i = 0; i < waterSites.length && waypoints.length < 4; i++) {
     for (let j = i + 1; j < waterSites.length && waypoints.length < 4; j++) {
-      const a = waterSites[i], b = waterSites[j];
+      const a = waterSites[i],
+        b = waterSites[j];
       const d = Math.hypot(a.x - b.x, a.y - b.y);
       if (d < 3200) continue;
       const mid = {
@@ -675,8 +917,8 @@ export function generateSites(seed, roads, worldSize, terrain) {
         kind: 'waypoint',
       };
       if (!passesTypeCheck(mid)) continue;
-      if (placed.some(p => Math.hypot(mid.x - p.x, mid.y - p.y) < 380)) continue;
-      if (waypoints.some(p => Math.hypot(mid.x - p.x, mid.y - p.y) < 500)) continue;
+      if (placed.some((p) => Math.hypot(mid.x - p.x, mid.y - p.y) < 380)) continue;
+      if (waypoints.some((p) => Math.hypot(mid.x - p.x, mid.y - p.y) < 500)) continue;
       waypoints.push(mid);
       placed.push(mid);
       if (placed.length >= 16) break;
@@ -685,7 +927,8 @@ export function generateSites(seed, roads, worldSize, terrain) {
 
   // ── Sector coverage guarantee: no silent quarter of the map ─────────
   // 3x3 sectors over the play area; force a hamlet into any empty one.
-  const SECT = 3, secW = (worldSize * 0.88) / SECT;
+  const SECT = 3,
+    secW = (worldSize * 0.88) / SECT;
   const sectorOf = (p) => {
     const cx = Math.min(SECT - 1, Math.max(0, Math.floor((p.x + worldSize * 0.44) / secW)));
     const cy = Math.min(SECT - 1, Math.max(0, Math.floor((p.y + worldSize * 0.44) / secW)));
@@ -703,7 +946,7 @@ export function generateSites(seed, roads, worldSize, terrain) {
         kind: 'scatter',
       };
       if (!passesTypeCheck(cand)) continue;
-      if (placed.some(p => Math.hypot(cand.x - p.x, cand.y - p.y) < 300)) continue;
+      if (placed.some((p) => Math.hypot(cand.x - p.x, cand.y - p.y) < 300)) continue;
       placed.push(cand);
       occupied.add(sec);
       break;
@@ -719,7 +962,11 @@ export function generateSites(seed, roads, worldSize, terrain) {
       for (const p1 of roads[i].points) {
         for (const p2 of roads[j].points) {
           if (Math.hypot(p1.x - p2.x, p1.y - p2.y) < 200) {
-            junctionCandidates.push({ x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2, kind: 'junction' });
+            junctionCandidates.push({
+              x: (p1.x + p2.x) / 2,
+              y: (p1.y + p2.y) / 2,
+              kind: 'junction',
+            });
             break;
           }
         }
@@ -730,7 +977,7 @@ export function generateSites(seed, roads, worldSize, terrain) {
   }
   for (const jc of junctionCandidates) {
     if (placed.length >= 14) break;
-    if (!placed.some(p => Math.hypot(jc.x - p.x, jc.y - p.y) < 380)) placed.push(jc);
+    if (!placed.some((p) => Math.hypot(jc.x - p.x, jc.y - p.y) < 380)) placed.push(jc);
   }
 
   // ── Build sites at the accepted positions ───────────────────────────
@@ -762,7 +1009,10 @@ export function generateSites(seed, roads, worldSize, terrain) {
     for (const road of roads) {
       for (const pt of road.points) {
         const d = Math.hypot(pt.x - pos.x, pt.y - pos.y);
-        if (d < nearestDist) { nearestDist = d; nearestRoad = road; }
+        if (d < nearestDist) {
+          nearestDist = d;
+          nearestRoad = road;
+        }
       }
     }
 
@@ -791,14 +1041,24 @@ export function generateSites(seed, roads, worldSize, terrain) {
     const numEnemies = randInt(arch.enemyCount[0], arch.enemyCount[1], rng);
     const scaledCount = Math.max(1, Math.floor(numEnemies * (1 + distFrac * 0.5)));
     const id = `site-${String(sites.length + 1).padStart(2, '0')}`;
-    const allEnemies = generateEnemyRoster(arch.classes, scaledCount, rng, buildings, pos.x, pos.y, id, {
-      minArmed: arch.minArmed ?? 1,
-      unarmedOnlyChance: arch.unarmedOnlyChance ?? 0,
-    });
+    const allEnemies = generateEnemyRoster(
+      arch.classes,
+      scaledCount,
+      rng,
+      buildings,
+      pos.x,
+      pos.y,
+      id,
+      {
+        minArmed: arch.minArmed ?? 1,
+        unarmedOnlyChance: arch.unarmedOnlyChance ?? 0,
+      }
+    );
 
     sites.push({
       id,
-      x: pos.x, y: pos.y,
+      x: pos.x,
+      y: pos.y,
       archetype,
       terrainKind: pos.kind || 'scatter',
       buildings,
@@ -817,13 +1077,22 @@ export function generateSites(seed, roads, worldSize, terrain) {
  *  Guarantees `minArmed` armed defenders unless the site is a tiny settlement
  *  that rolls `unarmedOnlyChance` (rural hamlets only). Remaining slots are
  *  filled by weighted pick, so civilians outnumber gunmen in rural sites. */
-function generateEnemyRoster(classWeights, count, rng, buildings, villageX, villageY, siteId, opts = {}) {
+function generateEnemyRoster(
+  classWeights,
+  count,
+  rng,
+  buildings,
+  villageX,
+  villageY,
+  siteId,
+  opts = {}
+) {
   const minArmed = opts.minArmed ?? 1;
   const unarmedOnlyChance = opts.unarmedOnlyChance ?? 0;
   const classes = Object.keys(classWeights);
-  const weights = classes.map(c => classWeights[c]);
-  const armedClasses = classes.filter(c => c !== 'unarmed');
-  const armedWeights = armedClasses.map(c => classWeights[c]);
+  const weights = classes.map((c) => classWeights[c]);
+  const armedClasses = classes.filter((c) => c !== 'unarmed');
+  const armedWeights = armedClasses.map((c) => classWeights[c]);
 
   // Only the smallest settlements may be completely unarmed.
   const unarmedOnly = count <= 3 && rng() < unarmedOnlyChance;
@@ -878,16 +1147,78 @@ function generateEnemyRoster(classWeights, count, rng, buildings, villageX, vill
 //  "Zukhranabad", "Wadi al-Qushmir", "Tell Ra'khaniyya" — all fiction.
 // ══════════════════════════════════════════════════════════════
 
-const NAME_ONSETS = ['b','b','d','dh','f','g','gh','h','j','k','kh','kh','l','m','m','n','q','q','r','s','sh','sh','t','th','w','y','z','zh'];
-const NAME_NUCLEI = ['a','a','a','i','i','u','aa','ii','ou','ai'];
-const NAME_CODAS  = ['b','d','dh','f','g','j','k','kh','l','m','n','q','r','r','s','sh','t','z',''];
-const NAME_SUFFIX = ['abad','iyya','istan','ah','iya','oun','at','ir','im','ar','eib','oul'];
+const NAME_ONSETS = [
+  'b',
+  'b',
+  'd',
+  'dh',
+  'f',
+  'g',
+  'gh',
+  'h',
+  'j',
+  'k',
+  'kh',
+  'kh',
+  'l',
+  'm',
+  'm',
+  'n',
+  'q',
+  'q',
+  'r',
+  's',
+  'sh',
+  'sh',
+  't',
+  'th',
+  'w',
+  'y',
+  'z',
+  'zh',
+];
+const NAME_NUCLEI = ['a', 'a', 'a', 'i', 'i', 'u', 'aa', 'ii', 'ou', 'ai'];
+const NAME_CODAS = [
+  'b',
+  'd',
+  'dh',
+  'f',
+  'g',
+  'j',
+  'k',
+  'kh',
+  'l',
+  'm',
+  'n',
+  'q',
+  'r',
+  'r',
+  's',
+  'sh',
+  't',
+  'z',
+  '',
+];
+const NAME_SUFFIX = [
+  'abad',
+  'iyya',
+  'istan',
+  'ah',
+  'iya',
+  'oun',
+  'at',
+  'ir',
+  'im',
+  'ar',
+  'eib',
+  'oul',
+];
 // Generic geographic honorifics — landscape words, not real places.
 const NAME_GEO = {
-  water:   ['Ain', 'Bir', 'Wadi', 'Hammam'],
-  junction:['Qasr', 'Khan', 'Suk'],
-  high:    ['Tell', "Qal'at", 'Khirbet', 'Ras'],
-  waypoint:['Maqam', 'Khan', 'Midan'],
+  water: ['Ain', 'Bir', 'Wadi', 'Hammam'],
+  junction: ['Qasr', 'Khan', 'Suk'],
+  high: ['Tell', "Qal'at", 'Khirbet', 'Ras'],
+  waypoint: ['Maqam', 'Khan', 'Midan'],
   scatter: ['Khirbet', 'Nabaa', 'Deir', 'Marj'],
 };
 
@@ -923,24 +1254,26 @@ function generateVillageName(rng, used, terrainKind) {
     const roll = rng();
     let name;
     if (roll < 0.22) {
-      name = `Al-${core}${pick(NAME_SUFFIX, rng)}`;            // Al-Zakhmiriyya
+      name = `Al-${core}${pick(NAME_SUFFIX, rng)}`; // Al-Zakhmiriyya
     } else if (roll < 0.42) {
-      name = `${pick(geoPool, rng)}-${core}`;                  // Bir-Qashoul
+      name = `${pick(geoPool, rng)}-${core}`; // Bir-Qashoul
     } else if (roll < 0.56) {
-      name = `${pick(geoPool, rng)} al-${core}`;               // Wadi al-Kharnoub
+      name = `${pick(geoPool, rng)} al-${core}`; // Wadi al-Kharnoub
     } else if (roll < 0.68) {
-      name = `${core}${pick(NAME_SUFFIX, rng)}`;               // Muhdafiyya
+      name = `${core}${pick(NAME_SUFFIX, rng)}`; // Muhdafiyya
     } else if (roll < 0.8) {
       // Glottal-stop compound: break inside the core, never between
       // identical consonants (no "q'q").
       const cut = Math.max(1, Math.floor(core.length * 0.6));
-      const cleanCut = core[cut - 1]?.toLowerCase() === core[cut]?.toLowerCase()
-        ? cut + 1 : cut;
+      const cleanCut = core[cut - 1]?.toLowerCase() === core[cut]?.toLowerCase() ? cut + 1 : cut;
       name = `${core.slice(0, cleanCut)}'${core.slice(cleanCut).toLowerCase()}${rng() < 0.5 ? pick(NAME_SUFFIX, rng) : ''}`;
     } else {
       name = core;
     }
-    if (!used.has(name)) { used.add(name); return name; }
+    if (!used.has(name)) {
+      used.add(name);
+      return name;
+    }
   }
   return nameCore(rng) + pick(NAME_SUFFIX, rng); // last resort, collisions near-impossible
 }
@@ -965,7 +1298,8 @@ function densifyRoute(pts, spacing = 55) {
   const out = [pts[0]];
   let carry = 0;
   for (let i = 0; i < pts.length - 1; i++) {
-    const a = pts[i], b = pts[i + 1];
+    const a = pts[i],
+      b = pts[i + 1];
     const segLen = Math.hypot(b.x - a.x, b.y - a.y);
     if (segLen < 1) continue;
     let d = spacing - carry;
@@ -984,7 +1318,7 @@ export function generateConvoys(seed, roads, sites, worldSize) {
   const rng = mulberry32(seed + 3000);
   const convoys = [];
 
-  const highways = roads.filter(r => r.hierarchy === 'highway');
+  const highways = roads.filter((r) => r.hierarchy === 'highway');
   if (highways.length === 0) return convoys;
 
   const numConvoys = randInt(2, 4, rng);
@@ -1023,8 +1357,8 @@ export function generateConvoys(seed, roads, sites, worldSize) {
       id: `convoy-${String(i + 1).padStart(2, '0')}`,
       route,
       routeCum: buildRouteCum(route),
-      s: 60,                 // arc-length position of the lead along the route
-      direction: 1,          // ping-pong patrol direction
+      s: 60, // arc-length position of the lead along the route
+      direction: 1, // ping-pong patrol direction
       composition,
       surface: road.surface, // speed mod by the road it patrols
       x: route[0].x,
@@ -1059,8 +1393,10 @@ export function generateDecorations(seed, worldSize, roads, villages, terrain) {
         let best = Infinity;
         for (const w of terrain.wadis) {
           for (let i = 0; i < w.points.length - 1; i++) {
-            const a = w.points[i], b = w.points[i + 1];
-            const dx = b.x - a.x, dy = b.y - a.y;
+            const a = w.points[i],
+              b = w.points[i + 1];
+            const dx = b.x - a.x,
+              dy = b.y - a.y;
             const l2 = dx * dx + dy * dy || 1e-6;
             let t = ((x - a.x) * dx + (y - a.y) * dy) / l2;
             t = clamp(t, 0, 1);
@@ -1090,14 +1426,20 @@ export function generateDecorations(seed, worldSize, roads, villages, terrain) {
     let nearRoad = false;
     for (const road of roads) {
       for (const p of road.points) {
-        if (Math.hypot(p.x - x, p.y - y) < road.width + 10) { nearRoad = true; break; }
+        if (Math.hypot(p.x - x, p.y - y) < road.width + 10) {
+          nearRoad = true;
+          break;
+        }
       }
       if (nearRoad) break;
     }
     if (nearRoad) continue;
     let nearVillage = false;
     for (const v of villages) {
-      if (Math.hypot(v.x - x, v.y - y) < 100) { nearVillage = true; break; }
+      if (Math.hypot(v.x - x, v.y - y) < 100) {
+        nearVillage = true;
+        break;
+      }
     }
     if (nearVillage) continue;
 
@@ -1110,25 +1452,39 @@ export function generateDecorations(seed, worldSize, roads, villages, terrain) {
     let type, size;
     if (od < 220 && roll < 0.75) {
       // Palm groves ring the oases — nothing else grows there like this.
-      type = 'palm'; size = 9 + rng() * 7;
+      type = 'palm';
+      size = 9 + rng() * 7;
     } else if (wd < 140 && roll < 0.6) {
       // Tamarisk / scrub lines trace the wadi banks.
-      type = 'bush'; size = 4 + rng() * 8;
+      type = 'bush';
+      size = 4 + rng() * 8;
     } else if (ty === 'rock' || ty === 'gravel') {
       // Rocky highlands and gravel aprons shed stones.
-      if (roll < 0.55) { type = 'rock'; size = 5 + rng() * 12; }
-      else if (roll < 0.7) { type = 'bush'; size = 2 + rng() * 4; }
-      else continue;
+      if (roll < 0.55) {
+        type = 'rock';
+        size = 5 + rng() * 12;
+      } else if (roll < 0.7) {
+        type = 'bush';
+        size = 2 + rng() * 4;
+      } else continue;
     } else if (ty === 'dunes') {
       // Dune fields are near-barren; occasional dry shrub.
-      if (roll < 0.12) { type = 'bush'; size = 2 + rng() * 3; }
-      else continue;
+      if (roll < 0.12) {
+        type = 'bush';
+        size = 2 + rng() * 3;
+      } else continue;
     } else {
       // Open desert: sparse scrub and the occasional crater.
-      if (roll < 0.16) { type = 'bush'; size = 3 + rng() * 6; }
-      else if (roll < 0.24) { type = 'rock'; size = 4 + rng() * 10; }
-      else if (roll < 0.28) { type = 'crater'; size = 10 + rng() * 20; }
-      else continue;
+      if (roll < 0.16) {
+        type = 'bush';
+        size = 3 + rng() * 6;
+      } else if (roll < 0.24) {
+        type = 'rock';
+        size = 4 + rng() * 10;
+      } else if (roll < 0.28) {
+        type = 'crater';
+        size = 10 + rng() * 20;
+      } else continue;
     }
     decos.push({ x, y, type, size, angle: rng() * Math.PI * 2 });
   }
@@ -1140,8 +1496,9 @@ export function generateDecorations(seed, worldSize, roads, villages, terrain) {
       for (let p = 0; p < n; p++) {
         const ang = rng() * Math.PI * 2;
         const d = rng() * o.radius;
-        const x = o.x + Math.cos(ang) * d, y = o.y + Math.sin(ang) * d;
-        if (!decos.some(dd => Math.hypot(dd.x - x, dd.y - y) < 14)) {
+        const x = o.x + Math.cos(ang) * d,
+          y = o.y + Math.sin(ang) * d;
+        if (!decos.some((dd) => Math.hypot(dd.x - x, dd.y - y) < 14)) {
           decos.push({ x, y, type: 'palm', size: 9 + rng() * 8, angle: rng() * Math.PI * 2 });
         }
       }
@@ -1155,17 +1512,17 @@ export function generateDecorations(seed, worldSize, roads, villages, terrain) {
 // ══════════════════════════════════════════════════════════════
 
 const BUILDING_TEMPLATES = {
-  hut:         { w: 20, d: 20, h: 10, col: '#a08050' },
-  depot:       { w: 48, d: 32, h: 14, col: '#8a8a7a' },
-  tower:       { w: 16, d: 16, h: 36, col: '#c0b898' },
-  sandbag:     { w: 36, d: 36, h: 6,  col: '#b0a070' },
-  crate_stack: { w: 16, d: 16, h: 8,  col: '#a08050' },
-  bunker:      { w: 40, d: 40, h: 18, col: '#c0b898' },
-  barracks:    { w: 56, d: 28, h: 12, col: '#c0b898' },
-  garage:      { w: 44, d: 36, h: 16, col: '#8a8a7a' },
-  fuel:        { w: 24, d: 24, h: 12, col: '#cc4433' },
-  sam_site:    { w: 30, d: 30, h: 20, col: '#5a6a5a' },
-  radar:       { w: 20, d: 20, h: 40, col: '#6a7a6a' },
+  hut: { w: 20, d: 20, h: 10, col: '#a08050' },
+  depot: { w: 48, d: 32, h: 14, col: '#8a8a7a' },
+  tower: { w: 16, d: 16, h: 36, col: '#c0b898' },
+  sandbag: { w: 36, d: 36, h: 6, col: '#b0a070' },
+  crate_stack: { w: 16, d: 16, h: 8, col: '#a08050' },
+  bunker: { w: 40, d: 40, h: 18, col: '#c0b898' },
+  barracks: { w: 56, d: 28, h: 12, col: '#c0b898' },
+  garage: { w: 44, d: 36, h: 16, col: '#8a8a7a' },
+  fuel: { w: 24, d: 24, h: 12, col: '#cc4433' },
+  sam_site: { w: 30, d: 30, h: 20, col: '#5a6a5a' },
+  radar: { w: 20, d: 20, h: 40, col: '#6a7a6a' },
 };
 
 export function getBuildingTemplate(type) {
@@ -1181,8 +1538,13 @@ function addScenarioBuilding(world, site, type, x, y, options = {}) {
   const id = `${site.id}-building-${String(site.buildings.length + 1).padStart(2, '0')}`;
   const building = {
     id,
-    x, y, type,
-    w: tmpl.w, d: tmpl.d, h: tmpl.h, col: tmpl.col,
+    x,
+    y,
+    type,
+    w: tmpl.w,
+    d: tmpl.d,
+    h: tmpl.h,
+    col: tmpl.col,
     siteId: site.id,
     hp: options.hp || 80,
     maxHp: options.hp || 80,
@@ -1218,7 +1580,9 @@ function makeExtraction() {
 }
 
 function chooseTargetSite(world, scenario, rng) {
-  const candidates = world.sites.filter((site) => scenario.compatibleSites.includes(site.archetype));
+  const candidates = world.sites.filter((site) =>
+    scenario.compatibleSites.includes(site.archetype)
+  );
   return pick(candidates.length > 0 ? candidates : world.sites, rng) || world.sites[0];
 }
 
@@ -1267,17 +1631,23 @@ function applyContractPlan(world, contract) {
     world.objective.targetId = target.id;
     world.objective.target = target;
   } else if (contract.scenarioId === 'intercept') {
-    let convoy = world.convoys.find(c => !c.destroyed) || world.convoys[0];
+    let convoy = world.convoys.find((c) => !c.destroyed) || world.convoys[0];
     if (!convoy) {
       // Fallback: run the intercept along a real highway if one exists,
       // otherwise a straight line through the target site.
-      const hw = world.roads.filter(r => r.hierarchy === 'highway' && r.points.length >= 6);
+      const hw = world.roads.filter((r) => r.hierarchy === 'highway' && r.points.length >= 6);
       let route;
       if (hw.length > 0) {
         const src = pick(hw, rng).points;
-        route = densifyRoute(src.slice(Math.floor(src.length * 0.2), Math.floor(src.length * 0.8)), 55);
+        route = densifyRoute(
+          src.slice(Math.floor(src.length * 0.2), Math.floor(src.length * 0.8)),
+          55
+        );
       } else {
-        route = [{ x: -world.worldSize * 0.35, y: targetSite.y }, { x: world.worldSize * 0.35, y: targetSite.y }];
+        route = [
+          { x: -world.worldSize * 0.35, y: targetSite.y },
+          { x: world.worldSize * 0.35, y: targetSite.y },
+        ];
       }
       convoy = {
         id: 'convoy-01',
@@ -1306,7 +1676,8 @@ function applyContractPlan(world, contract) {
     world.objective.targetId = convoy.id;
     world.objective.target = convoy;
   } else if (contract.scenarioId === 'suppression') {
-    const classes = difficulty.rating >= 3 ? ['lightAA', 'shilka', 'lightAA'] : ['lightAA', 'lightAA', 'rpg'];
+    const classes =
+      difficulty.rating >= 3 ? ['lightAA', 'shilka', 'lightAA'] : ['lightAA', 'lightAA', 'rpg'];
     for (let i = 0; i < classes.length; i++) {
       addRosterEnemy(targetSite, classes[i], rng, i + 1, true);
     }
@@ -1329,7 +1700,8 @@ function applyContractPlan(world, contract) {
 
   // Every operation has a radar installation to make Heat controllable.
   const radarSite = world.sites.find((site) => site.id !== targetSite.id) || targetSite;
-  const radarPoint = targetSite.id === radarSite.id ? targetOffset() : { x: radarSite.x, y: radarSite.y };
+  const radarPoint =
+    targetSite.id === radarSite.id ? targetOffset() : { x: radarSite.x, y: radarSite.y };
   const radar = addScenarioBuilding(world, radarSite, 'radar', radarPoint.x, radarPoint.y, {
     hp: Math.round(65 * difficulty.targetHpMultiplier),
     objectiveTag: 'radar',
@@ -1394,8 +1766,8 @@ function generateFuelDepots(seed, roads, sites, worldSize, rng) {
     const x = cand.p.x + randFloat(-70, 70, rng);
     const y = cand.p.y + randFloat(-70, 70, rng);
     if (Math.abs(x) > worldSize * 0.45 || Math.abs(y) > worldSize * 0.45) continue;
-    if (sites.some(s => Math.hypot(s.x - x, s.y - y) < 550)) continue;
-    if (depots.some(d => Math.hypot(d.x - x, d.y - y) < 900)) continue;
+    if (sites.some((s) => Math.hypot(s.x - x, s.y - y) < 550)) continue;
+    if (depots.some((d) => Math.hypot(d.x - x, d.y - y) < 900)) continue;
 
     const id = `depot-${String(depots.length + 1).padStart(2, '0')}`;
     const tanks = randInt(2, 3);
@@ -1405,20 +1777,28 @@ function generateFuelDepots(seed, roads, sites, worldSize, rng) {
     // Fuel tanks + a watch tower + sandbag revetment.
     for (let t = 0; t < tanks; t++) {
       const ang = (t / tanks) * Math.PI * 2 + rng();
-      buildings.push(makeFuelBuilding(
-        `${id}-tank-${t + 1}`,
-        x + Math.cos(ang) * 22, y + Math.sin(ang) * 22,
-        'fuel', { depotId: id, hp: 15 }
-      ));
+      buildings.push(
+        makeFuelBuilding(
+          `${id}-tank-${t + 1}`,
+          x + Math.cos(ang) * 22,
+          y + Math.sin(ang) * 22,
+          'fuel',
+          { depotId: id, hp: 15 }
+        )
+      );
     }
-    buildings.push(makeFuelBuilding(
-      `${id}-tower`, x + randFloat(-30, 30), y + randFloat(-30, 30),
-      'tower', { depotId: id, hp: 20 }
-    ));
-    buildings.push(makeFuelBuilding(
-      `${id}-bag`, x + randFloat(-30, 30), y + randFloat(-30, 30),
-      'sandbag', { depotId: id, hp: 25 }
-    ));
+    buildings.push(
+      makeFuelBuilding(`${id}-tower`, x + randFloat(-30, 30), y + randFloat(-30, 30), 'tower', {
+        depotId: id,
+        hp: 20,
+      })
+    );
+    buildings.push(
+      makeFuelBuilding(`${id}-bag`, x + randFloat(-30, 30), y + randFloat(-30, 30), 'sandbag', {
+        depotId: id,
+        hp: 25,
+      })
+    );
   }
   return { depots, buildings };
 }
@@ -1426,8 +1806,14 @@ function generateFuelDepots(seed, roads, sites, worldSize, rng) {
 function makeFuelBuilding(id, x, y, type, opts = {}) {
   const tmpl = getBuildingTemplate(type);
   return {
-    id, x, y, type,
-    w: tmpl.w, d: tmpl.d, h: tmpl.h, col: tmpl.col,
+    id,
+    x,
+    y,
+    type,
+    w: tmpl.w,
+    d: tmpl.d,
+    h: tmpl.h,
+    col: tmpl.col,
     siteId: null,
     hp: opts.hp || 80,
     maxHp: opts.hp || 80,
@@ -1446,7 +1832,7 @@ function makeFuelBuilding(id, x, y, type, opts = {}) {
 // ══════════════════════════════════════════════════════════════
 
 export function generateWorld(input) {
-  const context = typeof input === 'number' ? { seed: input } : (input || {});
+  const context = typeof input === 'number' ? { seed: input } : input || {};
   const seed = context.seed ?? context.rootSeed ?? 42;
   const worldSize = context.worldSize || WORLD_SIZE;
   const terrain = context.terrain || createTerrain(seed, worldSize);
@@ -1466,8 +1852,13 @@ export function generateWorld(input) {
       b.siteId = site.id;
       buildings.push({
         id: b.id,
-        x: b.x, y: b.y, type: b.type,
-        w: tmpl.w, d: tmpl.d, h: tmpl.h, col: tmpl.col,
+        x: b.x,
+        y: b.y,
+        type: b.type,
+        w: tmpl.w,
+        d: tmpl.d,
+        h: tmpl.h,
+        col: tmpl.col,
         siteId: site.id,
         hp: b.hp || 0,
         maxHp: b.maxHp || 0,
@@ -1483,8 +1874,13 @@ export function generateWorld(input) {
 
   // Fuel depots — standalone timer-bonus targets along the road network.
   const depotRng = mulberry32(seed + 5000);
-  const { depots: fuelDepots, buildings: depotBuildings } =
-    generateFuelDepots(seed + 5000, roads, sites, worldSize, depotRng);
+  const { depots: fuelDepots, buildings: depotBuildings } = generateFuelDepots(
+    seed + 5000,
+    roads,
+    sites,
+    worldSize,
+    depotRng
+  );
   for (const db of depotBuildings) buildings.push(db);
 
   const world = {

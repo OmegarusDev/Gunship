@@ -3,7 +3,16 @@
  */
 console.log('[Gunship] app.js loading...');
 
-import { SIM_HZ, SIM_DT, WORLD_SIZE, TIMER, CIVILIAN_ESCAPE_RADIUS, CAMERA, COMBAT, HUD } from './config.js';
+import {
+  SIM_HZ,
+  SIM_DT,
+  WORLD_SIZE,
+  TIMER,
+  CIVILIAN_ESCAPE_RADIUS,
+  CAMERA,
+  COMBAT,
+  HUD,
+} from './config.js';
 import { WorldCamera } from './camera.js';
 import { Input } from './input.js';
 import { P, mats } from './palette.js';
@@ -16,21 +25,70 @@ import { generateWorld, getBuildingTemplate, getSpeedMod, ARCHETYPES } from './w
 import { createTerrain } from './terrain.js';
 import { drawCornerBrackets, drawBackButton } from './appBridge.js';
 import {
-  metaState, createCareer, loadCareer, commitSortieOutcome, applyCareerToHeli,
-  gainXp, xpToNext, saveCareer,
+  metaState,
+  createCareer,
+  loadCareer,
+  commitSortieOutcome,
+  applyCareerToHeli,
+  gainXp,
+  xpToNext,
+  saveCareer,
 } from './meta.js';
 import { hangarScreen, pilotScreen, handleHangarClick, handlePilotClick } from './screens_meta.js';
 import { createEnemyFromRoster } from './data/enemies.js';
-import { createContractBoard, getDifficulty as getDifficultyProfile, getScenario, getStyle } from './contracts.js';
+import {
+  createContractBoard,
+  getDifficulty as getDifficultyProfile,
+  getScenario,
+  getStyle,
+} from './contracts.js';
 import { createUpgradeChoices } from './upgrades.js';
-import { FEAR_THRESHOLDS as _FEAR_THRESHOLDS, HEAT_LABELS as _HEAT_LABELS, EQUIPMENT as _EQUIPMENT, hunterClockRate as _hunterClockRate } from './sim/state.js';
-import { nearestRoadPoint as _nearestRoadPoint, steerAlongRoads as _steerAlongRoads, vehicleSpeedFactor as _vehicleSpeedFactor, pointAlongRoute as _pointAlongRoute, getConvoyMembers as _getConvoyMembers } from './sim/movement.js';
-import { isTargetAlive as _isTargetAlive, objectiveComplete as _objectiveComplete, canExtract as _canExtract, getObjectiveFocus as _getObjectiveFocus, nearestExitPoint as _nearestExitPoint } from './sim/objectives.js';
-import { setTerrain as _setTerrain, drawSmoothTerrain as _drawSmoothTerrain } from './render/terrain.js';
+import {
+  FEAR_THRESHOLDS as _FEAR_THRESHOLDS,
+  HEAT_LABELS as _HEAT_LABELS,
+  EQUIPMENT as _EQUIPMENT,
+  hunterClockRate as _hunterClockRate,
+} from './sim/state.js';
+import {
+  nearestRoadPoint as _nearestRoadPoint,
+  steerAlongRoads as _steerAlongRoads,
+  vehicleSpeedFactor as _vehicleSpeedFactor,
+  pointAlongRoute as _pointAlongRoute,
+  getConvoyMembers as _getConvoyMembers,
+} from './sim/movement.js';
+import {
+  isTargetAlive as _isTargetAlive,
+  objectiveComplete as _objectiveComplete,
+  canExtract as _canExtract,
+  getObjectiveFocus as _getObjectiveFocus,
+  nearestExitPoint as _nearestExitPoint,
+} from './sim/objectives.js';
+import {
+  setTerrain as _setTerrain,
+  drawSmoothTerrain as _drawSmoothTerrain,
+} from './render/terrain.js';
 import { drawRoads as _drawRoads, getMiniRoads as _getMiniRoads } from './render/roads.js';
-import { hudPlate as _hudPlate, plateHeader as _plateHeader, hudBar as _hudBar, drawOffscreenMarker as _drawOffscreenMarker } from './render/hud.js';
-import { drawBuilding as _drawBuilding, drawSites as _drawSites, drawDecorations as _drawDecorations, drawScenarioOverlays as _drawScenarioOverlays, setWorldState as _setWorldState } from './render/world.js';
-import { drawHeliShadow as _drawHeliShadow, drawGunship as _drawGunship, drawEnemy as _drawEnemy, drawBoss as _drawBoss, drawHunter as _drawHunter, setBoss as _setBoss } from './render/entities.js';
+import {
+  hudPlate as _hudPlate,
+  plateHeader as _plateHeader,
+  hudBar as _hudBar,
+  drawOffscreenMarker as _drawOffscreenMarker,
+} from './render/hud.js';
+import {
+  drawBuilding as _drawBuilding,
+  drawSites as _drawSites,
+  drawDecorations as _drawDecorations,
+  drawScenarioOverlays as _drawScenarioOverlays,
+  setWorldState as _setWorldState,
+} from './render/world.js';
+import {
+  drawHeliShadow as _drawHeliShadow,
+  drawGunship as _drawGunship,
+  drawEnemy as _drawEnemy,
+  drawBoss as _drawBoss,
+  drawHunter as _drawHunter,
+  setBoss as _setBoss,
+} from './render/entities.js';
 import * as GameState from './sim/gameState.js';
 
 const canvas = document.getElementById('game');
@@ -40,7 +98,9 @@ const input = new Input(canvas);
 const screens = {};
 let currentScreen = null;
 
-export function registerScreen(name, screen) { screens[name] = screen; }
+export function registerScreen(name, screen) {
+  screens[name] = screen;
+}
 
 export function switchScreen(name, data) {
   if (currentScreen && currentScreen.exit) currentScreen.exit();
@@ -62,7 +122,8 @@ function loop(now) {
     accumulator += dt;
     let safety = 0;
     while (accumulator >= SIM_DT && safety < 8) {
-      if (!settingsOpen && !sortieState.levelUpOpen && currentScreen && currentScreen.tick) currentScreen.tick(SIM_DT);
+      if (!settingsOpen && !sortieState.levelUpOpen && currentScreen && currentScreen.tick)
+        currentScreen.tick(SIM_DT);
       accumulator -= SIM_DT;
       safety++;
     }
@@ -89,18 +150,22 @@ function loop(now) {
   requestAnimationFrame(loop);
 }
 
-function lerp(a, b, t) { return a + (b - a) * t; }
+function lerp(a, b, t) {
+  return a + (b - a) * t;
+}
 
 let settingsOpen = false;
 // Sortie start timestamp — used to fade the on-screen controls hint.
 let sortieStartedAt = performance.now();
 let lastFps = 0;
-const IS_TOUCH = typeof window !== 'undefined' && ('ontouchstart' in window);
+const IS_TOUCH = typeof window !== 'undefined' && 'ontouchstart' in window;
 let modeToastUntil = 0; // targeting-mode banner expiry (performance.now clock)
 
 // Position of the player's most recent gunshot — civilians panic only
 // when gunfire happens near them (or their site's defenders open up).
-let lastShotX = 0, lastShotY = 0, lastShotT = -999;
+let lastShotX = 0,
+  lastShotY = 0,
+  lastShotT = -999;
 
 // ── Equipment — one usable item per sortie, chosen at briefing (now from sim/state) ────────────
 const EQUIPMENT = _EQUIPMENT;
@@ -115,14 +180,35 @@ let debriefPilotBox = null;
 // ── Road network queries — delegated to sim/movement (app.js stays thin) ──
 let _roadSegsCache = null; // legacy shim — movement.js owns the real cache
 let _miniRoadsCache = null; // minimap road layer now via render/roads
-function getRoadSegs() { return null; } // shim retained for any legacy callers
-function nearestRoadPoint(x, y, maxDist) { return _nearestRoadPoint(world, x, y, maxDist); }
-function steerAlongRoads(desiredAngle, x, y) { return _steerAlongRoads(world, desiredAngle, x, y); }
-const TERRAIN_VEHICLE_SPEED = { hardpack: 1.1, sand: 1.0, gravel: 0.95, wadi: 0.9, oasis: 0.7, dunes: 0.6, rock: 0.5 };
-function vehicleSpeedFactor(x, y) { return _vehicleSpeedFactor(world, sharedTerrain, x, y); }
-const CONVOY_GAP_VEH = 30, CONVOY_GAP_INF = 17;
-function pointAlongRoute(convoy, s) { return _pointAlongRoute(convoy, s); }
-function getConvoyMembers(convoy) { return _getConvoyMembers(convoy); }
+function getRoadSegs() {
+  return null;
+} // shim retained for any legacy callers
+function nearestRoadPoint(x, y, maxDist) {
+  return _nearestRoadPoint(world, x, y, maxDist);
+}
+function steerAlongRoads(desiredAngle, x, y) {
+  return _steerAlongRoads(world, desiredAngle, x, y);
+}
+const TERRAIN_VEHICLE_SPEED = {
+  hardpack: 1.1,
+  sand: 1.0,
+  gravel: 0.95,
+  wadi: 0.9,
+  oasis: 0.7,
+  dunes: 0.6,
+  rock: 0.5,
+};
+function vehicleSpeedFactor(x, y) {
+  return _vehicleSpeedFactor(world, sharedTerrain, x, y);
+}
+const CONVOY_GAP_VEH = 30,
+  CONVOY_GAP_INF = 17;
+function pointAlongRoute(convoy, s) {
+  return _pointAlongRoute(convoy, s);
+}
+function getConvoyMembers(convoy) {
+  return _getConvoyMembers(convoy);
+}
 
 function toggleSettings() {
   settingsOpen = !settingsOpen;
@@ -152,7 +238,9 @@ let activeContract = null;
 const sortieState = GameState.sortieState; // shared
 
 /** Pre-rendered minimap road layer at a given size (cached per world). */
-function getMiniRoads(S) { return _getMiniRoads(world, S); }
+function getMiniRoads(S) {
+  return _getMiniRoads(world, S);
+}
 // minimap road cache now in render/roads.js
 
 function initWorld(contract = null) {
@@ -203,25 +291,44 @@ function applyEnemyDifficulty(enemy) {
 }
 
 // ── Terrain rendering — delegated to render/terrain.js ──
-function drawSmoothTerrain(ctx, cam) { return _drawSmoothTerrain(ctx, cam); }
+function drawSmoothTerrain(ctx, cam) {
+  return _drawSmoothTerrain(ctx, cam);
+}
 // BIOME, sampleTerrain, updateTerrainGrid, grain/mottle/macro live in render/terrain.js
 // Call _setTerrain(sharedTerrain, terrainNoise, moistureNoise, detailNoise) after initWorld.
 
 // ── Roads — delegated to render/roads.js ──
-function drawRoads(ctx, cam) { return _drawRoads(ctx, cam, world); }
+function drawRoads(ctx, cam) {
+  return _drawRoads(ctx, cam, world);
+}
 // ROAD_STYLE + shadeHex now live in render/roads.js
 
-function drawSites(ctx, cam) { _setWorldState(world, heli, enemies, boss); return _drawSites(ctx, cam); }
+function drawSites(ctx, cam) {
+  _setWorldState(world, heli, enemies, boss);
+  return _drawSites(ctx, cam);
+}
 
-function drawDecorations(ctx, cam) { _setWorldState(world, heli, enemies, boss); return _drawDecorations(ctx, cam); }
+function drawDecorations(ctx, cam) {
+  _setWorldState(world, heli, enemies, boss);
+  return _drawDecorations(ctx, cam);
+}
 
-function drawScenarioOverlays(ctx, cam) { _setWorldState(world, heli, enemies, boss); return _drawScenarioOverlays(ctx, cam); }
+function drawScenarioOverlays(ctx, cam) {
+  _setWorldState(world, heli, enemies, boss);
+  return _drawScenarioOverlays(ctx, cam);
+}
 
-function drawBuilding(ctx, b) { return _drawBuilding(ctx, b); }
+function drawBuilding(ctx, b) {
+  return _drawBuilding(ctx, b);
+}
 
-function drawHeliShadow(ctx, h) { return _drawHeliShadow(ctx, h); }
+function drawHeliShadow(ctx, h) {
+  return _drawHeliShadow(ctx, h);
+}
 
-function drawGunship(ctx, h) { return _drawGunship(ctx, h); }
+function drawGunship(ctx, h) {
+  return _drawGunship(ctx, h);
+}
 
 // ══════════════════════════════════════════════════════════════
 //  PROJECTILES
@@ -232,7 +339,8 @@ const explosions = GameState.explosions; // shared
 
 function spawnProjectile(x, y, angle, speed, damage, isEnemy = false, life = 2.0) {
   projectiles.push({
-    x, y,
+    x,
+    y,
     vx: Math.cos(angle) * speed,
     vy: Math.sin(angle) * speed,
     damage,
@@ -257,7 +365,7 @@ const floatingTexts = GameState.floatingTexts; // shared // CLEAR! popups and da
 function getDifficulty(worldX, worldY) {
   const dist = Math.hypot(worldX, worldY);
   const difficulty = getDifficultyProfile(activeContract?.difficultyId);
-  return (1 + (dist / 2500)) * difficulty.radialMultiplier;
+  return (1 + dist / 2500) * difficulty.radialMultiplier;
 }
 
 /** Discover a site: spawn indoor enemies who burst from buildings. */
@@ -288,7 +396,7 @@ function discoverSettlement(settlement) {
 /** Check if a settlement is cleared (all enemies dead). */
 function checkSettlementClear(settlement) {
   if (settlement.cleared) return false;
-  const alive = enemies.filter(e => e.siteId === settlement.id && e.state !== 'dead');
+  const alive = enemies.filter((e) => e.siteId === settlement.id && e.state !== 'dead');
   if (alive.length === 0 && settlement.discovered && settlement.enemies.length > 0) {
     settlement.cleared = true;
     // Spawn CLEAR! popup
@@ -302,7 +410,7 @@ function checkSettlementClear(settlement) {
       vy: -40, // float upward
     });
     // Score bonus
-    const arch = world.sites.find(v => v.id === settlement.id);
+    const arch = world.sites.find((v) => v.id === settlement.id);
     if (arch) {
       const dist = Math.hypot(settlement.x, settlement.y);
       const bonus = Math.floor(50 + dist * 0.02);
@@ -333,7 +441,10 @@ function checkSettlementClear(settlement) {
 /** Spawn a floating text popup (CLEAR!, damage numbers, etc). */
 function spawnFloatingText(x, y, text, color) {
   floatingTexts.push({
-    x, y, text, color,
+    x,
+    y,
+    text,
+    color,
     life: 1.0,
     maxLife: 1.0,
     vy: -30,
@@ -366,7 +477,8 @@ function resetBossTimer() {
 }
 
 function resetBoss() {
-  boss.hp = 0; boss.maxHp = 0;
+  boss.hp = 0;
+  boss.maxHp = 0;
   boss.state = 'approach';
   boss.spawned = false;
 }
@@ -424,7 +536,10 @@ const HEAT_LABELS = _HEAT_LABELS;
 function resetSortieState() {
   const difficulty = getDifficultyProfile(activeContract?.difficultyId);
   sortieStartedAt = performance.now();
-  hudAnim.hp = 100; hudAnim.fear = 0; hudAnim.heat = 0; hudAnim.hpFlash = 0;
+  hudAnim.hp = 100;
+  hudAnim.fear = 0;
+  hudAnim.heat = 0;
+  hudAnim.hpFlash = 0;
   sortieState.status = 'active';
   sortieState.objectiveComplete = false;
   sortieState.fearLevel = 0;
@@ -459,7 +574,11 @@ function getHeatTier(value = sortieState.heat.value) {
 function addHeat(amount, reason = 'combat activity') {
   if (!Number.isFinite(amount) || amount <= 0 || sortieState.status !== 'active') return;
   const style = getStyle(activeContract?.styleId);
-  sortieState.heat.value = clamp(sortieState.heat.value + amount * (style.heatGainMultiplier || 1), 0, 100);
+  sortieState.heat.value = clamp(
+    sortieState.heat.value + amount * (style.heatGainMultiplier || 1),
+    0,
+    100
+  );
   sortieState.heat.lastContact = 0;
   sortieState.heat.lastEvent = reason;
   sortieState.heat.eventTimer = 1.8;
@@ -497,12 +616,14 @@ function addFear(amount, reason = 'confirmed hostile') {
     sortieState.pendingLevelUps++;
   }
   if (sortieState.pendingLevelUps > 0 && !sortieState.levelUpOpen) openFearUpgrade();
-  if (reason && amount >= 5) spawnFloatingText(heli.x, heli.y - 24, `+${Math.round(amount)} FEAR`, '#ff8844');
+  if (reason && amount >= 5)
+    spawnFloatingText(heli.x, heli.y - 24, `+${Math.round(amount)} FEAR`, '#ff8844');
 }
 
 function openFearUpgrade() {
   const level = sortieState.fearLevel || 1;
-  const seed = ((activeContract?.seed ?? 42) + level * 7919 + sortieState.pendingLevelUps * 97) >>> 0;
+  const seed =
+    ((activeContract?.seed ?? 42) + level * 7919 + sortieState.pendingLevelUps * 97) >>> 0;
   sortieState.upgradeChoices = createUpgradeChoices(seed, sortieState.appliedUpgrades);
   if (sortieState.upgradeChoices.length > 0) sortieState.levelUpOpen = true;
 }
@@ -516,28 +637,53 @@ function chooseFearUpgrade(index) {
   sortieState.pendingLevelUps = Math.max(0, sortieState.pendingLevelUps - 1);
   sortieState.levelUpOpen = false;
   sortieState.upgradeChoices = [];
-  floatingTexts.push({ x: heli.x, y: heli.y - 30, text: card.name, color: '#aaff88', life: 1.5, maxLife: 1.5, vy: -25 });
+  floatingTexts.push({
+    x: heli.x,
+    y: heli.y - 30,
+    text: card.name,
+    color: '#aaff88',
+    life: 1.5,
+    maxLife: 1.5,
+    vy: -25,
+  });
   if (sortieState.pendingLevelUps > 0) openFearUpgrade();
 }
 
-function isTargetAlive(target) { return _isTargetAlive(world, boss, target); }
+function isTargetAlive(target) {
+  return _isTargetAlive(world, boss, target);
+}
 
 /** Semi-transparent backing plate for a HUD cluster, with corner ticks. */
-function hudPlate(ctx, x, y, w, h, accent = 'rgba(90,140,80,0.55)') { return _hudPlate(ctx, x, y, w, h, accent); }
-function plateHeader(ctx, px, py, pw, title, accent = P.ui.textDim) { return _plateHeader(ctx, px, py, pw, title, accent); }
-function hudBar(ctx, x, y, w, h, frac, col, opts = {}) { return _hudBar(ctx, x, y, w, h, frac, col, opts); }
-function drawOffscreenMarker(ctx, cam, w, h, wx, wy, color, textColor, tag, uiScale = 1) { return _drawOffscreenMarker(ctx, cam, w, h, wx, wy, color, textColor, tag, uiScale); }
+function hudPlate(ctx, x, y, w, h, accent = 'rgba(90,140,80,0.55)') {
+  return _hudPlate(ctx, x, y, w, h, accent);
+}
+function plateHeader(ctx, px, py, pw, title, accent = P.ui.textDim) {
+  return _plateHeader(ctx, px, py, pw, title, accent);
+}
+function hudBar(ctx, x, y, w, h, frac, col, opts = {}) {
+  return _hudBar(ctx, x, y, w, h, frac, col, opts);
+}
+function drawOffscreenMarker(ctx, cam, w, h, wx, wy, color, textColor, tag, uiScale = 1) {
+  return _drawOffscreenMarker(ctx, cam, w, h, wx, wy, color, textColor, tag, uiScale);
+}
 // hud primitives now in render/hud.js
 
 // Per-sortie HUD animation state (smooth bar chase + hit flash).
 const hudAnim = { hp: 100, fear: 0, heat: 0, hpFlash: 0 };
 
 function posInBox(pos, box, dpr) {
-  return box && pos.x >= box.x * dpr && pos.x <= (box.x + box.w) * dpr &&
-         pos.y >= box.y * dpr && pos.y <= (box.y + box.h) * dpr;
+  return (
+    box &&
+    pos.x >= box.x * dpr &&
+    pos.x <= (box.x + box.w) * dpr &&
+    pos.y >= box.y * dpr &&
+    pos.y <= (box.y + box.h) * dpr
+  );
 }
 
-function getObjectiveFocus() { return _getObjectiveFocus(world, boss, enemies, heli); }
+function getObjectiveFocus() {
+  return _getObjectiveFocus(world, boss, enemies, heli);
+}
 function damageWorldTarget(target, damage, x, y) {
   if (!isTargetAlive(target) || target.hp === undefined) return false;
 
@@ -581,7 +727,7 @@ function damageWorldTarget(target, damage, x, y) {
       siteId: null,
       collected: false,
       objective: false,
-      rewardType: pick(['repair', 'damage', 'speed', 'fear'], mulberry32((Date.now() & 0xffff))),
+      rewardType: pick(['repair', 'damage', 'speed', 'fear'], mulberry32(Date.now() & 0xffff)),
     });
     return true;
   }
@@ -621,7 +767,10 @@ function damageWorldTarget(target, damage, x, y) {
         heli.hp -= Math.max(1, Math.round(25 * (1 - (heli.dmgResist || 0))));
         spawnExplosion(heli.x, heli.y, 0.5);
         spawnFloatingText(heli.x, heli.y - 30, 'TOO CLOSE!', '#ff4444');
-        if (heli.hp <= 0) { heli.hp = 0; finishSortie('failed'); }
+        if (heli.hp <= 0) {
+          heli.hp = 0;
+          finishSortie('failed');
+        }
       }
       for (const b of world.buildings) {
         if (b === target || b.destroyed) continue;
@@ -631,8 +780,8 @@ function damageWorldTarget(target, damage, x, y) {
       }
       // Depot fully flattened? Mark it for the minimap.
       if (target.depotId) {
-        const depot = world.fuelDepots?.find(d => d.id === target.depotId);
-        if (depot && world.buildings.every(b => b.depotId !== depot.id || b.destroyed)) {
+        const depot = world.fuelDepots?.find((d) => d.id === target.depotId);
+        if (depot && world.buildings.every((b) => b.depotId !== depot.id || b.destroyed)) {
           depot.destroyed = true;
         }
       }
@@ -712,8 +861,10 @@ function checkObjectiveProgress() {
 
 function objectiveHudText() {
   if (!world?.objective) return 'STANDBY';
-  if (world.objective.type === 'strike') return `DESTROY ${world.objective.targetSiteName || 'COMMAND TARGET'}`;
-  if (world.objective.type === 'sabotage') return `DISABLE ${world.objective.targetSiteName || 'RADAR RELAY'}`;
+  if (world.objective.type === 'strike')
+    return `DESTROY ${world.objective.targetSiteName || 'COMMAND TARGET'}`;
+  if (world.objective.type === 'sabotage')
+    return `DISABLE ${world.objective.targetSiteName || 'RADAR RELAY'}`;
   if (world.objective.type === 'intercept') return 'INTERCEPT SUPPLY CONVOY';
   if (world.objective.type === 'suppression') return 'DESTROY AIR DEFENSE UNITS';
   if (world.objective.type === 'recovery') return 'RECOVER SUPPLY CACHE';
@@ -748,26 +899,39 @@ function collectSupplyCrates() {
 
 /** Extraction = cross the map boundary. No LZ, no hold timer. */
 function updateExtraction(dt) {
-  if (!world?.extraction?.active || !sortieState.objectiveComplete || sortieState.status !== 'active') return;
+  if (
+    !world?.extraction?.active ||
+    !sortieState.objectiveComplete ||
+    sortieState.status !== 'active'
+  )
+    return;
   const lim = WORLD_SIZE * 0.48;
   if (Math.abs(heli.x) > lim || Math.abs(heli.y) > lim) finishSortie('complete');
 }
 
 /** Nearest boundary exit from the helicopter, with compass cardinal. */
-function nearestExitPoint() { return _nearestExitPoint(heli); }
+function nearestExitPoint() {
+  return _nearestExitPoint(heli);
+}
 
 function finishSortie(status) {
   if (sortieState.status !== 'active') return;
   sortieState.status = status;
   bossState.active = false;
-  sortieState.rewards.secured = status === 'complete'
-    ? sortieState.rewards.objective + sortieState.rewards.supplies + sortieState.rewards.hunter
-    : 0;
+  sortieState.rewards.secured =
+    status === 'complete'
+      ? sortieState.rewards.objective + sortieState.rewards.supplies + sortieState.rewards.hunter
+      : 0;
   sortieState.endTimer = 1.0;
   projectiles.length = 0;
   heli.target = null;
   heli.manualTarget = null;
-  spawnFloatingText(heli.x, heli.y - 45, status === 'complete' ? 'SORTIE COMPLETE' : 'PILOT KIA', status === 'complete' ? '#aaff88' : '#ff4444');
+  spawnFloatingText(
+    heli.x,
+    heli.y - 45,
+    status === 'complete' ? 'SORTIE COMPLETE' : 'PILOT KIA',
+    status === 'complete' ? '#aaff88' : '#ff4444'
+  );
 }
 
 /** Pilot aborts the sortie and returns to base alive. No rewards secured. */
@@ -791,14 +955,20 @@ function updateHeat(dt) {
   } else {
     sortieState.heat.lastContact += dt;
     if (sortieState.heat.lastContact > 3) {
-      sortieState.heat.value = clamp(sortieState.heat.value - dt * 1.6 * heli.heatDecayMultiplier, 0, 100);
+      sortieState.heat.value = clamp(
+        sortieState.heat.value - dt * 1.6 * heli.heatDecayMultiplier,
+        0,
+        100
+      );
       updateHeatTier();
     }
   }
   if (sortieState.heat.eventTimer > 0) sortieState.heat.eventTimer -= dt;
 }
 
-function hunterClockRate() { return _hunterClockRate(sortieState, activeContract); }
+function hunterClockRate() {
+  return _hunterClockRate(sortieState, activeContract);
+}
 
 // ══════════════════════════════════════════════════════════════
 //  SCREENS
@@ -809,11 +979,13 @@ registerScreen('title', {
     const dpr = cam.dpr;
     const w = cam.screenW;
     const h = cam.screenH;
-    ctx.save(); ctx.scale(dpr, dpr);
+    ctx.save();
+    ctx.scale(dpr, dpr);
     const grad = ctx.createLinearGradient(0, 0, 0, h);
     grad.addColorStop(0, '#0a120a');
     grad.addColorStop(1, '#16240f');
-    ctx.fillStyle = grad; ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, w, h);
     drawTacticalGrid(ctx, w, h);
 
     const cx = w / 2;
@@ -827,7 +999,8 @@ registerScreen('title', {
 
     // ── Wordmark ──
     const cy = h * 0.32;
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
     const titleSize = Math.min(64, Math.max(40, Math.floor(w / 9)));
     ctx.font = `bold ${titleSize}px "Courier New", monospace`;
     // Layered shadow for depth
@@ -869,7 +1042,8 @@ registerScreen('title', {
       ctx.strokeStyle = P.ui.borderHi;
       ctx.lineWidth = 1.2;
       ctx.strokeRect(menuX, my2, menuW, mh);
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
       ctx.fillStyle = P.ui.textBright;
       ctx.font = 'bold 13px "Courier New", monospace';
       ctx.fillText(entry.label, cx, my2 + 14);
@@ -885,7 +1059,8 @@ registerScreen('title', {
     if (c) {
       ctx.font = 'bold 11px "Courier New", monospace';
       ctx.fillStyle = P.ui.text;
-      ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
       ctx.fillText(`${c.pilot.name}  ·  LV ${c.pilot.level}`, cx, my2 + 8);
       ctx.fillStyle = '#ffcc44';
       ctx.fillText(`$ ${c.dollars}`, cx, my2 + 26);
@@ -908,7 +1083,8 @@ function drawFearUpgradeOverlay(ctx, cam) {
   const dpr = cam.dpr;
   const w = cam.screenW;
   const h = cam.screenH;
-  ctx.save(); ctx.scale(dpr, dpr);
+  ctx.save();
+  ctx.scale(dpr, dpr);
   ctx.fillStyle = 'rgba(0,0,0,0.72)';
   ctx.fillRect(0, 0, w, h);
   ctx.fillStyle = '#0a1a0a';
@@ -918,7 +1094,8 @@ function drawFearUpgradeOverlay(ctx, cam) {
   ctx.strokeRect(18, 28, w - 36, h - 56);
   ctx.fillStyle = '#ffcc66';
   ctx.font = 'bold 20px "Courier New", monospace';
-  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
   ctx.fillText('FEAR GROWS', w / 2, 48);
   ctx.fillStyle = P.ui.textDim;
   ctx.font = '10px "Courier New", monospace';
@@ -959,10 +1136,18 @@ registerScreen('debrief', {
   enter() {
     // Commit the sortie to the career: XP/levels if the pilot survived,
     // fresh pilot if KIA. Dollars always banked. Campaign advances on win.
-    const res = commitSortieOutcome(career, sortieState.status, sortieXpEarned, sortieDollarsEarned);
+    const res = commitSortieOutcome(
+      career,
+      sortieState.status,
+      sortieXpEarned,
+      sortieDollarsEarned
+    );
     if (sortieState.status === 'complete') {
       career.campaign.sortie += 1;
-      if (career.campaign.sortie > 4) { career.campaign.sortie = 1; career.campaign.act += 1; }
+      if (career.campaign.sortie > 4) {
+        career.campaign.sortie = 1;
+        career.campaign.act += 1;
+      }
       saveCareer(career);
     }
     debriefInfo = {
@@ -980,23 +1165,42 @@ registerScreen('debrief', {
     const h = cam.screenH;
     const success = sortieState.status === 'complete';
     const aborted = sortieState.status === 'abandoned';
-    drawScreenBackground(ctx, cam,
+    drawScreenBackground(
+      ctx,
+      cam,
       success ? 'SORTIE COMPLETE' : aborted ? 'SORTIE ABORTED' : 'PILOT KIA',
-      success ? 'OPERATIONAL REPORT' : aborted ? 'PILOT RECOVERED' : 'SIGNAL LOST');
-    ctx.save(); ctx.scale(cam.dpr, cam.dpr);
+      success ? 'OPERATIONAL REPORT' : aborted ? 'PILOT RECOVERED' : 'SIGNAL LOST'
+    );
+    ctx.save();
+    ctx.scale(cam.dpr, cam.dpr);
     const panelW = Math.min(420, w - 32);
     const panelH = Math.min(420, h - 130);
     const x = (w - panelW) / 2;
     const y = 84;
-    ctx.fillStyle = '#0d210f'; ctx.fillRect(x, y, panelW, panelH);
+    ctx.fillStyle = '#0d210f';
+    ctx.fillRect(x, y, panelW, panelH);
     ctx.strokeStyle = success ? P.ui.border : aborted ? '#aa8844' : '#883333';
-    ctx.lineWidth = 1.5; ctx.strokeRect(x, y, panelW, panelH);
-    drawCornerBrackets(ctx, x, y, panelW, panelH,
-      success ? P.ui.borderHi : aborted ? '#cc9944' : '#aa4444', 16, 2);
-    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(x, y, panelW, panelH);
+    drawCornerBrackets(
+      ctx,
+      x,
+      y,
+      panelW,
+      panelH,
+      success ? P.ui.borderHi : aborted ? '#cc9944' : '#aa4444',
+      16,
+      2
+    );
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
     ctx.fillStyle = success ? '#aaff88' : aborted ? '#ffcc44' : '#ff6666';
     ctx.font = 'bold 16px "Courier New", monospace';
-    ctx.fillText(success ? 'MISSION SUCCESS' : aborted ? 'MISSION ABORTED' : 'MISSION FAILURE', x + 18, y + 18);
+    ctx.fillText(
+      success ? 'MISSION SUCCESS' : aborted ? 'MISSION ABORTED' : 'MISSION FAILURE',
+      x + 18,
+      y + 18
+    );
     ctx.fillStyle = P.ui.text;
     ctx.font = '11px "Courier New", monospace';
     const rows = [
@@ -1008,16 +1212,25 @@ registerScreen('debrief', {
       ['FEAR LEVEL', `${sortieState.fearLevel || 0}`],
       ['PEAK HEAT', `${Math.round(sortieState.heat.value)}`],
       ['SECURED PAY', `$${sortieState.rewards.secured}`],
-      ['XP EARNED', debriefInfo ? `${debriefInfo.xp}${debriefInfo.died ? ' (LOST — KIA)' : ''}` : '0'],
+      [
+        'XP EARNED',
+        debriefInfo ? `${debriefInfo.xp}${debriefInfo.died ? ' (LOST — KIA)' : ''}` : '0',
+      ],
       ['DOLLARS EARNED', `$${debriefInfo ? debriefInfo.dollars : 0}`],
-      ['PILOT LEVEL', debriefInfo ? `LV ${debriefInfo.level}${debriefInfo.levelsGained ? ` (+${debriefInfo.levelsGained})` : ''}` : '—'],
+      [
+        'PILOT LEVEL',
+        debriefInfo
+          ? `LV ${debriefInfo.level}${debriefInfo.levelsGained ? ` (+${debriefInfo.levelsGained})` : ''}`
+          : '—',
+      ],
     ];
     for (let i = 0; i < rows.length; i++) {
       ctx.fillStyle = i === rows.length - 1 ? '#ffcc44' : P.ui.text;
       ctx.fillText(`${rows[i][0].padEnd(16, ' ')} ${rows[i][1]}`, x + 18, y + 58 + i * 22);
     }
     // Career callouts flow below the rows
-    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
     let cy2 = y + 58 + rows.length * 22 + 12;
     if (debriefInfo?.died) {
       ctx.fillStyle = '#ff6666';
@@ -1027,18 +1240,27 @@ registerScreen('debrief', {
     } else if (debriefInfo?.levelsGained) {
       ctx.fillStyle = '#44cccc';
       ctx.font = 'bold 11px "Courier New", monospace';
-      ctx.fillText(`LEVEL UP — ${debriefInfo.sp} SKILL POINT${debriefInfo.sp === 1 ? '' : 'S'} AVAILABLE`, x + 18, cy2);
+      ctx.fillText(
+        `LEVEL UP — ${debriefInfo.sp} SKILL POINT${debriefInfo.sp === 1 ? '' : 'S'} AVAILABLE`,
+        x + 18,
+        cy2
+      );
       cy2 += 20;
     } else if (debriefInfo && debriefInfo.sp > 0) {
       ctx.fillStyle = '#44cccc';
       ctx.font = 'bold 11px "Courier New", monospace';
-      ctx.fillText(`${debriefInfo.sp} UNSPENT SKILL POINT${debriefInfo.sp === 1 ? '' : 'S'}`, x + 18, cy2);
+      ctx.fillText(
+        `${debriefInfo.sp} UNSPENT SKILL POINT${debriefInfo.sp === 1 ? '' : 'S'}`,
+        x + 18,
+        cy2
+      );
       cy2 += 20;
     }
 
     // Action buttons: PILOT RECORD (when it has something to offer) + NEXT BOARD
     const btnH = 32;
-    const showPilot = debriefInfo && (debriefInfo.sp > 0 || debriefInfo.levelsGained) && !debriefInfo.died;
+    const showPilot =
+      debriefInfo && (debriefInfo.sp > 0 || debriefInfo.levelsGained) && !debriefInfo.died;
     const nbW = showPilot ? 190 : 220;
     const nbH = btnH;
     const gap = 14;
@@ -1052,7 +1274,8 @@ registerScreen('debrief', {
       ctx.strokeStyle = '#44cccc';
       ctx.lineWidth = 1.4;
       ctx.strokeRect(bx2, by2, 190, nbH);
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
       ctx.fillStyle = '#88eeee';
       ctx.font = 'bold 12px "Courier New", monospace';
       ctx.fillText('PILOT RECORD ▸', bx2 + 95, by2 + nbH / 2 + 0.5);
@@ -1068,7 +1291,8 @@ registerScreen('debrief', {
     ctx.strokeStyle = blink2 ? P.ui.textBright : P.ui.borderHi;
     ctx.lineWidth = 1.4;
     ctx.strokeRect(bx2, by2, nbW, nbH);
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
     ctx.fillStyle = P.ui.textBright;
     ctx.font = 'bold 13px "Courier New", monospace';
     ctx.fillText('[ NEXT BOARD ]', bx2 + nbW / 2, by2 + nbH / 2 + 0.5);
@@ -1083,7 +1307,14 @@ registerScreen('debrief', {
 function drawScanlines(ctx, w, h) {
   ctx.fillStyle = 'rgba(0,0,0,0.10)';
   for (let y = 0; y < h; y += 4) ctx.fillRect(0, y, w, 1);
-  const vg = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.35, w / 2, h / 2, Math.max(w, h) * 0.75);
+  const vg = ctx.createRadialGradient(
+    w / 2,
+    h / 2,
+    Math.min(w, h) * 0.35,
+    w / 2,
+    h / 2,
+    Math.max(w, h) * 0.75
+  );
   vg.addColorStop(0, 'rgba(0,0,0,0)');
   vg.addColorStop(1, 'rgba(0,0,0,0.42)');
   ctx.fillStyle = vg;
@@ -1096,8 +1327,14 @@ function drawTacticalGrid(ctx, w, h) {
   ctx.lineWidth = 1;
   const step = 48;
   ctx.beginPath();
-  for (let x = (w % step) / 2; x < w; x += step) { ctx.moveTo(x, 0); ctx.lineTo(x, h); }
-  for (let y = (h % step) / 2; y < h; y += step) { ctx.moveTo(0, y); ctx.lineTo(w, y); }
+  for (let x = (w % step) / 2; x < w; x += step) {
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, h);
+  }
+  for (let y = (h % step) / 2; y < h; y += step) {
+    ctx.moveTo(0, y);
+    ctx.lineTo(w, y);
+  }
   ctx.stroke();
 }
 
@@ -1108,15 +1345,21 @@ function drawRadarSweep(ctx, cx, cy, radius, tSec) {
   ctx.strokeStyle = 'rgba(90,160,80,0.16)';
   ctx.lineWidth = 1;
   for (const rr of [0.33, 0.66, 1]) {
-    ctx.beginPath(); ctx.arc(cx, cy, radius * rr, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius * rr, 0, Math.PI * 2);
+    ctx.stroke();
   }
-  ctx.beginPath(); ctx.moveTo(cx - radius, cy); ctx.lineTo(cx + radius, cy);
-  ctx.moveTo(cx, cy - radius); ctx.lineTo(cx, cy + radius); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(cx - radius, cy);
+  ctx.lineTo(cx + radius, cy);
+  ctx.moveTo(cx, cy - radius);
+  ctx.lineTo(cx, cy + radius);
+  ctx.stroke();
   // Sweep wedge with trailing fade
   const ang = (tSec * 1.1) % (Math.PI * 2);
   for (let i = 0; i < 24; i++) {
     const a = ang - i * 0.05;
-    ctx.strokeStyle = `rgba(110,220,100,${0.30 * (1 - i / 24)})`;
+    ctx.strokeStyle = `rgba(110,220,100,${0.3 * (1 - i / 24)})`;
     ctx.lineWidth = 3;
     ctx.beginPath();
     ctx.moveTo(cx, cy);
@@ -1124,13 +1367,24 @@ function drawRadarSweep(ctx, cx, cy, radius, tSec) {
     ctx.stroke();
   }
   // Blips
-  const blips = [[0.55, 0.8], [0.72, 2.6], [0.85, 4.9], [0.4, 3.7]];
+  const blips = [
+    [0.55, 0.8],
+    [0.72, 2.6],
+    [0.85, 4.9],
+    [0.4, 3.7],
+  ];
   for (const [rr, ba] of blips) {
     const bAng = ba + Math.sin(tSec * 0.23) * 0.2;
     const fade = 0.25 + 0.55 * Math.max(0, Math.cos(ang - ba));
     ctx.fillStyle = `rgba(150,255,120,${fade})`;
     ctx.beginPath();
-    ctx.arc(cx + Math.cos(bAng) * radius * rr, cy + Math.sin(bAng) * radius * rr, 2.4, 0, Math.PI * 2);
+    ctx.arc(
+      cx + Math.cos(bAng) * radius * rr,
+      cy + Math.sin(bAng) * radius * rr,
+      2.4,
+      0,
+      Math.PI * 2
+    );
     ctx.fill();
   }
   ctx.restore();
@@ -1140,15 +1394,18 @@ function drawScreenBackground(ctx, cam, title, subtitle = '') {
   const dpr = cam.dpr;
   const w = cam.screenW;
   const h = cam.screenH;
-  ctx.save(); ctx.scale(dpr, dpr);
+  ctx.save();
+  ctx.scale(dpr, dpr);
   const grad = ctx.createLinearGradient(0, 0, 0, h);
   grad.addColorStop(0, '#0a120a');
   grad.addColorStop(1, '#16240f');
-  ctx.fillStyle = grad; ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, h);
   drawTacticalGrid(ctx, w, h);
 
   // Header rule under the title
-  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
   ctx.fillStyle = P.ui.textBright;
   ctx.font = 'bold 22px "Courier New", monospace';
   ctx.fillText(title, w / 2, 24);
@@ -1197,20 +1454,30 @@ function drawContractCard(ctx, card, rect, selected = false) {
   ctx.fillStyle = 'rgba(0,0,0,0.25)';
   ctx.fillRect(rect.x, rect.y, rect.w, 28);
   // Risk-colored accent stripe
-  const riskCol = card.difficultyRating >= 4 ? '#cc3333' : card.difficultyRating >= 3 ? '#ff8844' : '#88aa55';
+  const riskCol =
+    card.difficultyRating >= 4 ? '#cc3333' : card.difficultyRating >= 3 ? '#ff8844' : '#88aa55';
   ctx.fillStyle = riskCol;
   ctx.fillRect(rect.x, rect.y, 4, rect.h);
   ctx.strokeStyle = selected ? P.ui.textBright : P.ui.border;
   ctx.lineWidth = selected ? 2 : 1;
   ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
-  drawCornerBrackets(ctx, rect.x, rect.y, rect.w, rect.h,
-    selected ? P.ui.textBright : 'rgba(90,140,80,0.45)', 10, 1.5);
+  drawCornerBrackets(
+    ctx,
+    rect.x,
+    rect.y,
+    rect.w,
+    rect.h,
+    selected ? P.ui.textBright : 'rgba(90,140,80,0.45)',
+    10,
+    1.5
+  );
 
   ctx.save();
   ctx.beginPath();
   ctx.rect(rect.x + 6, rect.y, rect.w - 12, rect.h);
   ctx.clip();
-  ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
   ctx.fillStyle = P.ui.infamy;
   ctx.font = 'bold 14px "Courier New", monospace';
   ctx.fillText(card.name, rect.x + 16, rect.y + 8);
@@ -1238,7 +1505,11 @@ function drawContractCard(ctx, card, rect, selected = false) {
   ctx.fillStyle = P.ui.rocket;
   ctx.fillText(`STYLE  ${card.styleName}`, rect.x + 16, rect.y + rect.h - 42);
   ctx.fillStyle = riskCol;
-  ctx.fillText(`RISK   ${'◆'.repeat(card.difficultyRating)}${'◇'.repeat(4 - card.difficultyRating)}  ${card.difficultyName}`, rect.x + 16, rect.y + rect.h - 28);
+  ctx.fillText(
+    `RISK   ${'◆'.repeat(card.difficultyRating)}${'◇'.repeat(4 - card.difficultyRating)}  ${card.difficultyName}`,
+    rect.x + 16,
+    rect.y + rect.h - 28
+  );
   ctx.fillStyle = '#ffcc44';
   ctx.fillText(`PAY    $${card.reward}`, rect.x + 16, rect.y + rect.h - 14);
   ctx.restore();
@@ -1271,8 +1542,14 @@ registerScreen('contracts', {
     const w = cam.screenW;
     const h = cam.screenH;
     const camp = career?.campaign || { act: 1, sortie: 1 };
-    drawScreenBackground(ctx, cam, 'AVAILABLE OPERATIONS', `ACT ${camp.act} · SORTIE ${camp.sortie} — SELECT ONE CONTRACT`);
-    ctx.save(); ctx.scale(cam.dpr, cam.dpr);
+    drawScreenBackground(
+      ctx,
+      cam,
+      'AVAILABLE OPERATIONS',
+      `ACT ${camp.act} · SORTIE ${camp.sortie} — SELECT ONE CONTRACT`
+    );
+    ctx.save();
+    ctx.scale(cam.dpr, cam.dpr);
     for (let i = 0; i < contractBoard.length; i++) {
       drawContractCard(ctx, contractBoard[i], contractCardRect(i, w, h));
     }
@@ -1296,17 +1573,28 @@ registerScreen('briefing', {
     const scenario = getScenario(activeContract?.scenarioId);
     const style = getStyle(activeContract?.styleId);
     const difficulty = getDifficultyProfile(activeContract?.difficultyId);
-    drawScreenBackground(ctx, cam, 'SORTIE BRIEFING', activeContract ? `CONTRACT SEED ${activeContract.seed}` : 'NO CONTRACT');
-    ctx.save(); ctx.scale(cam.dpr, cam.dpr);
+    drawScreenBackground(
+      ctx,
+      cam,
+      'SORTIE BRIEFING',
+      activeContract ? `CONTRACT SEED ${activeContract.seed}` : 'NO CONTRACT'
+    );
+    ctx.save();
+    ctx.scale(cam.dpr, cam.dpr);
     const panelW = Math.min(480, w - 32);
     const panelH = Math.min(400, h - 120);
     const x = (w - panelW) / 2;
     const y = 78;
-    ctx.fillStyle = '#0d210f'; ctx.fillRect(x, y, panelW, panelH);
-    ctx.strokeStyle = P.ui.border; ctx.lineWidth = 1; ctx.strokeRect(x, y, panelW, panelH);
+    ctx.fillStyle = '#0d210f';
+    ctx.fillRect(x, y, panelW, panelH);
+    ctx.strokeStyle = P.ui.border;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x, y, panelW, panelH);
     drawCornerBrackets(ctx, x, y, panelW, panelH, P.ui.borderHi, 16, 2);
-    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-    ctx.fillStyle = P.ui.infamy; ctx.font = 'bold 18px "Courier New", monospace';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = P.ui.infamy;
+    ctx.font = 'bold 18px "Courier New", monospace';
     ctx.fillText(activeContract?.name || 'NO CONTRACT', x + 18, y + 18);
     const nameW = ctx.measureText(activeContract?.name || 'NO CONTRACT').width;
     ctx.strokeStyle = 'rgba(204,136,51,0.5)';
@@ -1314,28 +1602,38 @@ registerScreen('briefing', {
     ctx.moveTo(x + 18, y + 40);
     ctx.lineTo(x + 18 + nameW, y + 40);
     ctx.stroke();
-    ctx.fillStyle = P.ui.textBright; ctx.font = 'bold 12px "Courier New", monospace';
+    ctx.fillStyle = P.ui.textBright;
+    ctx.font = 'bold 12px "Courier New", monospace';
     ctx.fillText(scenario.objectiveLabel, x + 18, y + 52);
-    ctx.fillStyle = P.ui.text; ctx.font = '11px "Courier New", monospace';
+    ctx.fillStyle = P.ui.text;
+    ctx.font = '11px "Courier New", monospace';
     const descriptionLines = wrapText(scenario.description, Math.floor(panelW / 7.2));
-    for (let i = 0; i < descriptionLines.length; i++) ctx.fillText(descriptionLines[i], x + 18, y + 76 + i * 15);
+    for (let i = 0; i < descriptionLines.length; i++)
+      ctx.fillText(descriptionLines[i], x + 18, y + 76 + i * 15);
     const detailY = y + 126;
     ctx.fillStyle = P.ui.rocket;
     ctx.fillText(`STYLE       ${style.name}`, x + 18, detailY);
     ctx.fillText(`DIFFICULTY  ${difficulty.name}`, x + 18, detailY + 20);
-    ctx.fillText(`THREAT      ${activeContract?.threatTags.join(' / ').toUpperCase()}`, x + 18, detailY + 40);
+    ctx.fillText(
+      `THREAT      ${activeContract?.threatTags.join(' / ').toUpperCase()}`,
+      x + 18,
+      detailY + 40
+    );
     ctx.fillStyle = '#ffcc44';
     ctx.fillText(`BASE PAY    $${activeContract?.reward || 0}`, x + 18, detailY + 60);
 
     // ── Flow layout: hints → equipment → launch prompt (no absolute overlaps)
     let fy = detailY + 86;
     ctx.fillStyle = P.ui.textDim;
-    ctx.fillText('Fear levels you up. Heat accelerates the Hunter.', x + 18, fy); fy += 16;
-    ctx.fillText('Complete the objective, then leave the map.', x + 18, fy); fy += 26;
+    ctx.fillText('Fear levels you up. Heat accelerates the Hunter.', x + 18, fy);
+    fy += 16;
+    ctx.fillText('Complete the objective, then leave the map.', x + 18, fy);
+    fy += 26;
 
     ctx.fillStyle = P.ui.textDim;
     ctx.font = 'bold 10px "Courier New", monospace';
-    ctx.fillText('FIELD EQUIPMENT — CLICK TO SELECT', x + 18, fy); fy += 20;
+    ctx.fillText('FIELD EQUIPMENT — CLICK TO SELECT', x + 18, fy);
+    fy += 20;
     briefingEquipmentBoxes = [];
     const eqKeys = Object.keys(EQUIPMENT);
     const eqGap = 10;
@@ -1370,7 +1668,8 @@ registerScreen('briefing', {
     ctx.font = 'bold 14px "Courier New", monospace';
     const lw2 = ctx.measureText(lbl).width + 36;
     const lh2 = 32;
-    const lx = w / 2 - lw2 / 2, ly = fy - lh2 / 2 + 4;
+    const lx = w / 2 - lw2 / 2,
+      ly = fy - lh2 / 2 + 4;
     const blink = Math.sin(performance.now() / 500) > -0.4;
     ctx.fillStyle = 'rgba(20,40,16,0.65)';
     ctx.fillRect(lx, ly, lw2, lh2);
@@ -1394,8 +1693,15 @@ registerScreen('sortie', {
     projectiles.length = 0;
     explosions.length = 0;
     floatingTexts.length = 0;
-    heli.x = 0; heli.y = 0; heli.vx = 0; heli.vy = 0;
-    heli.angle = -Math.PI / 2; heli.hp = 100; heli.maxHp = 100; heli.score = 0; heli.fear = 0;
+    heli.x = 0;
+    heli.y = 0;
+    heli.vx = 0;
+    heli.vy = 0;
+    heli.angle = -Math.PI / 2;
+    heli.hp = 100;
+    heli.maxHp = 100;
+    heli.score = 0;
+    heli.fear = 0;
     heli.bladeAngle = 0;
     heli.targetMode = 'closest';
     heli.targetCycleIndex = 0;
@@ -1477,7 +1783,10 @@ registerScreen('sortie', {
       for (const e of enemies) {
         if (e.state === 'dead') continue;
         const dist = Math.hypot(e.x - worldPos.x, e.y - worldPos.y);
-        if (dist < closestDist) { closestDist = dist; clickedTarget = e; }
+        if (dist < closestDist) {
+          closestDist = dist;
+          clickedTarget = e;
+        }
       }
       // Convoys: any member is clickable.
       for (const convoy of world.convoys) {
@@ -1486,7 +1795,10 @@ registerScreen('sortie', {
           const dist = Math.hypot(m.x - worldPos.x, m.y - worldPos.y);
           const r = m.isVeh ? 26 : 20;
           if (dist < Math.max(closestDist, r) && dist < closestDist + r) {
-            if (dist < closestDist) { closestDist = dist; clickedTarget = convoy; }
+            if (dist < closestDist) {
+              closestDist = dist;
+              clickedTarget = convoy;
+            }
           }
         }
       }
@@ -1495,12 +1807,18 @@ registerScreen('sortie', {
         if (!b.destructible || b.destroyed) continue;
         const dist = Math.hypot(b.x - worldPos.x, b.y - worldPos.y);
         const r = Math.max(b.w, b.d) * 0.7 + 18;
-        if (dist < r && dist < closestDist) { closestDist = dist; clickedTarget = b; }
+        if (dist < r && dist < closestDist) {
+          closestDist = dist;
+          clickedTarget = b;
+        }
       }
       const objectiveTarget = world?.objective?.target;
       if (objectiveTarget && isTargetAlive(objectiveTarget)) {
         const dist = Math.hypot(objectiveTarget.x - worldPos.x, objectiveTarget.y - worldPos.y);
-        if (dist < closestDist) { closestDist = dist; clickedTarget = objectiveTarget; }
+        if (dist < closestDist) {
+          closestDist = dist;
+          clickedTarget = objectiveTarget;
+        }
       }
       if (boss.spawned && boss.state !== 'dead') {
         const dist = Math.hypot(boss.x - worldPos.x, boss.y - worldPos.y);
@@ -1539,13 +1857,19 @@ registerScreen('sortie', {
           if (!b.destructible || b.destroyed) continue;
           const dist = Math.hypot(b.x - heli.x, b.y - heli.y);
           if (dist > heli.weaponRange) continue;
-          if (dist < bestValue) { bestValue = dist; bestTarget = b; }
+          if (dist < bestValue) {
+            bestValue = dist;
+            bestTarget = b;
+          }
         }
         for (const convoy of world.convoys) {
           if (!convoy.active || convoy.destroyed) continue;
           const dist = Math.hypot(convoy.x - heli.x, convoy.y - heli.y);
           if (dist > heli.weaponRange) continue;
-          if (dist < bestValue) { bestValue = dist; bestTarget = convoy; }
+          if (dist < bestValue) {
+            bestValue = dist;
+            bestTarget = convoy;
+          }
         }
       } else {
         for (const e of enemies) {
@@ -1560,7 +1884,10 @@ registerScreen('sortie', {
             const dps = e.damage / Math.max(0.2, e.fireRate);
             value = -(dps + e.range * 0.03);
           }
-          if (value < bestValue) { bestValue = value; bestTarget = e; }
+          if (value < bestValue) {
+            bestValue = value;
+            bestTarget = e;
+          }
         }
       }
     }
@@ -1597,8 +1924,11 @@ registerScreen('sortie', {
     if (heli.adrenalineT > 0) heli.adrenalineT -= dt;
     if (heli.flareT > 0) heli.flareT -= dt;
     const boost = heli.adrenalineT > 0 ? 1 + 0.5 * (heli.boostPotency || 1) : 1.0;
-    const accel = heli.accel * boost, drag = 0.91, maxSpeed = heli.maxSpeed * boost;
-    const mx = input.moveX, my = input.moveY;
+    const accel = heli.accel * boost,
+      drag = 0.91,
+      maxSpeed = heli.maxSpeed * boost;
+    const mx = input.moveX,
+      my = input.moveY;
     if (mx !== 0 || my !== 0) {
       // WASD / joystick: magnitude controls speed
       const mag = Math.hypot(mx, my);
@@ -1652,17 +1982,36 @@ registerScreen('sortie', {
       }
       if (Math.random() < (heli.critChance || 0)) dmg *= 2;
       aimA += (Math.random() - 0.5) * 0.035 * (heli.spreadMult || 1);
-      spawnProjectile(heli.x + Math.cos(aimA) * 20, heli.y + Math.sin(aimA) * 20, aimA, heli.bulletSpeed, Math.round(dmg));
+      spawnProjectile(
+        heli.x + Math.cos(aimA) * 20,
+        heli.y + Math.sin(aimA) * 20,
+        aimA,
+        heli.bulletSpeed,
+        Math.round(dmg)
+      );
       if (Math.random() < (heli.doubleTap || 0)) {
-        spawnProjectile(heli.x + Math.cos(aimA + 0.05) * 20, heli.y + Math.sin(aimA + 0.05) * 20, aimA + 0.05, heli.bulletSpeed, Math.round(dmg));
+        spawnProjectile(
+          heli.x + Math.cos(aimA + 0.05) * 20,
+          heli.y + Math.sin(aimA + 0.05) * 20,
+          aimA + 0.05,
+          heli.bulletSpeed,
+          Math.round(dmg)
+        );
       }
       addHeat(0.08, 'gunfire reported');
-      lastShotX = heli.x; lastShotY = heli.y; lastShotT = performance.now() / 1000;
+      lastShotX = heli.x;
+      lastShotY = heli.y;
+      lastShotT = performance.now() / 1000;
       heli.fireCooldown = fireRate;
     }
 
     // ── Equipment activation (E) ──
-    if (input.equipment && heli.equipmentType && !heli.equipmentUsed && sortieState.status === 'active') {
+    if (
+      input.equipment &&
+      heli.equipmentType &&
+      !heli.equipmentUsed &&
+      sortieState.status === 'active'
+    ) {
       heli.equipmentUsed = true;
       if (heli.equipmentType === 'repair') {
         heli.hp = Math.min(heli.maxHp, heli.hp + 40);
@@ -1686,7 +2035,15 @@ registerScreen('sortie', {
         const tx = heli.target ? heli.target.x : heli.x + Math.cos(heli.angle) * 400;
         const ty = heli.target ? heli.target.y : heli.y + Math.sin(heli.angle) * 400;
         const angle = Math.atan2(ty - heli.y, tx - heli.x) + (Math.random() - 0.5) * 0.14;
-        spawnProjectile(heli.x + Math.cos(angle) * 22, heli.y + Math.sin(angle) * 22, angle, 340, 15, false, 1.6);
+        spawnProjectile(
+          heli.x + Math.cos(angle) * 22,
+          heli.y + Math.sin(angle) * 22,
+          angle,
+          340,
+          15,
+          false,
+          1.6
+        );
         heli.salvoShots--;
         heli.salvoTimer = 0.12;
       }
@@ -1722,9 +2079,13 @@ registerScreen('sortie', {
       // reaches them — gunfire nearby, or their own defenders opening up —
       // then run until they escape the area.
       if (e.className === 'unarmed') {
-        const gunfireNear = (performance.now() / 1000 - lastShotT) < COMBAT.gunfireMemorySec &&
+        const gunfireNear =
+          performance.now() / 1000 - lastShotT < COMBAT.gunfireMemorySec &&
           Math.hypot(e.x - lastShotX, e.y - lastShotY) < COMBAT.gunfireRadius;
-        if ((gunfireNear || (e.siteId && sitesUnderAttack.has(e.siteId))) && dist < COMBAT.civilianPanicRadius) {
+        if (
+          (gunfireNear || (e.siteId && sitesUnderAttack.has(e.siteId))) &&
+          dist < COMBAT.civilianPanicRadius
+        ) {
           e.state = 'flee';
         }
         if (e.state === 'flee') {
@@ -1739,8 +2100,10 @@ registerScreen('sortie', {
           }
           // Civilians who outrun the engagement area escape the site:
           // they leave the battle and no longer block clearing it.
-          if (e.homeX !== undefined &&
-              Math.hypot(e.x - e.homeX, e.y - e.homeY) > CIVILIAN_ESCAPE_RADIUS) {
+          if (
+            e.homeX !== undefined &&
+            Math.hypot(e.x - e.homeX, e.y - e.homeY) > CIVILIAN_ESCAPE_RADIUS
+          ) {
             e.escaped = true;
           }
         } else {
@@ -1758,13 +2121,15 @@ registerScreen('sortie', {
       // ── Armed hostiles. Aggro range scales with Heat; a home leash keeps
       // garrisons defending their post instead of swarming across the map.
       const responseRange = COMBAT.aggroBase + sortieState.heat.tier * COMBAT.aggroPerHeatTier;
-      const homeDist = e.homeX !== undefined
-        ? Math.hypot(e.x - e.homeX, e.y - e.homeY)
-        : 0;
+      const homeDist = e.homeX !== undefined ? Math.hypot(e.x - e.homeX, e.y - e.homeY) : 0;
       const leash = e.category === 'vehicle' ? COMBAT.leashVehicle : COMBAT.leashInfantry;
       const wasAttacking = e.state === 'attack';
       if (dist < responseRange && homeDist < leash) e.state = 'attack';
-      else if ((dist < responseRange + COMBAT.alertExtra || wasAttacking) && homeDist < leash + COMBAT.leashGrace) e.state = 'alert';
+      else if (
+        (dist < responseRange + COMBAT.alertExtra || wasAttacking) &&
+        homeDist < leash + COMBAT.leashGrace
+      )
+        e.state = 'alert';
       else e.state = 'idle';
 
       if (e.state === 'attack' && !wasAttacking) addHeat(1.2, 'hostile contact');
@@ -1850,7 +2215,11 @@ registerScreen('sortie', {
       bossState.timeRemaining -= dt * hunterClockRate();
 
       // 5-second warning
-      if (bossState.timeRemaining <= TIMER.bossWarningTime && !bossState.warning && !bossState.spawned) {
+      if (
+        bossState.timeRemaining <= TIMER.bossWarningTime &&
+        !bossState.warning &&
+        !bossState.spawned
+      ) {
         bossState.warning = true;
         bossState.warningTimer = TIMER.bossWarningTime;
       }
@@ -1900,7 +2269,7 @@ registerScreen('sortie', {
         }
       } else if (boss.state === 'attack') {
         // Make attack passes instead of orbiting like a turret.
-        const strafeDir = (boss.phaseTimer % 8 < 4) ? 1 : -1;
+        const strafeDir = boss.phaseTimer % 8 < 4 ? 1 : -1;
         const tangential = trackAngle + (Math.PI / 2) * strafeDir;
         boss.x += Math.cos(tangential) * boss.speed * 0.85 * dt;
         boss.y += Math.sin(tangential) * boss.speed * 0.85 * dt;
@@ -1984,8 +2353,13 @@ registerScreen('sortie', {
         // Advance along the route by arc length; ping-pong at the ends.
         const total = convoy.routeCum[convoy.routeCum.length - 1];
         convoy.s += convoy.direction * convoy.speed * dt;
-        if (convoy.s >= total) { convoy.s = total; convoy.direction = -1; }
-        else if (convoy.s <= 0) { convoy.s = 0; convoy.direction = 1; }
+        if (convoy.s >= total) {
+          convoy.s = total;
+          convoy.direction = -1;
+        } else if (convoy.s <= 0) {
+          convoy.s = 0;
+          convoy.direction = 1;
+        }
 
         // Lead position/heading come from the path itself.
         const lead = pointAlongRoute(convoy, convoy.s);
@@ -1999,7 +2373,8 @@ registerScreen('sortie', {
           convoy.fireCooldown -= dt;
           const d = Math.hypot(convoy.x - heli.x, convoy.y - heli.y);
           if (d < 380 && convoy.fireCooldown <= 0) {
-            const fireAngle = Math.atan2(heli.y - convoy.y, heli.x - convoy.x) + (Math.random() - 0.5) * 0.12;
+            const fireAngle =
+              Math.atan2(heli.y - convoy.y, heli.x - convoy.x) + (Math.random() - 0.5) * 0.12;
             spawnProjectile(convoy.x, convoy.y, fireAngle, 200, 3, true, 1.2);
             convoy.fireCooldown = 1.5;
             addHeat(0.35, 'convoy escort engaging');
@@ -2025,7 +2400,10 @@ registerScreen('sortie', {
       p.x += p.vx * dt;
       p.y += p.vy * dt;
       p.life -= dt;
-      if (p.life <= 0) { projectiles.splice(i, 1); continue; }
+      if (p.life <= 0) {
+        projectiles.splice(i, 1);
+        continue;
+      }
 
       if (!p.isEnemy) {
         // Player bullet → hit destructible objectives, radar, and convoys.
@@ -2077,7 +2455,12 @@ registerScreen('sortie', {
               let fearGain = 1;
               if (e.category === 'vehicle') fearGain = 4;
               else if (e.category === 'emplacement') fearGain = 3;
-              else if (e.weaponName === 'RPG' || e.weaponName === 'ATGM' || e.weaponName === 'MANPADS') fearGain = 2;
+              else if (
+                e.weaponName === 'RPG' ||
+                e.weaponName === 'ATGM' ||
+                e.weaponName === 'MANPADS'
+              )
+                fearGain = 2;
               addFear(fearGain, e.className);
               addHeat(Math.max(0.4, fearGain * 0.65), `${e.className} kill reported`);
               spawnExplosion(e.x, e.y, 1.0);
@@ -2136,7 +2519,9 @@ registerScreen('sortie', {
   },
 
   draw(ctx, cam, dt = 0) {
-    const dpr = cam.dpr, w = cam.screenW, h = cam.screenH;
+    const dpr = cam.dpr,
+      w = cam.screenW,
+      h = cam.screenH;
     cam.begin(ctx);
 
     drawSmoothTerrain(ctx, cam);
@@ -2146,18 +2531,33 @@ registerScreen('sortie', {
     // Draw convoys as a path-bound vehicle column (before helicopter so
     // they appear underneath). Every member sits ON the route polyline.
     if (world) {
-      const VEHICLE_CLASSES = { technical: '#7a6040', apc: '#7a7a5a', shilka: '#5a5a4a', sam: '#5a6a5a' };
+      const VEHICLE_CLASSES = {
+        technical: '#7a6040',
+        apc: '#7a7a5a',
+        shilka: '#5a5a4a',
+        sam: '#5a6a5a',
+      };
       for (const convoy of world.convoys) {
         if (!convoy.active) continue;
         // Cull by column bounding box
-        let colMinX = Infinity, colMinY = Infinity, colMaxX = -Infinity, colMaxY = -Infinity;
+        let colMinX = Infinity,
+          colMinY = Infinity,
+          colMaxX = -Infinity,
+          colMaxY = -Infinity;
         const members = getConvoyMembers(convoy);
         for (const m of members) {
-          if (m.x < colMinX) colMinX = m.x; if (m.x > colMaxX) colMaxX = m.x;
-          if (m.y < colMinY) colMinY = m.y; if (m.y > colMaxY) colMaxY = m.y;
+          if (m.x < colMinX) colMinX = m.x;
+          if (m.x > colMaxX) colMaxX = m.x;
+          if (m.y < colMinY) colMinY = m.y;
+          if (m.y > colMaxY) colMaxY = m.y;
         }
-        if (colMaxX < cam.x - 1200 || colMinX > cam.x + 1200 ||
-            colMaxY < cam.y - 1200 || colMinY > cam.y + 1200) continue;
+        if (
+          colMaxX < cam.x - 1200 ||
+          colMinX > cam.x + 1200 ||
+          colMaxY < cam.y - 1200 ||
+          colMinY > cam.y + 1200
+        )
+          continue;
 
         if (convoy.destroyed) {
           // Burnt-out wrecks scattered along the road
@@ -2167,7 +2567,9 @@ registerScreen('sortie', {
             ctx.translate(m.x, m.y);
             ctx.rotate(m.angle + ((m.x * 7 + m.y * 3) % 10) / 30 - 0.15);
             ctx.fillStyle = 'rgba(20,16,12,0.55)';
-            ctx.beginPath(); ctx.ellipse(0, 0, 14, 8, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath();
+            ctx.ellipse(0, 0, 14, 8, 0, 0, Math.PI * 2);
+            ctx.fill();
             ctx.fillStyle = '#2e2a24';
             ctx.fillRect(-9, -5, 18, 10);
             ctx.restore();
@@ -2183,24 +2585,36 @@ registerScreen('sortie', {
           ctx.translate(m.x, m.y);
           ctx.rotate(m.angle);
           if (m.isVeh) {
-            const len = m.cls === 'shilka' ? 24 : 20, wid = m.cls === 'shilka' ? 12 : 10;
+            const len = m.cls === 'shilka' ? 24 : 20,
+              wid = m.cls === 'shilka' ? 12 : 10;
             ctx.fillStyle = withAlpha('#000000', 0.18); // shadow
-            ctx.beginPath(); ctx.ellipse(2, 3, len * 0.55, wid * 0.5, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath();
+            ctx.ellipse(2, 3, len * 0.55, wid * 0.5, 0, 0, Math.PI * 2);
+            ctx.fill();
             ctx.fillStyle = VEHICLE_CLASSES[m.cls];
             ctx.fillRect(-len / 2, -wid / 2, len, wid);
-            if (convoy.flashTimer > 0) { ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.fillRect(-len / 2, -wid / 2, len, wid); }
+            if (convoy.flashTimer > 0) {
+              ctx.fillStyle = 'rgba(255,255,255,0.7)';
+              ctx.fillRect(-len / 2, -wid / 2, len, wid);
+            }
             ctx.fillStyle = 'rgba(0,0,0,0.35)'; // cab / front block
             ctx.fillRect(len / 2 - 6, -wid / 2 + 1.5, 5, wid - 3);
-            if (m.cls === 'shilka') { // gun barrels
-              ctx.strokeStyle = '#3a3a2a'; ctx.lineWidth = 1.5;
+            if (m.cls === 'shilka') {
+              // gun barrels
+              ctx.strokeStyle = '#3a3a2a';
+              ctx.lineWidth = 1.5;
               ctx.beginPath();
-              ctx.moveTo(len / 2 - 4, -3); ctx.lineTo(len / 2 + 8, -4);
-              ctx.moveTo(len / 2 - 4, 3); ctx.lineTo(len / 2 + 8, 4);
+              ctx.moveTo(len / 2 - 4, -3);
+              ctx.lineTo(len / 2 + 8, -4);
+              ctx.moveTo(len / 2 - 4, 3);
+              ctx.lineTo(len / 2 + 8, 4);
               ctx.stroke();
             }
           } else {
             ctx.fillStyle = '#8a6a4a';
-            ctx.beginPath(); ctx.arc(0, 0, 2.5, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath();
+            ctx.arc(0, 0, 2.5, 0, Math.PI * 2);
+            ctx.fill();
           }
           ctx.restore();
         }
@@ -2220,7 +2634,7 @@ registerScreen('sortie', {
     }
 
     if (world) {
-      world.buildings.sort((a, b) => (a.y + a.d / 2) - (b.y + b.d / 2));
+      world.buildings.sort((a, b) => a.y + a.d / 2 - (b.y + b.d / 2));
       for (const b of world.buildings) {
         if (cam.isVisible(b.x, b.y, 80)) drawBuilding(ctx, b);
       }
@@ -2242,7 +2656,9 @@ registerScreen('sortie', {
     // Draw projectiles
     for (const p of projectiles) {
       // Trail
-      ctx.strokeStyle = p.isEnemy ? withAlpha(P.projectile.enemyTrail, 0.4) : withAlpha(P.projectile.bulletTrail, 0.4);
+      ctx.strokeStyle = p.isEnemy
+        ? withAlpha(P.projectile.enemyTrail, 0.4)
+        : withAlpha(P.projectile.bulletTrail, 0.4);
       ctx.lineWidth = 2;
       if (p.trail.length > 1) {
         ctx.beginPath();
@@ -2290,17 +2706,21 @@ registerScreen('sortie', {
         const fa = performance.now() / 130 + f * 1.256;
         const fr = 18 + (f % 3) * 9;
         const fx = heli.x + Math.cos(fa) * fr;
-        const fy = heli.y + Math.sin(fa) * fr * 0.7 + (performance.now() / 60 + f * 13) % 14;
+        const fy = heli.y + Math.sin(fa) * fr * 0.7 + ((performance.now() / 60 + f * 13) % 14);
         ctx.fillStyle = withAlpha('#ffdd66', 0.85);
-        ctx.beginPath(); ctx.arc(fx, fy, 2.2, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath();
+        ctx.arc(fx, fy, 2.2, 0, Math.PI * 2);
+        ctx.fill();
         ctx.fillStyle = withAlpha('#ff8833', 0.4);
-        ctx.beginPath(); ctx.arc(fx, fy + 2, 3.4, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath();
+        ctx.arc(fx, fy + 2, 3.4, 0, Math.PI * 2);
+        ctx.fill();
       }
     }
 
     // Draw floating texts (CLEAR!, damage numbers)
     for (const ft of floatingTexts) {
-      const alpha = clamp(ft.life / ft.maxLife * 2, 0, 1); // fade in fast, fade out
+      const alpha = clamp((ft.life / ft.maxLife) * 2, 0, 1); // fade in fast, fade out
       const scale = 1 + (1 - ft.life / ft.maxLife) * 0.3; // grow slightly
       ctx.save();
       ctx.translate(ft.x, ft.y);
@@ -2320,7 +2740,8 @@ registerScreen('sortie', {
     cam.end(ctx);
 
     // ── HUD ──
-    ctx.save(); ctx.scale(dpr, dpr);
+    ctx.save();
+    ctx.scale(dpr, dpr);
 
     // Scale the HUD with viewport size so it stays readable on big screens
     // and still fits on small ones. All HUD code below uses W/H (logical).
@@ -2328,32 +2749,50 @@ registerScreen('sortie', {
     ctx.scale(uiS, uiS);
 
     // ── HUD layout metrics (responsive; no plate overlaps) ──
-    const W = w / uiS, H = h / uiS;
+    const W = w / uiS,
+      H = h / uiS;
     const narrow = W < HUD.narrowBreakpoint;
-    const lpw = narrow ? 178 : 240;                 // left systems plate width
-    const rpw = narrow ? 152 : 188;                 // right status plate width
-    const rph = narrow ? 106 : 96;                  // right status plate height
+    const lpw = narrow ? 178 : 240; // left systems plate width
+    const rpw = narrow ? 152 : 188; // right status plate width
+    const rph = narrow ? 106 : 96; // right status plate height
     const rpx = W - rpw - 8;
 
     const nToggles = (input.autofire ? 1 : 0) + (input.clickToTarget ? 1 : 0);
     const equipReady = sortieState.status === 'active' && heli.equipmentType && !heli.equipmentUsed;
-    const objText = (world?.objective && !sortieState.objectiveComplete)
-      ? objectiveHudText()
-      : (sortieState.objectiveComplete ? 'RTB — EXIT THE MAP' : null);
-    const objWrap = objText ? wrapText(objText, Math.max(16, Math.floor((lpw - 26) / 6))).slice(0, 2) : [];
-    const showProgress = !!(world?.objective && !sortieState.objectiveComplete && world.objective.type === 'suppression');
-    const sysH = 40 + nToggles * 15 + (equipReady ? 15 : 0) + objWrap.length * 13 + (showProgress ? 13 : 0) + 4;
+    const objText =
+      world?.objective && !sortieState.objectiveComplete
+        ? objectiveHudText()
+        : sortieState.objectiveComplete
+          ? 'RTB — EXIT THE MAP'
+          : null;
+    const objWrap = objText
+      ? wrapText(objText, Math.max(16, Math.floor((lpw - 26) / 6))).slice(0, 2)
+      : [];
+    const showProgress = !!(
+      world?.objective &&
+      !sortieState.objectiveComplete &&
+      world.objective.type === 'suppression'
+    );
+    const sysH =
+      40 +
+      nToggles * 15 +
+      (equipReady ? 15 : 0) +
+      objWrap.length * 13 +
+      (showProgress ? 13 : 0) +
+      4;
 
     // Centre stack drops below the side plates on narrow screens.
     const hpY0 = narrow ? 8 + Math.max(sysH, rph) + 12 : 8;
-    let hudEtaY = hpY0 + 36;
+    const hudEtaY = hpY0 + 36;
 
     // Bottom row metrics (radar / compass / sortie stats)
-    const mmS = narrow ? 108 : 148;              // minimap size
-    const mmX = 12, mmY = H - mmS - 12;
-    const stW = narrow ? 138 : 172;              // stats plate width
+    const mmS = narrow ? 108 : 148; // minimap size
+    const mmX = 12,
+      mmY = H - mmS - 12;
+    const stW = narrow ? 138 : 172; // stats plate width
     const stH = narrow ? 52 : 60;
-    const stX = W - stW - 12, stY = H - stH - 12;
+    const stX = W - stW - 12,
+      stY = H - stH - 12;
     const cpW = Math.max(0, Math.min(W - (mmS + 48) * 2 - 24, 300));
     const cpH = 34;
 
@@ -2363,7 +2802,14 @@ registerScreen('sortie', {
       if (hpPctV < 0.35) {
         const pulse = 0.75 + 0.25 * Math.sin(performance.now() / 160);
         const a = (1 - hpPctV / 0.35) * 0.38 * pulse * (1 - (heli.redScreenRed || 0));
-        const vg = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.32, W / 2, H / 2, Math.max(W, H) * 0.72);
+        const vg = ctx.createRadialGradient(
+          W / 2,
+          H / 2,
+          Math.min(W, H) * 0.32,
+          W / 2,
+          H / 2,
+          Math.max(W, H) * 0.72
+        );
         vg.addColorStop(0, 'rgba(180,20,20,0)');
         vg.addColorStop(1, `rgba(180,20,20,${a.toFixed(3)})`);
         ctx.fillStyle = vg;
@@ -2381,11 +2827,15 @@ registerScreen('sortie', {
           infrastructure: 'buildings & convoys only',
         };
         const alpha = Math.min(1, (modeToastUntil - now) / 600);
-        const modeLabel = { closest: 'CLOSEST', strongest: 'STRONGEST', infrastructure: 'INFRA' }[heli.targetMode] || heli.targetMode;
+        const modeLabel =
+          { closest: 'CLOSEST', strongest: 'STRONGEST', infrastructure: 'INFRA' }[
+            heli.targetMode
+          ] || heli.targetMode;
         const ty0 = hpY0 + 44;
         ctx.globalAlpha = alpha;
         ctx.font = 'bold 12px "Courier New", monospace';
-        ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
         ctx.fillStyle = '#44cccc';
         ctx.fillText(`TARGETING: ${modeLabel}`, W / 2, ty0);
         ctx.font = '9px "Courier New", monospace';
@@ -2397,38 +2847,59 @@ registerScreen('sortie', {
 
     // Hull plate (centred — animated bar, segments, damage flash)
     {
-      const hpBarW = 110, hpBarH = 9;
-      const plateW = 212, plateH = 30;
-      const px = W / 2 - plateW / 2, py = hpY0;
+      const hpBarW = 110,
+        hpBarH = 9;
+      const plateW = 212,
+        plateH = 30;
+      const px = W / 2 - plateW / 2,
+        py = hpY0;
       const hpPct = heli.hp / heli.maxHp;
-      hudPlate(ctx, px, py, plateW, plateH,
-        hpPct <= 0.25 ? 'rgba(255,68,68,0.7)' : hpPct <= 0.5 ? 'rgba(204,170,51,0.55)' : 'rgba(90,140,80,0.55)');
-      const lowPulse = hpPct <= 0.25 ? (0.55 + 0.45 * Math.sin(performance.now() / 120)) : 1;
+      hudPlate(
+        ctx,
+        px,
+        py,
+        plateW,
+        plateH,
+        hpPct <= 0.25
+          ? 'rgba(255,68,68,0.7)'
+          : hpPct <= 0.5
+            ? 'rgba(204,170,51,0.55)'
+            : 'rgba(90,140,80,0.55)'
+      );
+      const lowPulse = hpPct <= 0.25 ? 0.55 + 0.45 * Math.sin(performance.now() / 120) : 1;
 
       // Animate the displayed value toward the real one; flash on damage.
       hudAnim.hp += (heli.hp - hudAnim.hp) * Math.min(1, 10 * (dt || 0.016));
       hudAnim.hpFlash = Math.max(0, (hudAnim.hpFlash || 0) - (dt || 0.016));
 
-      let label = 'HULL', labelCol = P.ui.text;
-      if (hpPct <= 0.25) { label = 'CRIT'; labelCol = '#ff4444'; }
-      else if (hpPct <= 0.5) { label = 'DMGD'; labelCol = P.ui.hpMed; }
+      let label = 'HULL',
+        labelCol = P.ui.text;
+      if (hpPct <= 0.25) {
+        label = 'CRIT';
+        labelCol = '#ff4444';
+      } else if (hpPct <= 0.5) {
+        label = 'DMGD';
+        labelCol = P.ui.hpMed;
+      }
 
       const num = `${Math.round(Math.max(0, heli.hp))}/${Math.round(heli.maxHp)}`;
       ctx.font = 'bold 10px "Courier New", monospace';
-      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
       const labelW = ctx.measureText(label).width;
       const numW = ctx.measureText(num).width;
       const gap = 9;
       const total = labelW + gap + hpBarW + gap + numW;
 
       const midY = py + plateH / 2 + 0.5;
-      let cx0 = px + (plateW - total) / 2;
+      const cx0 = px + (plateW - total) / 2;
 
       ctx.fillStyle = labelCol;
       ctx.globalAlpha = hpPct <= 0.25 ? lowPulse : 1;
       ctx.fillText(label, cx0, midY);
       ctx.globalAlpha = 1;
-      const barX = cx0 + labelW + gap, barY = py + (plateH - hpBarH) / 2;
+      const barX = cx0 + labelW + gap,
+        barY = py + (plateH - hpBarH) / 2;
       const hpCol = hpPct > 0.5 ? P.ui.hp : hpPct > 0.25 ? P.ui.hpMed : P.ui.hpLow;
       hudBar(ctx, barX, barY, hpBarW, hpBarH, hpPct, hpCol, {
         shown: hudAnim.hp / heli.maxHp,
@@ -2441,20 +2912,27 @@ registerScreen('sortie', {
 
     // Score / Fear / Heat — right status plate
     {
-      const px = rpx, py = 8, pw = rpw, ph = rph;
+      const px = rpx,
+        py = 8,
+        pw = rpw,
+        ph = rph;
       hudPlate(ctx, px, py, pw, ph, 'rgba(90,140,80,0.55)');
       plateHeader(ctx, px, py, pw, 'STATUS');
-      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
       const fbW = pw - 24;
 
       // Animate bars toward real values
       const fearThreshold = getFearThreshold();
-      hudAnim.fear += (clamp(heli.fear / fearThreshold, 0, 1) - hudAnim.fear) * Math.min(1, 8 * (dt || 0.016));
-      hudAnim.heat += (sortieState.heat.value / 100 - hudAnim.heat) * Math.min(1, 8 * (dt || 0.016));
+      hudAnim.fear +=
+        (clamp(heli.fear / fearThreshold, 0, 1) - hudAnim.fear) * Math.min(1, 8 * (dt || 0.016));
+      hudAnim.heat +=
+        (sortieState.heat.value / 100 - hudAnim.heat) * Math.min(1, 8 * (dt || 0.016));
 
       // SCORE — big number, right-aligned
       ctx.font = 'bold 10px "Courier New", monospace';
-      ctx.fillStyle = P.ui.textDim; ctx.fillText('SCORE', px + 12, py + 18);
+      ctx.fillStyle = P.ui.textDim;
+      ctx.fillText('SCORE', px + 12, py + 18);
       ctx.font = 'bold 14px "Courier New", monospace';
       ctx.fillStyle = P.ui.infamy;
       ctx.textAlign = 'right';
@@ -2463,17 +2941,29 @@ registerScreen('sortie', {
 
       // FEAR
       ctx.font = 'bold 10px "Courier New", monospace';
-      ctx.fillStyle = '#ff8844'; ctx.fillText(`FEAR LV ${sortieState.fearLevel || 0}`, px + 12, py + 38);
-      hudBar(ctx, px + 12, py + 50, fbW, 5, heli.fear / fearThreshold, '#cc8833', { shown: hudAnim.fear });
+      ctx.fillStyle = '#ff8844';
+      ctx.fillText(`FEAR LV ${sortieState.fearLevel || 0}`, px + 12, py + 38);
+      hudBar(ctx, px + 12, py + 50, fbW, 5, heli.fear / fearThreshold, '#cc8833', {
+        shown: hudAnim.fear,
+      });
 
       // HEAT (tier-colored)
       const heatCols = [P.ui.hp, P.ui.hpMed, '#ff8844', '#ff5533', '#ff2222'];
       ctx.fillStyle = heatCols[Math.min(sortieState.heat.tier, heatCols.length - 1)];
       ctx.fillText(`HEAT ${HEAT_LABELS[sortieState.heat.tier]}`, px + 12, py + 62);
-      hudBar(ctx, px + 12, py + 74, fbW, 6, sortieState.heat.value / 100,
-        sortieState.heat.tier >= 3 ? '#ff4444' : '#cc6633', { shown: hudAnim.heat });
+      hudBar(
+        ctx,
+        px + 12,
+        py + 74,
+        fbW,
+        6,
+        sortieState.heat.value / 100,
+        sortieState.heat.tier >= 3 ? '#ff4444' : '#cc6633',
+        { shown: hudAnim.heat }
+      );
       if (sortieState.heat.eventTimer > 0 && sortieState.heat.lastEvent) {
-        ctx.fillStyle = '#ffcc88'; ctx.font = '8px "Courier New", monospace';
+        ctx.fillStyle = '#ffcc88';
+        ctx.font = '8px "Courier New", monospace';
         const ev = sortieState.heat.lastEvent.toUpperCase();
         ctx.fillText(ev.length > 34 ? ev.slice(0, 33) + '…' : ev, px + 12, py + 84);
       }
@@ -2487,11 +2977,14 @@ registerScreen('sortie', {
       const timerStr = `${mins}:${rem.toString().padStart(2, '0')}`;
       const urgent = bossState.timeRemaining < 30;
       const flash = urgent && Math.sin(performance.now() / 200) > 0;
-      const bw = 190, bx = W / 2 - bw / 2, by = hudEtaY;
+      const bw = 190,
+        bx = W / 2 - bw / 2,
+        by = hudEtaY;
       hudPlate(ctx, bx, by, bw, 24, urgent ? 'rgba(255,68,68,0.7)' : 'rgba(90,140,80,0.55)');
       ctx.fillStyle = flash ? '#ff4444' : P.ui.textBright;
       ctx.font = 'bold 13px "Courier New", monospace';
-      ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
       ctx.fillText(`HUNTER ETA ${timerStr}`, W / 2, by + 5);
       // Time-remaining underline (normalized against base timer)
       const baseT = Math.max(1, TIMER.baseTime);
@@ -2502,7 +2995,8 @@ registerScreen('sortie', {
 
     // ── Boss HP bar (when spawned) — sits clear of the ETA plate ──
     if (boss.spawned && boss.state !== 'dead') {
-      const bossBarW = 220, bossBarH = 9;
+      const bossBarW = 220,
+        bossBarH = 9;
       const bossBarX = W / 2 - bossBarW / 2;
       const etaShowing = bossState.active && !bossState.defeated;
       const bossBarY = etaShowing ? hudEtaY + 40 : hudEtaY;
@@ -2517,19 +3011,25 @@ registerScreen('sortie', {
       ctx.strokeRect(bossBarX + 0.5, bossBarY + 0.5, bossBarW - 1, bossBarH - 1);
       ctx.fillStyle = '#ff6666';
       ctx.font = 'bold 9px "Courier New", monospace';
-      ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
       ctx.fillText('HIND PURSUIT GUNSHIP', W / 2, bossBarY - 12);
     }
 
     // Target indicator + mode
     if (heli.target) {
       const ts = cam.worldToScreen(heli.target.x, heli.target.y);
-      ts.x /= uiS; ts.y /= uiS; // convert to HUD-logical space
+      ts.x /= uiS;
+      ts.y /= uiS; // convert to HUD-logical space
       // Reticle color follows the targeting mode (boss always red)
-      const retCol = heli.target === boss ? P.ui.enemy
-        : heli.targetMode === 'infrastructure' ? '#44cccc'
-        : heli.targetMode === 'strongest' ? '#ff8844'
-        : P.ui.enemy;
+      const retCol =
+        heli.target === boss
+          ? P.ui.enemy
+          : heli.targetMode === 'infrastructure'
+            ? '#44cccc'
+            : heli.targetMode === 'strongest'
+              ? '#ff8844'
+              : P.ui.enemy;
       ctx.save();
       ctx.translate(ts.x, ts.y);
       ctx.rotate(performance.now() / 2400); // slow instrument rotation
@@ -2542,7 +3042,8 @@ registerScreen('sortie', {
       for (let i = 0; i < 4; i++) {
         ctx.rotate(Math.PI / 2);
         ctx.beginPath();
-        ctx.moveTo(9, 0); ctx.lineTo(22, 0);
+        ctx.moveTo(9, 0);
+        ctx.lineTo(22, 0);
         ctx.stroke();
       }
       ctx.restore();
@@ -2557,19 +3058,29 @@ registerScreen('sortie', {
         ctx.fillStyle = 'rgba(10,16,10,0.85)';
         ctx.fillRect(ts.x - bw2 / 2, ts.y + 14, bw2, 3);
         ctx.fillStyle = retCol;
-        ctx.fillRect(ts.x - bw2 / 2, ts.y + 14, bw2 * clamp(heli.target.hp / heli.target.maxHp, 0, 1), 3);
+        ctx.fillRect(
+          ts.x - bw2 / 2,
+          ts.y + 14,
+          bw2 * clamp(heli.target.hp / heli.target.maxHp, 0, 1),
+          3
+        );
       }
       // Label + range-to-target (+ lock indicator when click-locked)
-      const tRange = Math.round(Math.hypot(heli.target.x - heli.x, heli.target.y - heli.y) / 10) * 10;
+      const tRange =
+        Math.round(Math.hypot(heli.target.x - heli.x, heli.target.y - heli.y) / 10) * 10;
       ctx.font = '9px "Courier New", monospace';
       ctx.textAlign = 'center';
       ctx.fillStyle = retCol;
       let label = 'TARGET';
       if (heli.target === boss) label = 'HIND PURSUIT GUNSHIP';
       else if (Array.isArray(heli.target.route)) label = 'CONVOY';
-      else if (heli.target.type) label = heli.target.special === 'radar' ? 'RADAR'
-        : heli.target.special === 'fuel' ? 'FUEL TANK'
-        : heli.target.type.toUpperCase();
+      else if (heli.target.type)
+        label =
+          heli.target.special === 'radar'
+            ? 'RADAR'
+            : heli.target.special === 'fuel'
+              ? 'FUEL TANK'
+              : heli.target.type.toUpperCase();
       else if (heli.target.weaponName) label = heli.target.weaponName;
       else if (heli.target.className) label = heli.target.className.toUpperCase();
       if (heli.manualTarget === heli.target) label = 'LCK · ' + label;
@@ -2580,14 +3091,21 @@ registerScreen('sortie', {
 
     // Systems plate — targeting, toggles, equipment, objective
     {
-      const px = 8, py = 8, pw = lpw;
+      const px = 8,
+        py = 8,
+        pw = lpw;
       hudPlate(ctx, px, py, pw, sysH, 'rgba(90,140,80,0.55)');
       plateHeader(ctx, px, py, pw, 'SYSTEMS');
-      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
       ctx.font = 'bold 10px "Courier New", monospace';
       // Mode-colored targeting readout
-      const modeCol = { closest: P.ui.text, strongest: '#ff8844', infrastructure: '#44cccc' }[heli.targetMode] || P.ui.text;
-      const modeLabel = { closest: 'CLOSEST', strongest: 'STRONGEST', infrastructure: 'INFRA' }[heli.targetMode] || 'CLOSEST';
+      const modeCol =
+        { closest: P.ui.text, strongest: '#ff8844', infrastructure: '#44cccc' }[heli.targetMode] ||
+        P.ui.text;
+      const modeLabel =
+        { closest: 'CLOSEST', strongest: 'STRONGEST', infrastructure: 'INFRA' }[heli.targetMode] ||
+        'CLOSEST';
       ctx.fillStyle = modeCol;
       ctx.fillText(`TGT ${modeLabel}`, px + 12, py + 18);
       if (!narrow) {
@@ -2608,24 +3126,34 @@ registerScreen('sortie', {
       ctx.font = 'bold 10px "Courier New", monospace';
       for (const line of objWrap) {
         ctx.fillStyle = sortieState.objectiveComplete ? '#44ddff' : '#ffcc44';
-        ctx.fillText(line, px + 12, ty); ty += 13;
+        ctx.fillText(line, px + 12, ty);
+        ty += 13;
       }
       if (showProgress) {
         ctx.fillStyle = P.ui.textDim;
-        ctx.fillText(`PROGRESS ${world.objective.progress}/${world.objective.requiredCount}`, px + 12, ty);
+        ctx.fillText(
+          `PROGRESS ${world.objective.progress}/${world.objective.requiredCount}`,
+          px + 12,
+          ty
+        );
       }
     }
 
     // ── BOTTOM-LEFT: circular tactical radar ───────────────────────────
     if (world) {
       const R = mmS / 2;
-      const ccx = mmX + R, ccy = mmY + R;
+      const ccx = mmX + R,
+        ccy = mmY + R;
       // Circular backdrop + bezel
       ctx.fillStyle = 'rgba(6,14,6,0.78)';
-      ctx.beginPath(); ctx.arc(ccx, ccy, R + 4, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath();
+      ctx.arc(ccx, ccy, R + 4, 0, Math.PI * 2);
+      ctx.fill();
       ctx.strokeStyle = 'rgba(90,140,80,0.55)';
       ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.arc(ccx, ccy, R + 4, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(ccx, ccy, R + 4, 0, Math.PI * 2);
+      ctx.stroke();
       ctx.save();
       ctx.beginPath();
       ctx.arc(ccx, ccy, R, 0, Math.PI * 2);
@@ -2640,11 +3168,15 @@ registerScreen('sortie', {
       ctx.strokeStyle = 'rgba(90,160,80,0.22)';
       ctx.lineWidth = 1;
       for (const rr of [0.33, 0.66, 1]) {
-        ctx.beginPath(); ctx.arc(ccx, ccy, R * rr, 0, Math.PI * 2); ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(ccx, ccy, R * rr, 0, Math.PI * 2);
+        ctx.stroke();
       }
       ctx.beginPath();
-      ctx.moveTo(ccx - R, ccy); ctx.lineTo(ccx + R, ccy);
-      ctx.moveTo(ccx, ccy - R); ctx.lineTo(ccx, ccy + R);
+      ctx.moveTo(ccx - R, ccy);
+      ctx.lineTo(ccx + R, ccy);
+      ctx.moveTo(ccx, ccy - R);
+      ctx.lineTo(ccx, ccy + R);
       ctx.stroke();
 
       // Roads (cached layer)
@@ -2660,7 +3192,10 @@ registerScreen('sortie', {
       sw.addColorStop(1, 'rgba(120,220,110,0)');
       ctx.strokeStyle = 'rgba(120,220,110,0.25)';
       ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(R, 0); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(R, 0);
+      ctx.stroke();
       ctx.restore();
 
       // Camera view rectangle
@@ -2675,7 +3210,10 @@ registerScreen('sortie', {
       const nowMs = performance.now();
       if (heli.reconPulse) {
         if (!heli._nextPulse) heli._nextPulse = nowMs + 30000;
-        if (nowMs > heli._nextPulse) { heli._reconUntil = nowMs + 10000; heli._nextPulse = nowMs + 30000; }
+        if (nowMs > heli._nextPulse) {
+          heli._reconUntil = nowMs + 10000;
+          heli._nextPulse = nowMs + 30000;
+        }
       }
       const reconActive = heli._reconUntil > nowMs;
       const revealR = 1900 * (heli.radarRange || 1);
@@ -2692,16 +3230,21 @@ registerScreen('sortie', {
         const col = s.cleared ? '#3f7f3f' : s.discovered ? '#ffcc44' : 'rgba(255,204,68,0.5)';
         ctx.globalAlpha = blipAlpha(s.x, s.y);
         ctx.fillStyle = col;
-        const sx = mx(s.x), sy = my(s.y);
+        const sx = mx(s.x),
+          sy = my(s.y);
         if (s.archetype === 'town') {
           ctx.fillRect(sx - 2.5, sy - 2.5, 5, 5);
         } else if (s.archetype === 'camp') {
           ctx.beginPath();
-          ctx.moveTo(sx, sy - 3); ctx.lineTo(sx + 3, sy + 2.5); ctx.lineTo(sx - 3, sy + 2.5);
-          ctx.closePath(); ctx.fill();
+          ctx.moveTo(sx, sy - 3);
+          ctx.lineTo(sx + 3, sy + 2.5);
+          ctx.lineTo(sx - 3, sy + 2.5);
+          ctx.closePath();
+          ctx.fill();
         } else if (s.archetype === 'base') {
           ctx.save();
-          ctx.translate(sx, sy); ctx.rotate(Math.PI / 4);
+          ctx.translate(sx, sy);
+          ctx.rotate(Math.PI / 4);
           ctx.fillRect(-2.5, -2.5, 5, 5);
           ctx.restore();
         } else {
@@ -2711,14 +3254,17 @@ registerScreen('sortie', {
           const pr = 3.5 + Math.sin(performance.now() / 180) * 1.5;
           ctx.strokeStyle = '#ff5544';
           ctx.lineWidth = 1;
-          ctx.beginPath(); ctx.arc(sx, sy, pr, 0, Math.PI * 2); ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(sx, sy, pr, 0, Math.PI * 2);
+          ctx.stroke();
         }
       }
       // Convoys — heading ticks
       for (const c of world.convoys) {
         if (c.destroyed || !c.active) continue;
         ctx.globalAlpha = blipAlpha(c.x, c.y);
-        const cx2 = mx(c.x), cy2 = my(c.y);
+        const cx2 = mx(c.x),
+          cy2 = my(c.y);
         ctx.strokeStyle = '#ff8844';
         ctx.lineWidth = 1.5;
         ctx.beginPath();
@@ -2746,10 +3292,19 @@ registerScreen('sortie', {
         ctx.strokeStyle = '#44ddff';
         ctx.lineWidth = 2.5;
         ctx.beginPath();
-        if (ep.card === 'N') { ctx.moveTo(mx(-lim), my(-lim)); ctx.lineTo(mx(lim), my(-lim)); }
-        else if (ep.card === 'S') { ctx.moveTo(mx(-lim), my(lim)); ctx.lineTo(mx(lim), my(lim)); }
-        else if (ep.card === 'W') { ctx.moveTo(mx(-lim), my(-lim)); ctx.lineTo(mx(-lim), my(lim)); }
-        else { ctx.moveTo(mx(lim), my(-lim)); ctx.lineTo(mx(lim), my(lim)); }
+        if (ep.card === 'N') {
+          ctx.moveTo(mx(-lim), my(-lim));
+          ctx.lineTo(mx(lim), my(-lim));
+        } else if (ep.card === 'S') {
+          ctx.moveTo(mx(-lim), my(lim));
+          ctx.lineTo(mx(lim), my(lim));
+        } else if (ep.card === 'W') {
+          ctx.moveTo(mx(-lim), my(-lim));
+          ctx.lineTo(mx(-lim), my(lim));
+        } else {
+          ctx.moveTo(mx(lim), my(-lim));
+          ctx.lineTo(mx(lim), my(lim));
+        }
         ctx.stroke();
       }
       // Boss
@@ -2765,8 +3320,11 @@ registerScreen('sortie', {
       ctx.rotate(heli.angle);
       ctx.fillStyle = '#66ff66';
       ctx.beginPath();
-      ctx.moveTo(5, 0); ctx.lineTo(-4, -3.5); ctx.lineTo(-4, 3.5);
-      ctx.closePath(); ctx.fill();
+      ctx.moveTo(5, 0);
+      ctx.lineTo(-4, -3.5);
+      ctx.lineTo(-4, 3.5);
+      ctx.closePath();
+      ctx.fill();
       ctx.restore();
 
       ctx.restore(); // circular clip
@@ -2774,23 +3332,26 @@ registerScreen('sortie', {
       // Cardinal N marker on the bezel
       ctx.fillStyle = 'rgba(170,255,136,0.8)';
       ctx.font = 'bold 8px "Courier New", monospace';
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
       ctx.fillText('N', ccx, mmY - 8);
       drawCornerBrackets(ctx, mmX - 4, mmY - 4, mmS + 8, mmS + 8, 'rgba(90,140,80,0.55)', 10, 1.5);
     }
 
     // ── BOTTOM-CENTRE: compass tape + speed ─────────────────────────────
     if (cpW >= 130) {
-      const cx = W / 2, cy = H - cpH / 2 - 12;
+      const cx = W / 2,
+        cy = H - cpH / 2 - 12;
       hudPlate(ctx, cx - cpW / 2, cy - cpH / 2, cpW, cpH, 'rgba(90,140,80,0.55)');
       ctx.save();
       ctx.beginPath();
       ctx.rect(cx - cpW / 2 + 6, cy - cpH / 2, cpW - 12, cpH);
       ctx.clip();
-      const headingDeg = ((heli.angle * 180 / Math.PI) + 90 + 360) % 360;
+      const headingDeg = ((heli.angle * 180) / Math.PI + 90 + 360) % 360;
       const pxPerDeg = 2.1;
       ctx.font = 'bold 9px "Courier New", monospace';
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
       for (let d = Math.floor((headingDeg - 70) / 15) * 15; d <= headingDeg + 70; d += 15) {
         const x = cx + (d - headingDeg) * pxPerDeg;
         const dd = ((d % 360) + 360) % 360;
@@ -2809,7 +3370,7 @@ registerScreen('sortie', {
       }
       // Bearing markers: objective (amber) / exit (cyan) — clamped to tape ends
       const bearingMarker = (wx, wy, col) => {
-        const b = ((Math.atan2(wy - heli.y, wx - heli.x) * 180 / Math.PI) + 90 + 360) % 360;
+        const b = ((Math.atan2(wy - heli.y, wx - heli.x) * 180) / Math.PI + 90 + 360) % 360;
         let off = b - headingDeg;
         while (off > 180) off -= 360;
         while (off < -180) off += 360;
@@ -2845,7 +3406,8 @@ registerScreen('sortie', {
       const spdNow = Math.round(Math.hypot(heli.vx, heli.vy));
       ctx.font = 'bold 9px "Courier New", monospace';
       ctx.fillStyle = P.ui.textDim;
-      ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
       ctx.fillText(`${spdNow}`, cx + cpW / 2 - 26, cy);
       ctx.fillStyle = 'rgba(120,160,100,0.6)';
       ctx.fillText('SPD', cx + cpW / 2 - 26, cy + 10);
@@ -2854,10 +3416,11 @@ registerScreen('sortie', {
     // ── BOTTOM-RIGHT: sortie stats ──────────────────────────────────────
     {
       hudPlate(ctx, stX, stY, stW, stH, 'rgba(90,140,80,0.55)');
-      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
       const secs = Math.floor((performance.now() - sortieStartedAt) / 1000);
       const tStr = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
-      const clearedN = world ? world.sites.filter(s => s.cleared).length : 0;
+      const clearedN = world ? world.sites.filter((s) => s.cleared).length : 0;
       const totalSites = world ? world.sites.length : 0;
       ctx.font = 'bold 11px "Courier New", monospace';
       ctx.fillStyle = P.ui.text;
@@ -2872,23 +3435,40 @@ registerScreen('sortie', {
 
     // ── Target-MODE chip (touch: sits on the mode tap-zone near fire) ──
     if (IS_TOUCH) {
-      const chipW = 118, chipH = 24;
-      const chipX = W - chipW - 10, chipY = H * 0.36 - chipH / 2;
+      const chipW = 118,
+        chipH = 24;
+      const chipX = W - chipW - 10,
+        chipY = H * 0.36 - chipH / 2;
       hudPlate(ctx, chipX, chipY, chipW, chipH, 'rgba(90,140,80,0.55)');
-      const modeLabel = { closest: 'CLOSEST', strongest: 'STRONGEST', infrastructure: 'INFRA' }[heli.targetMode] || 'CLOSEST';
+      const modeLabel =
+        { closest: 'CLOSEST', strongest: 'STRONGEST', infrastructure: 'INFRA' }[heli.targetMode] ||
+        'CLOSEST';
       ctx.font = 'bold 9px "Courier New", monospace';
       ctx.fillStyle = P.ui.text;
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
       ctx.fillText(`MODE ▸ ${modeLabel}`, chipX + chipW / 2, chipY + chipH / 2 + 0.5);
     }
 
     // ── Objective + extraction direction markers (drawn above all plates) ──
     {
       const focus = getObjectiveFocus();
-      if (focus) drawOffscreenMarker(ctx, camera, W, H, focus.x, focus.y, '#ff5544', '#ff9966', null, uiS);
+      if (focus)
+        drawOffscreenMarker(ctx, camera, W, H, focus.x, focus.y, '#ff5544', '#ff9966', null, uiS);
       if (world?.extraction?.active) {
         const ep = nearestExitPoint();
-        drawOffscreenMarker(ctx, camera, W, H, ep.x, ep.y, '#44ddff', '#88ddff', `EXIT ${ep.card}`, uiS);
+        drawOffscreenMarker(
+          ctx,
+          camera,
+          W,
+          H,
+          ep.x,
+          ep.y,
+          '#44ddff',
+          '#88ddff',
+          `EXIT ${ep.card}`,
+          uiS
+        );
       }
     }
 
@@ -2901,7 +3481,8 @@ registerScreen('sortie', {
         ctx.globalAlpha = alpha;
         ctx.fillStyle = P.ui.text;
         ctx.font = '9px "Courier New", monospace';
-        ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
         ctx.fillText('MOUSE STEER · CLICK FIRE · V MODE · E EQUIP · P SETTINGS', W / 2, mmY - 10);
         ctx.globalAlpha = 1;
       }
@@ -2932,14 +3513,17 @@ function drawSettings(ctx, cam) {
   const dpr = cam.dpr;
   const w = cam.screenW;
   const h = cam.screenH;
-  ctx.save(); ctx.scale(dpr, dpr);
+  ctx.save();
+  ctx.scale(dpr, dpr);
 
   // Dimmed backdrop
   ctx.fillStyle = 'rgba(0,0,0,0.6)';
   ctx.fillRect(0, 0, w, h);
 
-  const cx = w / 2, cy = h / 2;
-  const panelW = 300, panelH = 260;
+  const cx = w / 2,
+    cy = h / 2;
+  const panelW = 300,
+    panelH = 260;
 
   // Panel
   ctx.fillStyle = '#0a1a0a';
@@ -2952,10 +3536,12 @@ function drawSettings(ctx, cam) {
   // Title
   ctx.fillStyle = P.ui.textBright;
   ctx.font = 'bold 16px "Courier New", monospace';
-  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
   ctx.fillText('PAUSE — SETTINGS', cx, cy - panelH / 2 + 14);
 
-  ctx.strokeStyle = '#3a5a2a'; ctx.lineWidth = 1;
+  ctx.strokeStyle = '#3a5a2a';
+  ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(cx - 100, cy - panelH / 2 + 38);
   ctx.lineTo(cx + 100, cy - panelH / 2 + 38);
@@ -2980,7 +3566,8 @@ function drawSettings(ctx, cam) {
     // Label
     ctx.fillStyle = P.ui.text;
     ctx.font = '12px "Courier New", monospace';
-    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
     ctx.fillText(label, optX + 22, optY + 1);
     optY += lineH;
   }
@@ -2993,7 +3580,8 @@ function drawSettings(ctx, cam) {
   if (currentScreen === screens.sortie && sortieState.status === 'active') {
     ctx.fillStyle = '#ff7744';
     ctx.font = 'bold 12px "Courier New", monospace';
-    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
     ctx.fillText('Q — ABANDON SORTIE', optX, optY);
     optY += lineH;
   }
@@ -3010,19 +3598,31 @@ function drawSettings(ctx, cam) {
   ctx.textAlign = 'left';
   const refX = cx - panelW / 2 + 24;
   optY = cy + panelH / 2 - 70;
-  ctx.fillText('Mouse: steer', refX, optY); optY += 16;
-  ctx.fillText('Click / Space: fire', refX, optY); optY += 16;
-  ctx.fillText('Shift: cycle target', refX, optY); optY += 16;
-  ctx.fillText('WASD: move', refX, optY); optY += 16;
+  ctx.fillText('Mouse: steer', refX, optY);
+  optY += 16;
+  ctx.fillText('Click / Space: fire', refX, optY);
+  optY += 16;
+  ctx.fillText('Shift: cycle target', refX, optY);
+  optY += 16;
+  ctx.fillText('WASD: move', refX, optY);
+  optY += 16;
 
   ctx.restore();
 }
 
-function drawEnemy(ctx, e) { return _drawEnemy(ctx, e); }
+function drawEnemy(ctx, e) {
+  return _drawEnemy(ctx, e);
+}
 
-function drawBoss(ctx) { _setBoss(boss); return _drawBoss(ctx); }
+function drawBoss(ctx) {
+  _setBoss(boss);
+  return _drawBoss(ctx);
+}
 
-function drawHunter(ctx) { _setBoss(boss); return _drawHunter(ctx); }
+function drawHunter(ctx) {
+  _setBoss(boss);
+  return _drawHunter(ctx);
+}
 
 function getCanvasClickPos(e) {
   const rect = canvas.getBoundingClientRect();
@@ -3074,8 +3674,12 @@ canvas.addEventListener('click', (e) => {
   }
   if (currentScreen === screens.title) {
     for (const box of titleMenuBoxes) {
-      if (pos.x >= box.x * cam.dpr && pos.x <= (box.x + box.w) * cam.dpr &&
-          pos.y >= box.y * cam.dpr && pos.y <= (box.y + box.h) * cam.dpr) {
+      if (
+        pos.x >= box.x * cam.dpr &&
+        pos.x <= (box.x + box.w) * cam.dpr &&
+        pos.y >= box.y * cam.dpr &&
+        pos.y <= (box.y + box.h) * cam.dpr
+      ) {
         metaReturnScreen = 'title';
         switchScreen(box.target);
         return;
@@ -3083,7 +3687,10 @@ canvas.addEventListener('click', (e) => {
     }
     return;
   } else if (currentScreen === screens.contracts) {
-    if (posInBox(pos, contractsBackBox, cam.dpr)) { switchScreen('title'); return; }
+    if (posInBox(pos, contractsBackBox, cam.dpr)) {
+      switchScreen('title');
+      return;
+    }
     for (let i = 0; i < contractBoard.length; i++) {
       const r = contractCardRect(i, w / cam.dpr, h / cam.dpr);
       const scaled = { x: r.x * cam.dpr, y: r.y * cam.dpr, w: r.w * cam.dpr, h: r.h * cam.dpr };
@@ -3093,7 +3700,10 @@ canvas.addEventListener('click', (e) => {
       }
     }
   } else if (currentScreen === screens.briefing) {
-    if (posInBox(pos, briefingBackBox, cam.dpr)) { switchScreen('contracts'); return; }
+    if (posInBox(pos, briefingBackBox, cam.dpr)) {
+      switchScreen('contracts');
+      return;
+    }
     // Equipment selector first — a click on a box selects instead of launching.
     for (const box of briefingEquipmentBoxes) {
       if (posInBox(pos, box, cam.dpr)) {
@@ -3103,17 +3713,23 @@ canvas.addEventListener('click', (e) => {
     }
     if (posInBox(pos, briefingInsertBox, cam.dpr)) switchScreen('sortie', activeContract);
   } else if (currentScreen === screens.debrief) {
-    if (posInBox(pos, debriefPilotBox, cam.dpr)) { metaReturnScreen = 'contracts'; switchScreen('pilot'); return; }
+    if (posInBox(pos, debriefPilotBox, cam.dpr)) {
+      metaReturnScreen = 'contracts';
+      switchScreen('pilot');
+      return;
+    }
     if (posInBox(pos, debriefNextBox, cam.dpr)) switchScreen('contracts');
   }
 });
 
 canvas.addEventListener('touchstart', (e) => {
   const touch = e.touches[0];
-  canvas.dispatchEvent(new MouseEvent('click', {
-    clientX: touch.clientX,
-    clientY: touch.clientY,
-  }));
+  canvas.dispatchEvent(
+    new MouseEvent('click', {
+      clientX: touch.clientX,
+      clientY: touch.clientY,
+    })
+  );
 });
 
 career = loadCareer() || createCareer((Math.random() * 0xffffffff) >>> 0);

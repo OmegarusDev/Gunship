@@ -4,15 +4,32 @@
  */
 
 import {
-  createCareer, createPilot, gainXp, xpToNext, canAllocate, gridNeighbors,
-  SKILL_GRID, allocateSkill, respecSkills, buyHangarLevel, HANGAR_SLOTS,
-  commitSortieOutcome, applyCareerToHeli, aggregateModifiers, loadCareer,
+  createCareer,
+  createPilot,
+  gainXp,
+  xpToNext,
+  canAllocate,
+  gridNeighbors,
+  SKILL_GRID,
+  allocateSkill,
+  respecSkills,
+  buyHangarLevel,
+  HANGAR_SLOTS,
+  commitSortieOutcome,
+  applyCareerToHeli,
+  aggregateModifiers,
+  loadCareer,
 } from '../js/meta.js';
 
-let pass = 0, fail = 0;
+let pass = 0,
+  fail = 0;
 const ok = (cond, msg) => {
-  if (cond) { pass++; }
-  else { fail++; console.error('  ✗ ' + msg); }
+  if (cond) {
+    pass++;
+  } else {
+    fail++;
+    console.error('  ✗ ' + msg);
+  }
 };
 
 console.log('— pilot generation —');
@@ -24,7 +41,10 @@ console.log('— pilot generation —');
     ok(p.stats[k] >= 1 && p.stats[k] <= 4, `stat ${k} in [1,4]`);
   }
   const p2 = createPilot(1234);
-  ok(p2.name === p.name && JSON.stringify(p2.stats) === JSON.stringify(p.stats), 'deterministic from seed');
+  ok(
+    p2.name === p.name && JSON.stringify(p2.stats) === JSON.stringify(p.stats),
+    'deterministic from seed'
+  );
 }
 
 console.log('— xp / leveling —');
@@ -50,9 +70,12 @@ console.log('— skill grid adjacency —');
   ok(canAllocate(['stabilizer'], 'marksman'), 'adjacent to owned = allocatable');
   ok(!canAllocate(['rapidfire'], 'marksman'), 'non-adjacent owned does not unlock');
   // Cross-links (0↔3)
-  ok(canAllocate(['stabilizer'], 'hardened') === canAllocate([], 'hardened'), 'cross-branch independence');
+  ok(
+    canAllocate(['stabilizer'], 'hardened') === canAllocate([], 'hardened'),
+    'cross-branch independence'
+  );
   // Grid integrity: every node has ≥1 neighbour, all ids unique
-  const ids = new Set(SKILL_GRID.map(n => n.id));
+  const ids = new Set(SKILL_GRID.map((n) => n.id));
   ok(ids.size === 30, '30 unique nodes');
   for (const n of SKILL_GRID) ok(gridNeighbors(n.id).length >= 2, `${n.id} has neighbours`);
 }
@@ -80,7 +103,10 @@ console.log('— hangar purchases —');
   ok(buyHangarLevel(c, 'armor').ok === false, 'L2 unaffordable with 250');
   c.dollars = 1000;
   ok(buyHangarLevel(c, 'armor').ok === true, 'buy armor L2');
-  ok(buyHangarLevel(c, 'armor').ok === false && buyHangarLevel(c, 'armor').reason === 'MAX LEVEL', 'L2 is cap');
+  ok(
+    buyHangarLevel(c, 'armor').ok === false && buyHangarLevel(c, 'armor').reason === 'MAX LEVEL',
+    'L2 is cap'
+  );
   ok(Object.keys(HANGAR_SLOTS).length === 5, '5 hangar slots (no fuel)');
 }
 
@@ -110,9 +136,19 @@ console.log('— applyCareerToHeli —');
 {
   const c = createCareer(4);
   c.pilot.allocated = ['marksman', 'unbreakable', 'hardened'];
-  c.pilot.stats.accuracy = 4; c.pilot.stats.grit = 4;
-  c.hangar.cobra.armor = 2; c.hangar.cobra.weaponMount = 2;
-  const heli = { bulletDamage: 10, fireRate: 0.15, accel: 1400, maxSpeed: 400, maxHp: 100, hp: 100, weaponRange: 350 };
+  c.pilot.stats.accuracy = 4;
+  c.pilot.stats.grit = 4;
+  c.hangar.cobra.armor = 2;
+  c.hangar.cobra.weaponMount = 2;
+  const heli = {
+    bulletDamage: 10,
+    fireRate: 0.15,
+    accel: 1400,
+    maxSpeed: 400,
+    maxHp: 100,
+    hp: 100,
+    weaponRange: 350,
+  };
   applyCareerToHeli(heli, c.pilot, c.hangar, 'cobra');
   const m = aggregateModifiers(c.pilot, c.hangar, 'cobra');
   ok(heli.bulletDamage === Math.round(10 * m.dmgMult), 'damage applies aggregated multiplier');
@@ -131,9 +167,15 @@ console.log('— save/load roundtrip (memory shim) —');
   // Node lacks localStorage; shim it
   globalThis.localStorage = {
     _d: {},
-    getItem(k) { return this._d[k] ?? null; },
-    setItem(k, v) { this._d[k] = String(v); },
-    removeItem(k) { delete this._d[k]; },
+    getItem(k) {
+      return this._d[k] ?? null;
+    },
+    setItem(k, v) {
+      this._d[k] = String(v);
+    },
+    removeItem(k) {
+      delete this._d[k];
+    },
   };
   const c = createCareer(7);
   c.dollars = 321;

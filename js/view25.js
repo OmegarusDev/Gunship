@@ -59,7 +59,8 @@ export function groundBasis(angle) {
   return {
     D,
     V: VIEW25.vExag,
-    ax, ay,
+    ax,
+    ay,
     px: -Math.sin(angle) / pl,
     py: (D * Math.cos(angle)) / pl,
     len: Math.hypot(ax, ay),

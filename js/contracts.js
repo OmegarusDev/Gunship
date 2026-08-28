@@ -194,7 +194,9 @@ export function createContractBoard(boardSeed, campaign = { act: 1, sortie: 1 })
     const difficultyId = chooseDifficulty(index, rng);
     const difficulty = DIFFICULTIES[difficultyId];
     const style = STYLES[styleId];
-    const reward = Math.round(scenario.baseReward * difficulty.rewardMultiplier * (1 + (style.supplyChance - 0.4) * 0.15));
+    const reward = Math.round(
+      scenario.baseReward * difficulty.rewardMultiplier * (1 + (style.supplyChance - 0.4) * 0.15)
+    );
 
     return {
       id: `act-${campaign.act}-sortie-${campaign.sortie}-offer-${index + 1}`,

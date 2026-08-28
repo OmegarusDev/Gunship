@@ -15,7 +15,7 @@ export function mulberry32(seed) {
 export function seededRng(key) {
   let h = 0;
   for (let i = 0; i < key.length; i++) {
-    h = Math.imul(31, h) + key.charCodeAt(i) | 0;
+    h = (Math.imul(31, h) + key.charCodeAt(i)) | 0;
   }
   return mulberry32(h);
 }
@@ -65,7 +65,10 @@ export function weightedSample(items, weights, n, rng = Math.random) {
     let idx = 0;
     for (let j = 0; j < pool.length; j++) {
       r -= pool[j].weight;
-      if (r <= 0) { idx = j; break; }
+      if (r <= 0) {
+        idx = j;
+        break;
+      }
     }
     result.push(pool[idx].item);
     pool.splice(idx, 1);

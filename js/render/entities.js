@@ -8,8 +8,9 @@ import { VIEW25, deckRy } from '../view25.js';
 import { box25, frustum25 } from '../prims25.js';
 
 let _boss = null;
-export function setBoss(boss) { _boss = boss; }
-
+export function setBoss(boss) {
+  _boss = boss;
+}
 
 function drawHeliShadow(ctx, h) {
   ctx.fillStyle = P.gunship.shadow;
@@ -24,7 +25,8 @@ function drawGunship(ctx, h) {
   ctx.save();
   ctx.translate(cx, cy);
   ctx.rotate(h.angle);
-  const bw = 10, bl = 30; // larger gunship
+  const bw = 10,
+    bl = 30; // larger gunship
 
   // Shadow underneath
   ctx.fillStyle = P.gunship.shadow;
@@ -60,33 +62,52 @@ function drawGunship(ctx, h) {
   // Fuselage — dark underside
   ctx.fillStyle = P.gunship.bodyDark;
   ctx.beginPath();
-  ctx.moveTo(-bl, 1.5); ctx.lineTo(-bl * 0.4, -bw - 1.5); ctx.lineTo(bl * 0.5, -bw * 0.8 - 1.5);
-  ctx.lineTo(bl, -2.5); ctx.lineTo(bl * 0.5, bw * 0.8 - 1.5); ctx.lineTo(-bl * 0.4, bw - 1.5);
-  ctx.closePath(); ctx.fill();
+  ctx.moveTo(-bl, 1.5);
+  ctx.lineTo(-bl * 0.4, -bw - 1.5);
+  ctx.lineTo(bl * 0.5, -bw * 0.8 - 1.5);
+  ctx.lineTo(bl, -2.5);
+  ctx.lineTo(bl * 0.5, bw * 0.8 - 1.5);
+  ctx.lineTo(-bl * 0.4, bw - 1.5);
+  ctx.closePath();
+  ctx.fill();
 
   // Fuselage — main body
   ctx.fillStyle = P.gunship.body;
   ctx.beginPath();
-  ctx.moveTo(-bl, 0); ctx.lineTo(-bl * 0.4, -bw); ctx.lineTo(bl * 0.5, -bw * 0.8);
-  ctx.lineTo(bl, -1); ctx.lineTo(bl * 0.5, bw * 0.8); ctx.lineTo(-bl * 0.4, bw);
-  ctx.closePath(); ctx.fill();
+  ctx.moveTo(-bl, 0);
+  ctx.lineTo(-bl * 0.4, -bw);
+  ctx.lineTo(bl * 0.5, -bw * 0.8);
+  ctx.lineTo(bl, -1);
+  ctx.lineTo(bl * 0.5, bw * 0.8);
+  ctx.lineTo(-bl * 0.4, bw);
+  ctx.closePath();
+  ctx.fill();
 
   // Fuselage — highlight panel (top surface)
   ctx.fillStyle = P.gunship.bodyHi;
   ctx.beginPath();
-  ctx.moveTo(-bl * 0.2, -bw * 0.5); ctx.lineTo(bl * 0.3, -bw * 0.5);
-  ctx.lineTo(bl * 0.4, -bw * 0.2); ctx.lineTo(-bl * 0.2, -bw * 0.2);
-  ctx.closePath(); ctx.fill();
+  ctx.moveTo(-bl * 0.2, -bw * 0.5);
+  ctx.lineTo(bl * 0.3, -bw * 0.5);
+  ctx.lineTo(bl * 0.4, -bw * 0.2);
+  ctx.lineTo(-bl * 0.2, -bw * 0.2);
+  ctx.closePath();
+  ctx.fill();
 
   // Cockpit canopy (glass)
   ctx.fillStyle = P.gunship.cockpit;
-  ctx.beginPath(); ctx.ellipse(bl * 0.15, 0, 7, 5, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(bl * 0.15, 0, 7, 5, 0, 0, Math.PI * 2);
+  ctx.fill();
   ctx.fillStyle = P.gunship.cockpitHi;
-  ctx.beginPath(); ctx.ellipse(bl * 0.1, -1.5, 3.5, 2.5, -0.2, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(bl * 0.1, -1.5, 3.5, 2.5, -0.2, 0, Math.PI * 2);
+  ctx.fill();
   // Canopy frame
   ctx.strokeStyle = withAlpha(P.gunship.outline, 0.4);
   ctx.lineWidth = 0.8;
-  ctx.beginPath(); ctx.ellipse(bl * 0.15, 0, 7, 5, 0, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath();
+  ctx.ellipse(bl * 0.15, 0, 7, 5, 0, 0, Math.PI * 2);
+  ctx.stroke();
 
   // Engine intakes (side-mounted)
   ctx.fillStyle = P.gunship.steelDark;
@@ -99,7 +120,7 @@ function drawGunship(ctx, h) {
   // Weapon pylons + pods
   ctx.fillStyle = P.gunship.weaponPod;
   ctx.fillRect(-2, -bw - 4, 12, 4); // left pod
-  ctx.fillRect(-2, bw, 12, 4);       // right pod
+  ctx.fillRect(-2, bw, 12, 4); // right pod
   ctx.fillStyle = P.gunship.weaponHi;
   ctx.fillRect(0, -bw - 4, 10, 1.5);
   ctx.fillRect(0, bw, 10, 1.5);
@@ -111,24 +132,35 @@ function drawGunship(ctx, h) {
   ctx.strokeStyle = P.gunship.outline;
   ctx.lineWidth = 1.2;
   ctx.beginPath();
-  ctx.moveTo(-bl, 0); ctx.lineTo(-bl * 0.4, -bw); ctx.lineTo(bl * 0.5, -bw * 0.8);
-  ctx.lineTo(bl, -1); ctx.lineTo(bl * 0.5, bw * 0.8); ctx.lineTo(-bl * 0.4, bw);
-  ctx.closePath(); ctx.stroke();
+  ctx.moveTo(-bl, 0);
+  ctx.lineTo(-bl * 0.4, -bw);
+  ctx.lineTo(bl * 0.5, -bw * 0.8);
+  ctx.lineTo(bl, -1);
+  ctx.lineTo(bl * 0.5, bw * 0.8);
+  ctx.lineTo(-bl * 0.4, bw);
+  ctx.closePath();
+  ctx.stroke();
 
   // Skid struts
   ctx.strokeStyle = P.gunship.skid;
   ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.moveTo(-bl * 0.2, -bw - 2); ctx.lineTo(-bl * 0.2, -bw - 5);
-  ctx.moveTo(bl * 0.2, -bw - 2); ctx.lineTo(bl * 0.2, -bw - 5);
-  ctx.moveTo(-bl * 0.2, bw + 2); ctx.lineTo(-bl * 0.2, bw + 5);
-  ctx.moveTo(bl * 0.2, bw + 2); ctx.lineTo(bl * 0.2, bw + 5);
+  ctx.moveTo(-bl * 0.2, -bw - 2);
+  ctx.lineTo(-bl * 0.2, -bw - 5);
+  ctx.moveTo(bl * 0.2, -bw - 2);
+  ctx.lineTo(bl * 0.2, -bw - 5);
+  ctx.moveTo(-bl * 0.2, bw + 2);
+  ctx.lineTo(-bl * 0.2, bw + 5);
+  ctx.moveTo(bl * 0.2, bw + 2);
+  ctx.lineTo(bl * 0.2, bw + 5);
   ctx.stroke();
   // Skid bars
   ctx.lineWidth = 1.5;
   ctx.beginPath();
-  ctx.moveTo(-bl * 0.3, -bw - 5); ctx.lineTo(bl * 0.3, -bw - 5);
-  ctx.moveTo(-bl * 0.3, bw + 5); ctx.lineTo(bl * 0.3, bw + 5);
+  ctx.moveTo(-bl * 0.3, -bw - 5);
+  ctx.lineTo(bl * 0.3, -bw - 5);
+  ctx.moveTo(-bl * 0.3, bw + 5);
+  ctx.lineTo(bl * 0.3, bw + 5);
   ctx.stroke();
 
   ctx.restore();
@@ -144,7 +176,7 @@ function drawGunship(ctx, h) {
   ctx.strokeStyle = P.gunship.rotor;
   ctx.lineWidth = 2;
   for (let i = 0; i < 2; i++) {
-    const a = rotAngle + (i * Math.PI);
+    const a = rotAngle + i * Math.PI;
     ctx.beginPath();
     ctx.moveTo(cx + Math.cos(a) * bladeLen, cy + Math.sin(a) * bladeLen * VIEW25.deckRatio);
     ctx.lineTo(cx - Math.cos(a) * bladeLen, cy - Math.sin(a) * bladeLen * VIEW25.deckRatio);
@@ -152,11 +184,14 @@ function drawGunship(ctx, h) {
   }
   // Rotor hub
   ctx.fillStyle = P.gunship.steel;
-  ctx.beginPath(); ctx.arc(cx, cy, 2.5, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx, cy, 2.5, 0, Math.PI * 2);
+  ctx.fill();
 }
 
 function drawEnemy(ctx, e) {
-  const cx = e.x, cy = e.y;
+  const cx = e.x,
+    cy = e.y;
   const isFlashing = e.flashTimer > 0;
 
   ctx.save();
@@ -178,17 +213,19 @@ function drawEnemy(ctx, e) {
       ctx.strokeStyle = isFlashing ? '#ffffff' : '#2a2a1a';
       ctx.lineWidth = 0.8;
       for (let i = 0; i < 5; i++) {
-        const tx = -s + i * (s * 2 / 5);
+        const tx = -s + i * ((s * 2) / 5);
         ctx.beginPath();
-        ctx.moveTo(tx, -s * 0.85); ctx.lineTo(tx, -s * 0.6);
-        ctx.moveTo(tx, s * 0.6); ctx.lineTo(tx, s * 0.85);
+        ctx.moveTo(tx, -s * 0.85);
+        ctx.lineTo(tx, -s * 0.6);
+        ctx.moveTo(tx, s * 0.6);
+        ctx.lineTo(tx, s * 0.85);
         ctx.stroke();
       }
       // Hull body
       ctx.fillStyle = bodyColor;
       ctx.fillRect(-s * 0.8, -s * 0.6, s * 1.8, s * 1.2);
       // Sloped front armor
-      ctx.fillStyle = isFlashing ? '#ffffff' : (P.enemy.vehicleHi || '#8a7050');
+      ctx.fillStyle = isFlashing ? '#ffffff' : P.enemy.vehicleHi || '#8a7050';
       ctx.beginPath();
       ctx.moveTo(s * 0.8, -s * 0.5);
       ctx.lineTo(s * 1.1, 0);
@@ -196,7 +233,7 @@ function drawEnemy(ctx, e) {
       ctx.closePath();
       ctx.fill();
       // Turret (offset forward, rounded)
-      ctx.fillStyle = isFlashing ? '#ffffff' : (P.enemy.vehicleDark || '#5a4020');
+      ctx.fillStyle = isFlashing ? '#ffffff' : P.enemy.vehicleDark || '#5a4020';
       ctx.beginPath();
       ctx.arc(s * 0.1, 0, s * 0.4, 0, Math.PI * 2);
       ctx.fill();
@@ -223,7 +260,7 @@ function drawEnemy(ctx, e) {
       ctx.fillStyle = bodyColor;
       ctx.fillRect(-s * 0.7, -s * 0.5, s * 1.6, s * 1.0);
       // Angled front
-      ctx.fillStyle = isFlashing ? '#ffffff' : (P.enemy.vehicleHi || '#8a7050');
+      ctx.fillStyle = isFlashing ? '#ffffff' : P.enemy.vehicleHi || '#8a7050';
       ctx.beginPath();
       ctx.moveTo(s * 0.7, -s * 0.4);
       ctx.lineTo(s * 0.95, 0);
@@ -231,7 +268,7 @@ function drawEnemy(ctx, e) {
       ctx.closePath();
       ctx.fill();
       // Small turret
-      ctx.fillStyle = isFlashing ? '#ffffff' : (P.enemy.vehicleDark || '#5a4020');
+      ctx.fillStyle = isFlashing ? '#ffffff' : P.enemy.vehicleDark || '#5a4020';
       ctx.beginPath();
       ctx.arc(0, 0, s * 0.25, 0, Math.PI * 2);
       ctx.fill();
@@ -248,7 +285,7 @@ function drawEnemy(ctx, e) {
       ctx.fillStyle = bodyColor;
       ctx.fillRect(-s * 0.8, -s * 0.6, s * 1.8, s * 1.2);
       // Turret (large, boxy)
-      ctx.fillStyle = isFlashing ? '#ffffff' : (P.enemy.vehicleDark || '#5a4020');
+      ctx.fillStyle = isFlashing ? '#ffffff' : P.enemy.vehicleDark || '#5a4020';
       ctx.fillRect(-s * 0.3, -s * 0.4, s * 0.8, s * 0.8);
       // 4 gun barrels
       ctx.fillStyle = isFlashing ? '#ffffff' : '#4a4a3a';
@@ -270,7 +307,7 @@ function drawEnemy(ctx, e) {
       ctx.fillStyle = bodyColor;
       ctx.fillRect(-s * 0.8, -s * 0.6, s * 1.8, s * 1.2);
       // Launch rails (3 missiles)
-      ctx.fillStyle = isFlashing ? '#ffffff' : (P.enemy.vehicleDark || '#5a4020');
+      ctx.fillStyle = isFlashing ? '#ffffff' : P.enemy.vehicleDark || '#5a4020';
       ctx.fillRect(-s * 0.2, -s * 0.35, s * 0.8, s * 0.7);
       // Missiles
       ctx.fillStyle = isFlashing ? '#ffffff' : '#8a8a6a';
@@ -342,7 +379,8 @@ function drawEnemy(ctx, e) {
 
 function drawBoss(ctx) {
   if (!_boss.spawned || _boss.state === 'dead') return;
-  const cx = _boss.x, cy = _boss.y;
+  const cx = _boss.x,
+    cy = _boss.y;
   const s = _boss.size;
   const isFlashing = _boss.flashTimer > 0;
   const body = isFlashing ? '#ffffff' : '#6a6a5a';
@@ -459,6 +497,8 @@ function drawBoss(ctx) {
   ctx.fillText('HIND PURSUIT GUNSHIP', cx, barY - 4);
 }
 
-function drawHunter(ctx) { drawBoss(ctx); }
+function drawHunter(ctx) {
+  drawBoss(ctx);
+}
 
 export { drawHeliShadow, drawGunship, drawEnemy, drawBoss, drawHunter };

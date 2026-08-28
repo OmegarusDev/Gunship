@@ -11,12 +11,17 @@ const roadCache = new WeakMap();
 
 function getRoadSegs(world) {
   if (!world || !world.roads) return null;
-  let cached = roadCache.get(world);
+  const cached = roadCache.get(world);
   if (cached) return cached;
   const segs = [];
   for (const road of world.roads) {
     for (let i = 0; i < road.points.length - 1; i++) {
-      segs.push({ ax: road.points[i].x, ay: road.points[i].y, bx: road.points[i + 1].x, by: road.points[i + 1].y });
+      segs.push({
+        ax: road.points[i].x,
+        ay: road.points[i].y,
+        bx: road.points[i + 1].x,
+        by: road.points[i + 1].y,
+      });
     }
   }
   roadCache.set(world, segs);
@@ -30,12 +35,15 @@ export function nearestRoadPoint(world, x, y, maxDist) {
   let bd = maxDist * maxDist;
   let best = null;
   for (const s of segs) {
-    const dx = s.bx - s.ax, dy = s.by - s.ay;
+    const dx = s.bx - s.ax,
+      dy = s.by - s.ay;
     const l2 = dx * dx + dy * dy || 1e-6;
     let t = ((x - s.ax) * dx + (y - s.ay) * dy) / l2;
     t = t < 0 ? 0 : t > 1 ? 1 : t;
-    const px = s.ax + t * dx, py = s.ay + t * dy;
-    const ddx = x - px, ddy = y - py;
+    const px = s.ax + t * dx,
+      py = s.ay + t * dy;
+    const ddx = x - px,
+      ddy = y - py;
     const d2 = ddx * ddx + ddy * ddy;
     if (d2 < bd) {
       bd = d2;
@@ -50,8 +58,12 @@ export function steerAlongRoads(world, desiredAngle, x, y) {
   const rp = nearestRoadPoint(world, x, y, 320);
   if (!rp) return { angle: desiredAngle, dist: Infinity };
   let roadAng = rp.ang;
-  const diffA = Math.abs(Math.atan2(Math.sin(rp.ang - desiredAngle), Math.cos(rp.ang - desiredAngle)));
-  const diffB = Math.abs(Math.atan2(Math.sin(rp.ang + Math.PI - desiredAngle), Math.cos(rp.ang + Math.PI - desiredAngle)));
+  const diffA = Math.abs(
+    Math.atan2(Math.sin(rp.ang - desiredAngle), Math.cos(rp.ang - desiredAngle))
+  );
+  const diffB = Math.abs(
+    Math.atan2(Math.sin(rp.ang + Math.PI - desiredAngle), Math.cos(rp.ang + Math.PI - desiredAngle))
+  );
   if (diffB < diffA) roadAng = rp.ang + Math.PI;
   const w = Math.max(0, 1 - rp.dist / 320);
   let diff = roadAng - desiredAngle;
@@ -84,23 +96,32 @@ export function vehicleSpeedFactor(world, terrain, x, y) {
 
 // ── Convoy path mechanics ──
 
-export const CONVOY_GAP_VEH = 30, CONVOY_GAP_INF = 17;
+export const CONVOY_GAP_VEH = 30,
+  CONVOY_GAP_INF = 17;
 
 /** Position + tangent at distance s along a convoy's route. */
 export function pointAlongRoute(convoy, s) {
-  const pts = convoy.route, cum = convoy.routeCum;
+  const pts = convoy.route,
+    cum = convoy.routeCum;
   const total = cum[cum.length - 1];
   s = ((s % total) + total) % total;
-  let lo = 0, hi = cum.length - 1;
+  let lo = 0,
+    hi = cum.length - 1;
   while (lo < hi) {
     const mid = (lo + hi) >> 1;
-    if (cum[mid] < s) lo = mid + 1; else hi = mid;
+    if (cum[mid] < s) lo = mid + 1;
+    else hi = mid;
   }
   const i = Math.max(0, lo - 1);
   const segLen = cum[i + 1] - cum[i] || 1e-6;
   const t = (s - cum[i]) / segLen;
-  const a = pts[i], b = pts[Math.min(i + 1, pts.length - 1)];
-  return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, ang: Math.atan2(b.y - a.y, b.x - a.x) };
+  const a = pts[i],
+    b = pts[Math.min(i + 1, pts.length - 1)];
+  return {
+    x: a.x + (b.x - a.x) * t,
+    y: a.y + (b.y - a.y) * t,
+    ang: Math.atan2(b.y - a.y, b.x - a.x),
+  };
 }
 
 /** All members of a convoy in world space (lead first). */

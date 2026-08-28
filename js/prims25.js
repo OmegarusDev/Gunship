@@ -36,7 +36,15 @@ export function cyl25(ctx, cx, topY, rx, rise, topCol, sideCol, bottomCol) {
   ctx.strokeStyle = withAlpha('#fff8e0', 0.18);
   ctx.lineWidth = 1.25;
   ctx.beginPath();
-  ctx.ellipse(cx - rx * 0.12, topY - ry * 0.08, rx * 0.72, ry * 0.55, -0.35, Math.PI * 1.15, Math.PI * 1.85);
+  ctx.ellipse(
+    cx - rx * 0.12,
+    topY - ry * 0.08,
+    rx * 0.72,
+    ry * 0.55,
+    -0.35,
+    Math.PI * 1.15,
+    Math.PI * 1.85
+  );
   ctx.stroke();
 }
 

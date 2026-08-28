@@ -8,8 +8,17 @@ import { withAlpha } from './drawUtil.js';
 import { drawCornerBrackets } from './appBridge.js';
 import { drawBackButton } from './appBridge.js';
 import {
-  metaState, HANGAR_SLOTS, SKILL_GRID, gridNeighbors, canAllocate,
-  buyHangarLevel, allocateSkill, respecSkills, saveCareer, xpToNext, clamp,
+  metaState,
+  HANGAR_SLOTS,
+  SKILL_GRID,
+  gridNeighbors,
+  canAllocate,
+  buyHangarLevel,
+  allocateSkill,
+  respecSkills,
+  saveCareer,
+  xpToNext,
+  clamp,
 } from './meta.js';
 
 // Click zones published each draw; app.js consults these in its handler.
@@ -17,11 +26,31 @@ export let hangarBuyBoxes = [];
 export let pilotNodeBoxes = [];
 export let pilotRespecBox = null;
 
-const ACCENTS = ['rgba(255,136,68,0.6)', 'rgba(120,200,255,0.6)', 'rgba(170,255,136,0.6)', 'rgba(204,136,51,0.6)', 'rgba(255,102,102,0.6)'];
+const ACCENTS = [
+  'rgba(255,136,68,0.6)',
+  'rgba(120,200,255,0.6)',
+  'rgba(170,255,136,0.6)',
+  'rgba(204,136,51,0.6)',
+  'rgba(255,102,102,0.6)',
+];
 const BRANCH_NAMES = ['MARKSMAN', 'PILOT', 'RECON', 'THRUST', 'FORTITUDE'];
 
 function careerOrEmpty() {
-  return metaState.career || { pilot: { name: '—', level: 1, xp: 0, skillPoints: 0, allocated: [], stats: { accuracy: 1, control: 1, awareness: 1, speed: 1, grit: 1 } }, dollars: 0, hangar: { cobra: {} }, gunship: 'cobra' };
+  return (
+    metaState.career || {
+      pilot: {
+        name: '—',
+        level: 1,
+        xp: 0,
+        skillPoints: 0,
+        allocated: [],
+        stats: { accuracy: 1, control: 1, awareness: 1, speed: 1, grit: 1 },
+      },
+      dollars: 0,
+      hangar: { cobra: {} },
+      gunship: 'cobra',
+    }
+  );
 }
 
 // ═════════════════════════════════════════════════════════════
@@ -30,25 +59,35 @@ function careerOrEmpty() {
 
 export const hangarScreen = {
   draw(ctx, cam) {
-    const w = cam.screenW, h = cam.screenH;
+    const w = cam.screenW,
+      h = cam.screenH;
     const career = careerOrEmpty();
-    drawScreenBackgroundShim(ctx, cam, 'HANGAR', `${career.gunship.toUpperCase()} — PERMANENT UPGRADES`);
-    ctx.save(); ctx.scale(cam.dpr, cam.dpr);
+    drawScreenBackgroundShim(
+      ctx,
+      cam,
+      'HANGAR',
+      `${career.gunship.toUpperCase()} — PERMANENT UPGRADES`
+    );
+    ctx.save();
+    ctx.scale(cam.dpr, cam.dpr);
 
     // Balance header
-    ctx.textAlign = 'right'; ctx.textBaseline = 'top';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'top';
     ctx.font = 'bold 16px "Courier New", monospace';
     ctx.fillStyle = '#ffcc44';
     ctx.fillText(`$ ${career.dollars}`, w - 24, 84);
 
     hangarBuyBoxes = [];
     const slotIds = Object.keys(HANGAR_SLOTS);
-    const rowH = 64, top = 130;
+    const rowH = 64,
+      top = 130;
     for (let i = 0; i < slotIds.length; i++) {
       const slot = slotIds[i];
       const def = HANGAR_SLOTS[slot];
-      const lvl = (career.hangar[career.gunship]?.[slot]) || 0;
-      const bx = 24, by = top + i * rowH;
+      const lvl = career.hangar[career.gunship]?.[slot] || 0;
+      const bx = 24,
+        by = top + i * rowH;
       const bw = w - 48;
       const maxed = lvl >= 2;
       const cost = maxed ? 0 : def.levels[lvl].cost;
@@ -60,7 +99,8 @@ export const hangarScreen = {
       ctx.lineWidth = 1;
       ctx.strokeRect(bx, by, bw, rowH - 8);
 
-      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
       ctx.font = 'bold 12px "Courier New", monospace';
       ctx.fillStyle = P.ui.textBright;
       ctx.fillText(def.name, bx + 12, by + 8);
@@ -76,7 +116,8 @@ export const hangarScreen = {
       // Buy zone (right)
       if (!maxed) {
         const bwid = 110;
-        const bxz = bx + bw - bwid - 10, byz = by + 10;
+        const bxz = bx + bw - bwid - 10,
+          byz = by + 10;
         ctx.fillStyle = affordable ? 'rgba(68,204,68,0.12)' : 'rgba(0,0,0,0.3)';
         ctx.fillRect(bxz, byz, bwid, rowH - 28);
         ctx.strokeStyle = affordable ? '#66ff66' : '#4a5a4a';
@@ -97,12 +138,19 @@ export const hangarScreen = {
     }
 
     // Footer hint + back button
-    ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
     ctx.font = '10px "Courier New", monospace';
     ctx.fillStyle = P.ui.textDim;
     ctx.fillText('UPGRADES PERSIST ACROSS PILOTS · CLICK ENTRY ZONE TO BUY', w / 2, h - 30);
     const backRect = drawBackButton(ctx, w, h);
-    hangarBuyBoxes.push({ x: backRect.x, y: backRect.y, w: backRect.w, h: backRect.h, slot: '__back' });
+    hangarBuyBoxes.push({
+      x: backRect.x,
+      y: backRect.y,
+      w: backRect.w,
+      h: backRect.h,
+      slot: '__back',
+    });
 
     drawCornerBrackets(ctx, 8, 8, w - 16, h - 16, 'rgba(90,140,80,0.5)', 22, 2);
     ctx.restore();
@@ -117,14 +165,17 @@ let pilotInfoSelection = null; // last-touched node for the info bar
 
 export const pilotScreen = {
   draw(ctx, cam) {
-    const w = cam.screenW, h = cam.screenH;
+    const w = cam.screenW,
+      h = cam.screenH;
     const career = careerOrEmpty();
     const pilot = career.pilot;
     drawScreenBackgroundShim(ctx, cam, 'PILOT RECORD', pilot.name);
-    ctx.save(); ctx.scale(cam.dpr, cam.dpr);
+    ctx.save();
+    ctx.scale(cam.dpr, cam.dpr);
 
     // Header stats
-    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
     ctx.font = 'bold 12px "Courier New", monospace';
     ctx.fillStyle = P.ui.textBright;
     ctx.fillText(`LEVEL ${pilot.level}`, 24, 84);
@@ -146,7 +197,11 @@ export const pilotScreen = {
     ctx.strokeRect(23.5, 103.5, w - 47, 9);
     ctx.font = '9px "Courier New", monospace';
     ctx.fillStyle = P.ui.textDim;
-    ctx.fillText(need === Infinity ? 'MAX LEVEL' : `XP ${pilot.xp} / ${need} TO LV ${pilot.level + 1}`, 24, 116);
+    ctx.fillText(
+      need === Infinity ? 'MAX LEVEL' : `XP ${pilot.xp} / ${need} TO LV ${pilot.level + 1}`,
+      24,
+      116
+    );
 
     // ── Skill grid: 5 columns × 6 nodes ──
     pilotNodeBoxes = [];
@@ -174,9 +229,11 @@ export const pilotScreen = {
       ctx.translate(cx, cy);
       ctx.beginPath();
       ctx.arc(0, 0, nodeR, 0, Math.PI * 2);
-      ctx.fillStyle = owned ? 'rgba(170,255,136,0.9)'
-        : available ? 'rgba(20,50,20,0.9)'
-        : 'rgba(10,14,10,0.9)';
+      ctx.fillStyle = owned
+        ? 'rgba(170,255,136,0.9)'
+        : available
+          ? 'rgba(20,50,20,0.9)'
+          : 'rgba(10,14,10,0.9)';
       ctx.fill();
       ctx.strokeStyle = owned ? '#aaff88' : available ? '#66aa66' : 'rgba(70,90,70,0.4)';
       ctx.lineWidth = owned ? 2 : 1;
@@ -193,9 +250,11 @@ export const pilotScreen = {
         const nextTierSameRow = node.tier % 3 < 2;
         const nb = gridNeighbors(node.id);
         for (const n of nb) {
-          const other = SKILL_GRID.find(x => x.id === n);
+          const other = SKILL_GRID.find((x) => x.id === n);
           if (!other || other.branch !== node.branch) continue;
-          const linkDown = other.tier === node.tier + 3 || (other.tier % 3 === node.tier % 3 && other.tier > node.tier);
+          const linkDown =
+            other.tier === node.tier + 3 ||
+            (other.tier % 3 === node.tier % 3 && other.tier > node.tier);
           if (!linkDown && !(other.tier % 3 === node.tier % 3)) continue;
           if (other.tier < node.tier) continue;
           const ox = gridX + colW * other.branch + colW / 2;
@@ -211,17 +270,27 @@ export const pilotScreen = {
         }
         void nextTierSameRow;
       }
-      pilotNodeBoxes.push({ x: cx - nodeR - 4, y: cy - nodeR - 4, w: nodeR * 2 + 8, h: nodeR * 2 + 8, id: node.id, cx, cy, r: nodeR });
+      pilotNodeBoxes.push({
+        x: cx - nodeR - 4,
+        y: cy - nodeR - 4,
+        w: nodeR * 2 + 8,
+        h: nodeR * 2 + 8,
+        id: node.id,
+        cx,
+        cy,
+        r: nodeR,
+      });
     }
 
     // Info bar (last-touched node)
-    const info = pilotInfoSelection ? SKILL_GRID.find(n => n.id === pilotInfoSelection) : null;
+    const info = pilotInfoSelection ? SKILL_GRID.find((n) => n.id === pilotInfoSelection) : null;
     const infoY = h - 96;
     ctx.fillStyle = 'rgba(6,12,6,0.75)';
     ctx.fillRect(16, infoY, w - 32, 40);
     ctx.strokeStyle = 'rgba(90,140,80,0.5)';
     ctx.strokeRect(16.5, infoY + 0.5, w - 33, 39);
-    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
     ctx.font = 'bold 10px "Courier New", monospace';
     ctx.fillStyle = P.ui.textBright;
     if (info) {
@@ -237,15 +306,18 @@ export const pilotScreen = {
 
     // Respec button
     if (pilot.allocated.length > 0 && pilot.skillPoints >= 0) {
-      const rw = 120, rh = 26;
-      const rx = w - rw - 16, ry = h - 60;
+      const rw = 120,
+        rh = 26;
+      const rx = w - rw - 16,
+        ry = h - 60;
       ctx.fillStyle = 'rgba(204,136,51,0.12)';
       ctx.fillRect(rx, ry, rw, rh);
       ctx.strokeStyle = '#cc8833';
       ctx.strokeRect(rx, ry, rw, rh);
       ctx.fillStyle = '#ffcc66';
       ctx.font = 'bold 10px "Courier New", monospace';
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
       ctx.fillText('FREE RESPEC', rx + rw / 2, ry + rh / 2);
       pilotRespecBox = { x: rx, y: ry, w: rw, h: rh };
     } else {
@@ -264,20 +336,30 @@ export let pilotBackBox = null;
 
 // ── Shared background shim (avoids importing app.js) ──
 function drawScreenBackgroundShim(ctx, cam, title, subtitle = '') {
-  const w = cam.screenW, h = cam.screenH;
-  ctx.save(); ctx.scale(cam.dpr, cam.dpr);
+  const w = cam.screenW,
+    h = cam.screenH;
+  ctx.save();
+  ctx.scale(cam.dpr, cam.dpr);
   const grad = ctx.createLinearGradient(0, 0, 0, h);
   grad.addColorStop(0, '#0a120a');
   grad.addColorStop(1, '#16240f');
-  ctx.fillStyle = grad; ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, h);
   ctx.strokeStyle = 'rgba(90,140,80,0.07)';
   ctx.lineWidth = 1;
   const step = 48;
   ctx.beginPath();
-  for (let x = (w % step) / 2; x < w; x += step) { ctx.moveTo(x, 0); ctx.lineTo(x, h); }
-  for (let y = (h % step) / 2; y < h; y += step) { ctx.moveTo(0, y); ctx.lineTo(w, y); }
+  for (let x = (w % step) / 2; x < w; x += step) {
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, h);
+  }
+  for (let y = (h % step) / 2; y < h; y += step) {
+    ctx.moveTo(0, y);
+    ctx.lineTo(w, y);
+  }
   ctx.stroke();
-  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
   ctx.fillStyle = P.ui.textBright;
   ctx.font = 'bold 22px "Courier New", monospace';
   ctx.fillText(title, w / 2, 24);
@@ -302,8 +384,12 @@ export function handleHangarClick(px, py, dpr) {
   const career = metaState.career;
   if (!career) return false;
   for (const box of hangarBuyBoxes) {
-    if (px >= box.x * dpr && px <= (box.x + box.w) * dpr &&
-        py >= box.y * dpr && py <= (box.y + box.h) * dpr) {
+    if (
+      px >= box.x * dpr &&
+      px <= (box.x + box.w) * dpr &&
+      py >= box.y * dpr &&
+      py <= (box.y + box.h) * dpr
+    ) {
       if (box.slot === '__back') return 'back';
       const res = buyHangarLevel(career, box.slot);
       if (!res.ok && res.reason === 'INSUFFICIENT FUNDS') {
@@ -318,20 +404,32 @@ export function handleHangarClick(px, py, dpr) {
 export function handlePilotClick(px, py, dpr) {
   const career = metaState.career;
   if (!career) return false;
-  if (pilotRespecBox &&
-      px >= pilotRespecBox.x * dpr && px <= (pilotRespecBox.x + pilotRespecBox.w) * dpr &&
-      py >= pilotRespecBox.y * dpr && py <= (pilotRespecBox.y + pilotRespecBox.h) * dpr) {
+  if (
+    pilotRespecBox &&
+    px >= pilotRespecBox.x * dpr &&
+    px <= (pilotRespecBox.x + pilotRespecBox.w) * dpr &&
+    py >= pilotRespecBox.y * dpr &&
+    py <= (pilotRespecBox.y + pilotRespecBox.h) * dpr
+  ) {
     respecSkills(career);
     return true;
   }
-  if (pilotBackBox &&
-      px >= pilotBackBox.x * dpr && px <= (pilotBackBox.x + pilotBackBox.w) * dpr &&
-      py >= pilotBackBox.y * dpr && py <= (pilotBackBox.y + pilotBackBox.h) * dpr) {
+  if (
+    pilotBackBox &&
+    px >= pilotBackBox.x * dpr &&
+    px <= (pilotBackBox.x + pilotBackBox.w) * dpr &&
+    py >= pilotBackBox.y * dpr &&
+    py <= (pilotBackBox.y + pilotBackBox.h) * dpr
+  ) {
     return 'back';
   }
   for (const box of pilotNodeBoxes) {
-    if (px >= box.x * dpr && px <= (box.x + box.w) * dpr &&
-        py >= box.y * dpr && py <= (box.y + box.h) * dpr) {
+    if (
+      px >= box.x * dpr &&
+      px <= (box.x + box.w) * dpr &&
+      py >= box.y * dpr &&
+      py <= (box.y + box.h) * dpr
+    ) {
       pilotInfoSelection = box.id;
       allocateSkill(career, box.id);
       return true;

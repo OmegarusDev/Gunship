@@ -7,13 +7,17 @@ export const FEAR_CARDS = [
     id: 'ap_rounds',
     name: 'AP ROUNDS',
     description: '+25% gun damage.',
-    apply(heli) { heli.bulletDamage *= 1.25; },
+    apply(heli) {
+      heli.bulletDamage *= 1.25;
+    },
   },
   {
     id: 'rapid_cycle',
     name: 'RAPID CYCLE',
     description: 'Fire 18% faster.',
-    apply(heli) { heli.fireRate *= 0.82; },
+    apply(heli) {
+      heli.fireRate *= 0.82;
+    },
   },
   {
     id: 'overpressure',
@@ -28,7 +32,9 @@ export const FEAR_CARDS = [
     id: 'long_belt',
     name: 'LONG BELT',
     description: '+90 weapon range.',
-    apply(heli) { heli.weaponRange += 90; },
+    apply(heli) {
+      heli.weaponRange += 90;
+    },
   },
   {
     id: 'hardened_frame',
@@ -52,7 +58,9 @@ export const FEAR_CARDS = [
     id: 'cooling_loop',
     name: 'COOLING LOOP',
     description: 'Heat decays 35% faster after breaking contact.',
-    apply(heli) { heli.heatDecayMultiplier *= 1.35; },
+    apply(heli) {
+      heli.heatDecayMultiplier *= 1.35;
+    },
   },
   {
     id: 'targeting_link',

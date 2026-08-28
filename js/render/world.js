@@ -11,9 +11,16 @@ import { clamp } from '../rng.js';
 import { getConvoyMembers } from '../sim/movement.js';
 import { isTargetAlive as _isTargetAlive } from '../sim/objectives.js';
 
-let _world = null, _heli = null, _enemies = null, _boss = null;
-export function setWorldState(world, heli, enemies, boss) { _world = world; _heli = heli; _enemies = enemies; _boss = boss; }
-
+let _world = null,
+  _heli = null,
+  _enemies = null,
+  _boss = null;
+export function setWorldState(world, heli, enemies, boss) {
+  _world = world;
+  _heli = heli;
+  _enemies = enemies;
+  _boss = boss;
+}
 
 function drawBuilding(ctx, b) {
   if (b.destroyed) {
@@ -71,7 +78,8 @@ function drawBuilding(ctx, b) {
   if (b.type === 'barracks') {
     // Windows
     ctx.fillStyle = withAlpha('#2a3a2a', 0.5);
-    const winW = 4, winH = 3;
+    const winW = 4,
+      winH = 3;
     for (let i = -1; i <= 1; i++) {
       ctx.fillRect(cx + i * 12 - winW / 2, cy - b.h * 0.6, winW, winH);
     }
@@ -111,7 +119,11 @@ function drawSites(ctx, cam) {
   if (!_world) return;
   for (const v of _world.sites) {
     if (!cam.isVisible(v.x, v.y, 120)) continue;
-    const markerColor = v.cleared ? '#44ff44' : v.archetype === 'base' ? P.ui.enemy : P.ui.settlement;
+    const markerColor = v.cleared
+      ? '#44ff44'
+      : v.archetype === 'base'
+        ? P.ui.enemy
+        : P.ui.settlement;
 
     // Village perimeter glow
     ctx.fillStyle = withAlpha(markerColor, 0.08);
@@ -127,8 +139,12 @@ function drawSites(ctx, cam) {
       ctx.strokeRect(v.x - 45, v.y - 45, 90, 90);
     } else if (v.archetype === 'town') {
       // Double circle for towns
-      ctx.beginPath(); ctx.arc(v.x, v.y, 50, 0, Math.PI * 2); ctx.stroke();
-      ctx.beginPath(); ctx.arc(v.x, v.y, 40, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(v.x, v.y, 50, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(v.x, v.y, 40, 0, Math.PI * 2);
+      ctx.stroke();
     } else if (v.archetype === 'camp') {
       // Triangle for camps
       ctx.beginPath();
@@ -139,7 +155,9 @@ function drawSites(ctx, cam) {
       ctx.stroke();
     } else {
       // Circle for rural
-      ctx.beginPath(); ctx.arc(v.x, v.y, 35, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(v.x, v.y, 35, 0, Math.PI * 2);
+      ctx.stroke();
     }
 
     // Site name
@@ -153,7 +171,7 @@ function drawSites(ctx, cam) {
     ctx.fillText(v.archetype.toUpperCase(), v.x, v.y - 49);
     // Enemy count (if discovered, not cleared)
     if (v.discovered && !v.cleared) {
-      const alive = _enemies.filter(e => e.siteId === v.id && e.state !== 'dead').length;
+      const alive = _enemies.filter((e) => e.siteId === v.id && e.state !== 'dead').length;
       ctx.fillStyle = alive > 0 ? P.ui.enemy : '#44ff44';
       ctx.fillText(`${alive} HOSTILE${alive !== 1 ? 'S' : ''}`, v.x, v.y + 50);
     }
@@ -238,7 +256,12 @@ function drawScenarioOverlays(ctx, cam) {
       if (!cam.isVisible(c.x, c.y, 40)) continue;
       const r = Math.max(c.r, 8);
       // Four corner ticks
-      for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+      for (const [sx, sy] of [
+        [-1, -1],
+        [1, -1],
+        [1, 1],
+        [-1, 1],
+      ]) {
         ctx.beginPath();
         ctx.moveTo(c.x + sx * r, c.y + sy * r - sy * 5);
         ctx.lineTo(c.x + sx * r, c.y + sy * r);
@@ -251,17 +274,28 @@ function drawScenarioOverlays(ctx, cam) {
   if (_world.extraction?.active) {
     // Extraction = leave the map. Highlight the nearest boundary edge.
     const lim = WORLD_SIZE * 0.48;
-    const dL = _heli.x + lim, dR = lim - _heli.x;
-    const dT = _heli.y + lim, dB = lim - _heli.y;
+    const dL = _heli.x + lim,
+      dR = lim - _heli.x;
+    const dT = _heli.y + lim,
+      dB = lim - _heli.y;
     const m = Math.min(dL, dR, dT, dB);
     const pulse = 0.55 + 0.35 * Math.sin(performance.now() / 220);
     ctx.strokeStyle = withAlpha('#44ddff', pulse);
     ctx.lineWidth = 6;
     ctx.beginPath();
-    if (m === dL) { ctx.moveTo(-lim, -lim); ctx.lineTo(-lim, lim); }
-    else if (m === dR) { ctx.moveTo(lim, -lim); ctx.lineTo(lim, lim); }
-    else if (m === dT) { ctx.moveTo(-lim, -lim); ctx.lineTo(lim, -lim); }
-    else { ctx.moveTo(-lim, lim); ctx.lineTo(lim, lim); }
+    if (m === dL) {
+      ctx.moveTo(-lim, -lim);
+      ctx.lineTo(-lim, lim);
+    } else if (m === dR) {
+      ctx.moveTo(lim, -lim);
+      ctx.lineTo(lim, lim);
+    } else if (m === dT) {
+      ctx.moveTo(-lim, -lim);
+      ctx.lineTo(lim, -lim);
+    } else {
+      ctx.moveTo(-lim, lim);
+      ctx.lineTo(lim, lim);
+    }
     ctx.stroke();
   }
 
@@ -275,8 +309,10 @@ function drawScenarioOverlays(ctx, cam) {
     ctx.strokeRect(crate.x - 7 * pulse, crate.y - 7 * pulse, 14 * pulse, 14 * pulse);
     ctx.strokeStyle = '#ffcc44';
     ctx.beginPath();
-    ctx.moveTo(crate.x - 6, crate.y); ctx.lineTo(crate.x + 6, crate.y);
-    ctx.moveTo(crate.x, crate.y - 6); ctx.lineTo(crate.x, crate.y + 6);
+    ctx.moveTo(crate.x - 6, crate.y);
+    ctx.lineTo(crate.x + 6, crate.y);
+    ctx.moveTo(crate.x, crate.y - 6);
+    ctx.lineTo(crate.x, crate.y + 6);
     ctx.stroke();
   }
 
@@ -292,12 +328,21 @@ function drawScenarioOverlays(ctx, cam) {
       ctx.fillStyle = '#1a1a1a';
       ctx.fillRect(target.x - barW / 2, target.y - 22, barW, 4);
       ctx.fillStyle = '#ff4444';
-      ctx.fillRect(target.x - barW / 2, target.y - 22, barW * clamp(target.hp / target.maxHp, 0, 1), 4);
+      ctx.fillRect(
+        target.x - barW / 2,
+        target.y - 22,
+        barW * clamp(target.hp / target.maxHp, 0, 1),
+        4
+      );
     }
     ctx.fillStyle = '#ff8844';
     ctx.font = 'bold 9px "Courier New", monospace';
     ctx.textAlign = 'center';
-    ctx.fillText(_world.objective.type === 'intercept' ? 'CONVOY TARGET' : 'PRIMARY TARGET', target.x, target.y - 28);
+    ctx.fillText(
+      _world.objective.type === 'intercept' ? 'CONVOY TARGET' : 'PRIMARY TARGET',
+      target.x,
+      target.y - 28
+    );
   }
 }
 
