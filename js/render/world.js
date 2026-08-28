@@ -7,7 +7,9 @@ import { withAlpha } from '../drawUtil.js';
 import { VIEW25, deckRy } from '../view25.js';
 import { box25, frustum25 } from '../prims25.js';
 import { WORLD_SIZE } from '../config.js';
+import { clamp } from '../rng.js';
 import { getConvoyMembers } from '../sim/movement.js';
+import { isTargetAlive as _isTargetAlive } from '../sim/objectives.js';
 
 let _world = null, _heli = null, _enemies = null, _boss = null;
 export function setWorldState(world, heli, enemies, boss) { _world = world; _heli = heli; _enemies = enemies; _boss = boss; }
@@ -107,7 +109,7 @@ function drawBuilding(ctx, b) {
 
 function drawSites(ctx, cam) {
   if (!_world) return;
-  for (const v of __world.sites) {
+  for (const v of _world.sites) {
     if (!cam.isVisible(v.x, v.y, 120)) continue;
     const markerColor = v.cleared ? '#44ff44' : v.archetype === 'base' ? P.ui.enemy : P.ui.settlement;
 
@@ -279,7 +281,7 @@ function drawScenarioOverlays(ctx, cam) {
   }
 
   const target = _world.objective?.target;
-  if (target && isTargetAlive(target) && target !== boss) {
+  if (target && _isTargetAlive(_world, _boss, target) && target !== _boss) {
     ctx.strokeStyle = withAlpha('#ff4444', 0.75);
     ctx.lineWidth = 1.5;
     ctx.beginPath();

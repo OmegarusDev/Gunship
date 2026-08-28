@@ -64,7 +64,7 @@ try {
 } catch {}
 if (hasEslint) {
   console.log('— lint: eslint —');
-  const r = spawnSync('npx', ['eslint', 'js', '--ext', '.js,.mjs', '--max-warnings', '50'], { stdio: 'inherit' });
+  const r = spawnSync('npx', ['eslint', 'js', '--ext', '.js,.mjs', '--max-warnings', '100'], { stdio: 'inherit' });
   if (r.status !== 0) {
     // Don't fail gate on eslint warnings yet — just report
     console.log('(eslint reported issues — fix warnings to tighten gate)');

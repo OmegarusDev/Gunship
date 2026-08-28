@@ -330,7 +330,7 @@ export function saveCareer(career) {
 }
 
 export function clearCareer() {
-  try { localStorage.removeItem(SAVE_KEY); } catch { }
+  try { localStorage.removeItem(SAVE_KEY); } catch { /* ignore */ }
 }
 
 /**
