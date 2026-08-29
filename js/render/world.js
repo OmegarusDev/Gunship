@@ -6,7 +6,7 @@ import { P, mats } from '../palette.js';
 import { withAlpha } from '../drawUtil.js';
 import { VIEW25, deckRy } from '../view25.js';
 import { box25, frustum25 } from '../prims25.js';
-import { WORLD_SIZE } from '../config.js';
+import { WORLD_SIZE, WORLD_GEN_VERSION } from '../config.js';
 import { clamp } from '../rng.js';
 import { getConvoyMembers } from '../sim/movement.js';
 import { isTargetAlive as _isTargetAlive } from '../sim/objectives.js';
@@ -118,14 +118,73 @@ function drawBuilding(ctx, b) {
 function drawSites(ctx, cam) {
   if (!_world) return;
   for (const v of _world.sites) {
-    if (!cam.isVisible(v.x, v.y, 120)) continue;
+    if (!cam.isVisible(v.x, v.y, 160)) continue;
+
+    // WORLD_GEN_VERSION 2: settlements are physically the streets + buildings, not an icon
+    if (WORLD_GEN_VERSION === 2 && v.streetGraph) {
+      // Draw street graph as part of the map (thin, like roads, but settlement-local)
+      ctx.strokeStyle = withAlpha('#8a7a5a', 0.85);
+      ctx.lineWidth = 2;
+      ctx.lineCap = 'round';
+      for (const e of v.streetGraph.edges) {
+        const an = v.streetGraph.nodes.find((n) => n.id === e.a);
+        const bn = v.streetGraph.nodes.find((n) => n.id === e.b);
+        if (!an || !bn) continue;
+        ctx.beginPath();
+        ctx.moveTo(an.x, an.y);
+        ctx.lineTo(bn.x, bn.y);
+        ctx.stroke();
+        // nodes as subtle dots
+        ctx.fillStyle = withAlpha('#6a5a3a', 0.9);
+        ctx.beginPath();
+        ctx.arc(an.x, an.y, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(bn.x, bn.y, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // Parcels as faint blocks (so the town reads as built-up even before buildings are close)
+      if (v.parcels) {
+        ctx.strokeStyle = withAlpha('#9a8a6a', 0.18);
+        ctx.lineWidth = 1;
+        for (const p of v.parcels) {
+          if (!p.polygon) continue;
+          ctx.beginPath();
+          ctx.moveTo(p.polygon[0].x, p.polygon[0].y);
+          for (let i = 1; i < p.polygon.length; i++) ctx.lineTo(p.polygon[i].x, p.polygon[i].y);
+          ctx.closePath();
+          ctx.stroke();
+        }
+      }
+      // Site name (smaller, no big icon)
+      ctx.font = 'bold 9px "Courier New", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = v.cleared ? '#44ff44' : withAlpha(P.ui.settlement, 0.95);
+      ctx.fillText(v.name, v.x, v.y - 72);
+      ctx.fillStyle = withAlpha(P.ui.textDim, 0.85);
+      ctx.font = '7px "Courier New", monospace';
+      ctx.fillText(v.archetype.toUpperCase(), v.x, v.y - 62);
+      if (v.discovered && !v.cleared) {
+        const alive = _enemies.filter((e) => e.siteId === v.id && e.state !== 'dead').length;
+        ctx.fillStyle = alive > 0 ? withAlpha(P.ui.enemy, 0.9) : '#44ff44';
+        ctx.font = '8px "Courier New", monospace';
+        ctx.fillText(`${alive} HOSTILE${alive !== 1 ? 'S' : ''}`, v.x, v.y + 58);
+      }
+      if (v.cleared) {
+        ctx.fillStyle = '#44ff44';
+        ctx.font = '8px "Courier New", monospace';
+        ctx.fillText('CLEARED', v.x, v.y + 58);
+      }
+      continue;
+    }
+
     const markerColor = v.cleared
       ? '#44ff44'
       : v.archetype === 'base'
         ? P.ui.enemy
         : P.ui.settlement;
 
-    // Village perimeter glow
+    // Village perimeter glow (legacy WORLD_GEN 1)
     ctx.fillStyle = withAlpha(markerColor, 0.08);
     ctx.beginPath();
     ctx.arc(v.x, v.y, 60, 0, Math.PI * 2);
@@ -135,10 +194,8 @@ function drawSites(ctx, cam) {
     ctx.strokeStyle = withAlpha(markerColor, 0.4);
     ctx.lineWidth = 1.5;
     if (v.archetype === 'base') {
-      // Square perimeter for bases
       ctx.strokeRect(v.x - 45, v.y - 45, 90, 90);
     } else if (v.archetype === 'town') {
-      // Double circle for towns
       ctx.beginPath();
       ctx.arc(v.x, v.y, 50, 0, Math.PI * 2);
       ctx.stroke();
@@ -146,7 +203,6 @@ function drawSites(ctx, cam) {
       ctx.arc(v.x, v.y, 40, 0, Math.PI * 2);
       ctx.stroke();
     } else if (v.archetype === 'camp') {
-      // Triangle for camps
       ctx.beginPath();
       ctx.moveTo(v.x, v.y - 45);
       ctx.lineTo(v.x + 40, v.y + 25);
@@ -154,22 +210,18 @@ function drawSites(ctx, cam) {
       ctx.closePath();
       ctx.stroke();
     } else {
-      // Circle for rural
       ctx.beginPath();
       ctx.arc(v.x, v.y, 35, 0, Math.PI * 2);
       ctx.stroke();
     }
 
-    // Site name
     ctx.font = 'bold 10px "Courier New", monospace';
     ctx.textAlign = 'center';
     ctx.fillStyle = v.cleared ? '#44ff44' : P.ui.settlement;
     ctx.fillText(v.name, v.x, v.y - 60);
-    // Archetype label
     ctx.fillStyle = P.ui.textDim;
     ctx.font = '8px "Courier New", monospace';
     ctx.fillText(v.archetype.toUpperCase(), v.x, v.y - 49);
-    // Enemy count (if discovered, not cleared)
     if (v.discovered && !v.cleared) {
       const alive = _enemies.filter((e) => e.siteId === v.id && e.state !== 'dead').length;
       ctx.fillStyle = alive > 0 ? P.ui.enemy : '#44ff44';
