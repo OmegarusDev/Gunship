@@ -373,7 +373,31 @@ function ufFind(parent, i) {
   return parent[i];
 }
 
-export function generateRoads(seed, worldSize, terrain, sites) {
+export function generateRoads(seed, worldSize, terrain, sites, opts = {}) {
+  const version = opts.worldGenVersion ?? WORLD_GEN_VERSION;
+  if (version === 3) {
+    // For v3, roads are handled in the post-process (streets) — return empty here and let generateWorld add them
+    // But we still need highways, so we generate a minimal highway network here
+    // Import dynamically to avoid circular
+    const rng3 = mulberry32(seed);
+    const roads3 = [];
+    const grid = getTerrainGrid(terrain, worldSize);
+    // Simple highway: 2 long least-cost paths across the map
+    const anchors = [
+      { x: -worldSize * 0.4, y: -worldSize * 0.4 },
+      { x: worldSize * 0.4, y: worldSize * 0.4 },
+      { x: -worldSize * 0.4, y: worldSize * 0.4 },
+      { x: worldSize * 0.4, y: -worldSize * 0.4 },
+    ];
+    for (let i = 0; i < anchors.length - 1; i++) {
+      const a = anchors[i], b = anchors[i + 1];
+      const path = leastCostPath(a.x, a.y, b.x, b.y, grid);
+      if (path && path.length >= 2) {
+        roads3.push({ points: path, width: randFloat(28, 36, rng3), surface: 'paved', hierarchy: 'highway' });
+      }
+    }
+    return roads3;
+  }
   const rng = mulberry32(seed);
   const roads = [];
 
@@ -1827,6 +1851,141 @@ function makeFuelBuilding(id, x, y, type, opts = {}) {
   };
 }
 
+function generateRoadCentricWorld(seed, worldSize, terrain, context) {
+  // For now, delegate to legacy but with a note — the true road-centric
+  // implementation will be in js/world/roadCentric.js and will make
+  // villages as road+building clusters, not points. This stub keeps
+  // WORLD_GEN=3 playable while the full rewrite lands.
+  // TODO: picks road segments, clusters buildings along them, adds walls for bases.
+  const rng = mulberry32(seed);
+  // Use legacy sites/roads as a base, but post-process to make buildings front roads
+  const sites = generateSites(seed, [], worldSize, terrain);
+  const roads = generateRoads(seed + 7, worldSize, terrain, sites, { worldGenVersion: 1 });
+  // For each site, snap its buildings to the nearest road so the village *is* the road
+  for (const site of sites) {
+    // Find nearest road segment to site center
+    let bestRoad = null, bestPoint = null, bestDist = Infinity;
+    for (const road of roads) {
+      for (let i = 0; i < road.points.length - 1; i++) {
+        const a = road.points[i], b = road.points[i + 1];
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const len2 = dx * dx + dy * dy || 1;
+        let t = ((site.x - a.x) * dx + (site.y - a.y) * dy) / len2;
+        t = Math.max(0, Math.min(1, t));
+        const px = a.x + t * dx, py = a.y + t * dy;
+        const d = Math.hypot(site.x - px, site.y - py);
+        if (d < bestDist) { bestDist = d; bestPoint = { x: px, y: py, angle: Math.atan2(dy, dx) }; bestRoad = road; }
+      }
+    }
+    if (!bestPoint) continue;
+    // Re-place buildings along that road segment, fronting it
+    const along = bestPoint.angle;
+    const perp = along + Math.PI / 2;
+    const spread = site.archetype === 'base' ? 90 : site.archetype === 'town' ? 70 : site.archetype === 'camp' ? 60 : 40;
+    const isMilitary = site.archetype === 'camp' || site.archetype === 'base';
+    for (let i = 0; i < site.buildings.length; i++) {
+      const b = site.buildings[i];
+      // Position along the road (t along spine) + offset to side
+      const t = (i / Math.max(1, site.buildings.length - 1) - 0.5) * (spread * 0.7);
+      const side = (i % 2 === 0 ? 1 : -1) * (isMilitary ? 18 : 12 + (i % 3) * 4);
+      const jitter = (rng() - 0.5) * 6;
+      b.x = bestPoint.x + Math.cos(along) * t + Math.cos(perp) * (side + jitter);
+      b.y = bestPoint.y + Math.sin(along) * t + Math.sin(perp) * (side + jitter);
+      // Military bases: grid-aligned, larger, walls will be added as perimeter road
+      if (isMilitary) {
+        b.x = Math.round(b.x / 8) * 8;
+        b.y = Math.round(b.y / 8) * 8;
+      }
+    }
+    // For bases/camps, add a wall as a local road loop around the site
+    if (isMilitary) {
+      const half = spread / 2 - 6;
+      const corners = [
+        { x: site.x - half, y: site.y - half },
+        { x: site.x + half, y: site.y - half },
+        { x: site.x + half, y: site.y + half },
+        { x: site.x - half, y: site.y + half },
+      ];
+      for (let i = 0; i < 4; i++) {
+        const a = corners[i], c = corners[(i + 1) % 4];
+        roads.push({ points: [a, c], width: 10, surface: 'dirt', hierarchy: 'perimeter' });
+      }
+    }
+  }
+  // Now continue with the rest of generateWorld's logic (decorations, convoys, buildings array)
+  // We duplicate the tail of generateWorld here to keep it self-contained
+  const decorations = generateDecorations(seed, worldSize, roads, sites, terrain);
+  const convoys = generateConvoys(seed, roads, sites, worldSize);
+  const buildings = [];
+  for (const site of sites) {
+    for (let i = 0; i < site.buildings.length; i++) {
+      const b = site.buildings[i];
+      const tmpl = getBuildingTemplate(b.type);
+      b.id = `${site.id}-building-${String(i + 1).padStart(2, '0')}`;
+      b.siteId = site.id;
+      buildings.push({ id: b.id, x: b.x, y: b.y, type: b.type, w: tmpl.w, d: tmpl.d, h: tmpl.h, col: tmpl.col, siteId: site.id, hp: 0, maxHp: 0, destructible: true, objectiveTag: null, special: null, highPriority: false, destroyed: false, flashTimer: 0 });
+    }
+  }
+  // Minimal world object for version 3 — reuse the tail logic via the legacy path's decorations etc. would be duplicated,
+  // so we just call the legacy tail by constructing a world and patching it
+  const baseWorld = (() => {
+    const w = { worldSize, seed, terrain, sites, roads, decorations, convoys, buildings, supplyCrates: [], fuelDepots: [], objective: null, extraction: { active: false }, worldGenVersion: 3 };
+    return w;
+  })();
+  // Reuse the rest of the legacy generateWorld tail (supply crates, fuel depots, objective) by calling a helper
+  // For now, just return the baseWorld with a simple objective (first site)
+  // The full objective logic is in the legacy tail; we will call it via a shared helper in the next iteration
+  // To keep this stub playable, we will just fill in a minimal objective
+  // Reuse legacy tail: fuel depots, buildings already have w/d/h, now build full world
+  const fuelDepots = [];
+  const depotBuildings = [];
+  // For v3, skip fuel depots for now (they are timer bonuses tied to old blob logic) — keep it simple
+  const worldV3 = {
+    seed,
+    worldSize,
+    roads,
+    sites,
+    decorations,
+    buildings,
+    fuelDepots,
+    convoys,
+    supplyCrates: [],
+    radarSites: [],
+    objective: null,
+    extraction: null,
+    responsePlan: null,
+    contract: context.contract || null,
+    worldGenVersion: 3,
+  };
+  // Generate a minimal set of supply crates for the new world (so recovery etc. still works)
+  // Place one crate per site near its buildings
+  for (const site of sites) {
+    if (site.buildings.length === 0) continue;
+    const b = site.buildings[0];
+    worldV3.supplyCrates.push({
+      id: `crate-${site.id}`,
+      x: b.x + (mulberry32(seed + site.id.charCodeAt(0))() - 0.5) * 20,
+      y: b.y + (mulberry32(seed + site.id.charCodeAt(0) + 1)() - 0.5) * 20,
+      siteId: site.id,
+      collected: false,
+      objective: false,
+      rewardType: 'repair',
+    });
+  }
+  // Apply contract plan (creates objective target etc.) — reuse legacy logic
+  // For v3, we need to ensure the objective target is placed along a road, not at a blob center
+  // The legacy applyContractPlan will handle it (it picks a site and places a building there)
+  // For now, just call it — it will work because sites still have archetypes
+  const dummyWorldForContract = { ...worldV3, buildings: [...buildings, ...depotBuildings] };
+  // We need to run the full contract plan on the v3 world, but to avoid duplicating code,
+  // we will just manually set a simple objective and let the legacy tail handle it on next iteration
+  // Instead, we will directly call applyContractPlan on worldV3
+  applyContractPlan(worldV3, context.contract);
+  // Also need to handle depotBuildings if any
+  for (const db of depotBuildings) worldV3.buildings.push(db);
+  return worldV3;
+}
+
 // ══════════════════════════════════════════════════════════════
 //  FULL WORLD GENERATION
 // ══════════════════════════════════════════════════════════════
@@ -1836,8 +1995,12 @@ export function generateWorld(input) {
   const seed = context.seed ?? context.rootSeed ?? 42;
   const worldSize = context.worldSize || WORLD_SIZE;
   const terrain = context.terrain || createTerrain(seed, worldSize);
-  // Settlements are placed on geography first (water, confluences, high
-  // ground, scatter) — then the road network connects them across terrain.
+  const version = context.worldGenVersion ?? WORLD_GEN_VERSION;
+  // WORLD_GEN 3: roads are primary, villages ARE roads+buildings (road-centric)
+  if (version === 3) {
+    return generateRoadCentricWorld(seed, worldSize, terrain, context);
+  }
+  // Legacy: settlements placed on geography first, then roads MST between them
   const sites = generateSites(seed, [], worldSize, terrain);
   const roads = generateRoads(seed + 7, worldSize, terrain, sites);
   const decorations = generateDecorations(seed, worldSize, roads, sites, terrain);
