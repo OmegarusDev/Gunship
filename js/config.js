@@ -104,6 +104,9 @@ export const PILOT_XP = [
 
 export const SETTLEMENT_DETECTION_RADIUS = 80;
 
+/** World-gen version — 1 = blobs-on-roads (prototype, main), 3 = roads connect buildings (true street villages, walls for bases) */
+export const WORLD_GEN_VERSION = 3;
+
 /** Unarmed civilians who flee this far from their home site escape the
  *  battle entirely (removed, no longer block clearing the settlement). */
 export const CIVILIAN_ESCAPE_RADIUS = 900;

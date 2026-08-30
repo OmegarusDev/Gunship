@@ -4,7 +4,7 @@
  * Villages are first-class objects with archetypes and enemy garrisons.
  */
 
-import { WORLD_SIZE } from './config.js';
+import { WORLD_SIZE, WORLD_GEN_VERSION } from './config.js';
 import { getDifficulty, getScenario, getStyle } from './contracts.js';
 import { mulberry32, randInt, randFloat, pick, clamp, weightedPick } from './rng.js';
 import { createTerrain } from './terrain.js';
