@@ -1852,66 +1852,268 @@ function makeFuelBuilding(id, x, y, type, opts = {}) {
 }
 
 function generateRoadCentricWorld(seed, worldSize, terrain, context) {
-  // For now, delegate to legacy but with a note — the true road-centric
-  // implementation will be in js/world/roadCentric.js and will make
-  // villages as road+building clusters, not points. This stub keeps
-  // WORLD_GEN=3 playable while the full rewrite lands.
-  // TODO: picks road segments, clusters buildings along them, adds walls for bases.
+  // WORLD_GEN 3: true road-centric — roads exist to connect buildings.
+  // Generate highways first, then walk them and emit building slots along them,
+  // then cluster slots into Sites (villages). A Site is a named cluster of
+  // road-fronting buildings, not a point with a scatter.
   const rng = mulberry32(seed);
-  // Use legacy sites/roads as a base, but post-process to make buildings front roads
-  const sites = generateSites(seed, [], worldSize, terrain);
-  const roads = generateRoads(seed + 7, worldSize, terrain, sites, { worldGenVersion: 1 });
-  // For each site, snap its buildings to the nearest road so the village *is* the road
+  // 1) Primary roads — 3-4 highways A* between terrain anchors (oases/highs/edges), not between sites
+  const primaryRoads = [];
+  const grid = getTerrainGrid(terrain, worldSize);
+  const anchors = [];
+  for (let i = 0; i < 4; i++) {
+    const ang = (i / 4) * Math.PI * 2 + randFloat(-0.2, 0.2, rng);
+    const r = worldSize * 0.42;
+    anchors.push({ x: Math.cos(ang) * r, y: Math.sin(ang) * r });
+  }
+  if (terrain) {
+    for (const o of terrain.oases.slice(0, 3)) anchors.push({ x: o.x, y: o.y });
+    for (const h of terrain.highs.slice(0, 2)) {
+      const a = rng() * Math.PI * 2, d = h.radius * 0.6;
+      anchors.push({ x: h.x + Math.cos(a) * d, y: h.y + Math.sin(a) * d });
+    }
+  }
+  anchors.sort((a,b) => Math.atan2(a.y,a.x) - Math.atan2(b.y,b.x));
+  for (let i = 0; i < anchors.length; i++) {
+    const a = anchors[i], b = anchors[(i+1)%anchors.length];
+    if (Math.hypot(a.x-b.x, a.y-b.y) > worldSize*0.85) continue;
+    if (rng() < 0.35) continue;
+    const path = leastCostPath(a.x, a.y, b.x, b.y, grid);
+    if (path && path.length >= 3) {
+      for (const p of path) { p.x += (rng()-0.5)*10; p.y += (rng()-0.5)*10; }
+      primaryRoads.push({ points: path, width: randFloat(28,36,rng), surface: 'paved', hierarchy: 'highway' });
+    }
+  }
+  // If no highways (rare), fall back to MST of anchors
+  if (primaryRoads.length === 0) {
+    const nodes = anchors.map((p,i)=>({x:p.x,y:p.y,i}));
+    const edges = [];
+    for (let i=0;i<nodes.length;i++) for (let j=i+1;j<nodes.length;j++) {
+      const d = Math.hypot(nodes[i].x-nodes[j].x, nodes[i].y-nodes[j].y);
+      if (d < worldSize*0.7) edges.push({a:i,b:j,d});
+    }
+    edges.sort((a,b)=>a.d-b.d);
+    const parent = nodes.map((_,i)=>i);
+    for (const e of edges) {
+      const ra=ufFind(parent,e.a), rb=ufFind(parent,e.b);
+      if (ra===rb) continue;
+      parent[ra]=rb;
+      const path=leastCostPath(nodes[e.a].x,nodes[e.a].y,nodes[e.b].x,nodes[e.b].y,grid);
+      if (path) primaryRoads.push({points:path,width:randFloat(28,36,rng),surface:'paved',hierarchy:'highway'});
+    }
+  }
+
+  // 2) Walk roads and emit building slots — each building is a footprint along a road
+  const slots = []; // {x,y, roadIdx, t, side, type}
+  const totalBuildingsWanted = 16 * 6; // ~96 buildings across the map, clustered into sites
+  const archetypeForSlot = (i) => {
+    const r = rng();
+    if (r < 0.35) return 'rural';
+    if (r < 0.65) return 'town';
+    if (r < 0.85) return 'camp';
+    return 'base';
+  };
+  for (let s = 0; s < totalBuildingsWanted; s++) {
+    const road = pick(primaryRoads, rng);
+    if (!road || road.points.length < 2) continue;
+    const segIdx = randInt(0, road.points.length-2, rng);
+    const a = road.points[segIdx], b = road.points[segIdx+1];
+    const t = rng();
+    const x = a.x + (b.x-a.x)*t, y = a.y + (b.y-a.y)*t;
+    const angle = Math.atan2(b.y-a.y, b.x-a.x);
+    const perp = angle + Math.PI/2;
+    const side = (rng()>0.5?1:-1);
+    const setback = 14 + rng()*8; // road width/2 + yard
+    const bx = x + Math.cos(perp)*side*setback + (rng()-0.5)*6;
+    const by = y + Math.sin(perp)*side*setback + (rng()-0.5)*6;
+    // Terrain check: avoid water/rock
+    if (terrain) {
+      const ty = terrain.type(bx, by);
+      if (ty === 'rock' || ty === 'wadi') continue;
+    }
+    slots.push({ x: bx, y: by, roadIdx: primaryRoads.indexOf(road), t, side, angle, archetype: archetypeForSlot(s) });
+  }
+
+  // 3) Cluster slots into Sites — buildings within 90 along same or nearby roads share a Site
+  const sites = [];
+  const used = new Set();
+  const clusterDist = 90;
+  let siteId = 1;
+  for (let i = 0; i < slots.length; i++) {
+    if (used.has(i)) continue;
+    const cluster = [slots[i]];
+    used.add(i);
+    for (let j = i+1; j < slots.length; j++) {
+      if (used.has(j)) continue;
+      // Simple proximity along roads: Euclidean for now, with same road bias
+      const a = slots[i], b = slots[j];
+      const d = Math.hypot(a.x-b.x, a.y-b.y);
+      if (d < clusterDist && (a.roadIdx===b.roadIdx || d < clusterDist*0.6)) {
+        cluster.push(b);
+        used.add(j);
+      }
+    }
+    if (cluster.length < 2 && rng() < 0.7) continue; // keep some loners as isolated buildings, not Sites (per your note)
+    // Keep loners as isolated buildings outside sites — they will be added as single-building sites if needed for gameplay
+    // For now, require at least 2 to form a named Site; loners become extra buildings in the nearest Site or are skipped
+    if (cluster.length === 1) {
+      // 50% chance to keep loner as a tiny hamlet (rural 1-2), else skip (it will just be a building along the road, not a Site)
+      if (rng() < 0.5) {
+        // keep as hamlet
+      } else {
+        continue;
+      }
+    }
+    // Cap cluster size to archetype expectations
+    const archetype = cluster[0].archetype;
+    const maxForArch = archetype === 'base' ? 12 : archetype === 'town' ? 18 : archetype === 'camp' ? 10 : 6;
+    const clipped = cluster.slice(0, maxForArch);
+    // Site center is centroid of its buildings
+    const cx = clipped.reduce((a,b)=>a+b.x,0)/clipped.length;
+    const cy = clipped.reduce((a,b)=>a+b.y,0)/clipped.length;
+    const buildings = clipped.map((s, idx) => {
+      // Pick building type by archetype and position (larger toward centre)
+      const distToCenter = Math.hypot(s.x - cx, s.y - cy);
+      const isCentre = distToCenter < 18 && idx < 2;
+      let type;
+      if (archetype === 'base' || archetype === 'camp') {
+        type = isCentre ? pick(['bunker','barracks','tower'], rng) : pick(['barracks','depot','sandbag'], rng);
+      } else {
+        type = isCentre ? pick(['depot','barracks','hut'], rng) : pick(['hut','hut','sandbag','crate_stack'], rng);
+      }
+      return { x: s.x, y: s.y, type, doorDir: s.angle + Math.PI/2 * s.side, roadAngle: s.angle };
+    });
+    // Add walls for bases/camps as perimeter not as buildings but as decorations (and collidable via perimeter road)
+    const arch = ARCHETYPES[archetype];
+    
+    // Use randInt with rng directly
+    const rawCount = randInt(arch.enemyCount[0], arch.enemyCount[1], rng);
+    const scaledCount = Math.max(1, Math.floor(rawCount * (1 + Math.hypot(cx, cy) / 2500 * 0.5)));
+    const sidStr = `site-${String(siteId).padStart(2,'0')}`;
+    const siteEnemies = [];
+    // Generate roster via helper (inline to avoid circular import issues)
+    const classes = Object.keys(arch.classes);
+    const weights = classes.map(c => arch.classes[c]);
+    const unarmedOnly = rawCount <= 3 && rng() < (arch.unarmedOnlyChance ?? 0);
+    const guaranteedArmed = unarmedOnly ? 0 : Math.min(arch.minArmed ?? 1, scaledCount);
+    for (let ei = 0; ei < scaledCount; ei++) {
+      let cls;
+      if (ei < guaranteedArmed) {
+        cls = weightedPick(classes.filter(c=>c!=='unarmed'), classes.filter(c=>c!=='unarmed').map(c=>arch.classes[c]), rng);
+        if (!cls) cls = weightedPick(classes, weights, rng);
+      } else {
+        cls = weightedPick(classes, weights, rng);
+      }
+      const isIndoor = ei < Math.max(1, Math.floor(scaledCount * 0.2));
+      let offX, offY;
+      if (isIndoor && buildings.length>0) {
+        const b = buildings[Math.floor(rng()*buildings.length)];
+        offX = b.x - cx; offY = b.y - cy;
+      } else {
+        const ang = rng()*Math.PI*2, dist = 20 + rng()*80;
+        offX = Math.cos(ang)*dist; offY = Math.sin(ang)*dist;
+      }
+      siteEnemies.push({ id: `${sidStr}-spawn-${String(ei+1).padStart(2,'0')}`, className: cls, offsetX: offX, offsetY: offY, isIndoor, active: false });
+    }
+    const site = {
+      id: sidStr,
+      x: cx, y: cy,
+      archetype,
+      terrainKind: 'roadCentric',
+      buildings,
+      enemies: siteEnemies,
+      streetGraph: null,
+      parcels: null,
+      _roadIdx: cluster[0].roadIdx,
+      _angle: cluster[0].angle,
+      discovered: false,
+      cleared: false,
+      detectionRadius: arch.detectionRadius,
+    };
+    siteId++;
+    sites.push(site);
+  }
+  // Ensure at least 12 sites (pad with legacy water-anchored if needed)
+  if (sites.length < 12) {
+    const legacy = generateSites(seed, [], worldSize, terrain);
+    for (const s of legacy) {
+      if (sites.length >= 16) break;
+      if (sites.some(o=>Math.hypot(o.x-s.x,o.y-s.y)<300)) continue;
+      sites.push(s);
+    }
+  }
+  // For each site, build a tiny StreetGraph that is the road segment(s) its buildings front onto, plus walls
   for (const site of sites) {
-    // Find nearest road segment to site center
-    let bestRoad = null, bestPoint = null, bestDist = Infinity;
-    for (const road of roads) {
-      for (let i = 0; i < road.points.length - 1; i++) {
-        const a = road.points[i], b = road.points[i + 1];
-        const dx = b.x - a.x, dy = b.y - a.y;
-        const len2 = dx * dx + dy * dy || 1;
-        let t = ((site.x - a.x) * dx + (site.y - a.y) * dy) / len2;
-        t = Math.max(0, Math.min(1, t));
-        const px = a.x + t * dx, py = a.y + t * dy;
-        const d = Math.hypot(site.x - px, site.y - py);
-        if (d < bestDist) { bestDist = d; bestPoint = { x: px, y: py, angle: Math.atan2(dy, dx) }; bestRoad = road; }
-      }
+    if (site.streetGraph) continue; // already has
+    const road = primaryRoads[site._roadIdx] || primaryRoads[0];
+    if (!road) continue;
+    // Find the closest point on that road to site center to make a local street graph
+    let best = null, bestD = Infinity, bestSeg = 0, bestT = 0;
+    for (let i=0;i<road.points.length-1;i++) {
+      const a=road.points[i], b=road.points[i+1];
+      const dx=b.x-a.x, dy=b.y-a.y, len2=dx*dx+dy*dy||1;
+      let t=((site.x-a.x)*dx + (site.y-a.y)*dy)/len2; t=Math.max(0,Math.min(1,t));
+      const px=a.x+t*dx, py=a.y+t*dy;
+      const d=Math.hypot(site.x-px, site.y-py);
+      if (d<bestD) {bestD=d; best={x:px,y:py,angle:Math.atan2(dy,dx)}; bestSeg=i; bestT=t;}
     }
-    if (!bestPoint) continue;
-    // Re-place buildings along that road segment, fronting it
-    const along = bestPoint.angle;
-    const perp = along + Math.PI / 2;
-    const spread = site.archetype === 'base' ? 90 : site.archetype === 'town' ? 70 : site.archetype === 'camp' ? 60 : 40;
-    const isMilitary = site.archetype === 'camp' || site.archetype === 'base';
-    for (let i = 0; i < site.buildings.length; i++) {
-      const b = site.buildings[i];
-      // Position along the road (t along spine) + offset to side
-      const t = (i / Math.max(1, site.buildings.length - 1) - 0.5) * (spread * 0.7);
-      const side = (i % 2 === 0 ? 1 : -1) * (isMilitary ? 18 : 12 + (i % 3) * 4);
-      const jitter = (rng() - 0.5) * 6;
-      b.x = bestPoint.x + Math.cos(along) * t + Math.cos(perp) * (side + jitter);
-      b.y = bestPoint.y + Math.sin(along) * t + Math.sin(perp) * (side + jitter);
-      // Military bases: grid-aligned, larger, walls will be added as perimeter road
-      if (isMilitary) {
-        b.x = Math.round(b.x / 8) * 8;
-        b.y = Math.round(b.y / 8) * 8;
-      }
-    }
-    // For bases/camps, add a wall as a local road loop around the site
-    if (isMilitary) {
-      const half = spread / 2 - 6;
+    if (!best) continue;
+    // Local street: short segment perpendicular to highway through the site (the village lane)
+    const len = site.archetype==='base'? 70 : site.archetype==='town'? 55 : 35;
+    const perp = best.angle + Math.PI/2;
+    const a = { x: site.x - Math.cos(perp)*len/2, y: site.y - Math.sin(perp)*len/2 };
+    const b = { x: site.x + Math.cos(perp)*len/2, y: site.y + Math.sin(perp)*len/2 };
+    const nodes = [
+      { id:`n${site.id}-a`, x:a.x, y:a.y, kind:'deadend' },
+      { id:`n${site.id}-c`, x:site.x, y:site.y, kind:'junction' },
+      { id:`n${site.id}-b`, x:b.x, y:b.y, kind:'deadend' },
+    ];
+    const edges = [
+      { id:`e${site.id}-0`, a:nodes[0].id, b:nodes[1].id, kind:'local', width: 9 },
+      { id:`e${site.id}-1`, a:nodes[1].id, b:nodes[2].id, kind:'local', width: 9 },
+    ];
+    // Gate connection to highway
+    const gate = { id:`n${site.id}-gate`, x:best.x, y:best.y, kind:'gate' };
+    nodes.push(gate);
+    edges.push({ id:`e${site.id}-gate`, a: nodes[1].id, b: gate.id, kind:'local', width: 8 });
+    site.streetGraph = { nodes, edges, bbox: { x0: site.x-len/2, y0: site.y-len/2, x1: site.x+len/2, y1: site.y+len/2, w:len, h:len }, roadAngle: best.angle };
+    // For bases/camps, add wall as perimeter (collidable for ground units)
+    if (site.archetype==='camp' || site.archetype==='base') {
+      const half = len/2 + 8;
       const corners = [
         { x: site.x - half, y: site.y - half },
         { x: site.x + half, y: site.y - half },
         { x: site.x + half, y: site.y + half },
         { x: site.x - half, y: site.y + half },
       ];
-      for (let i = 0; i < 4; i++) {
-        const a = corners[i], c = corners[(i + 1) % 4];
-        roads.push({ points: [a, c], width: 10, surface: 'dirt', hierarchy: 'perimeter' });
+      site.walls = [{ polygon: corners }];
+      // Also add perimeter to roads for visuals and AI blocking
+      for (let i=0;i<4;i++) {
+        const p1=corners[i], p2=corners[(i+1)%4];
+        // Leave gate gap on the side facing the highway
+        const mid = { x:(p1.x+p2.x)/2, y:(p1.y+p2.y)/2 };
+        const gateDist = Math.hypot(mid.x - best.x, mid.y - best.y);
+        if (gateDist < 18) continue; // gap for gate
+        primaryRoads.push({ points:[p1,p2], width: 8, surface:'dirt', hierarchy:'perimeter' });
       }
     }
   }
+  // Secondary: roads are now primaryRoads + village streets (already added via site.streetGraph edges)
+  // Collect all local/perimeter edges from sites into roads
+  const roads = [...primaryRoads];
+  for (const site of sites) {
+    if (!site.streetGraph) continue;
+    for (const e of site.streetGraph.edges) {
+      const an = site.streetGraph.nodes.find(n=>n.id===e.a);
+      const bn = site.streetGraph.nodes.find(n=>n.id===e.b);
+      if (!an||!bn) continue;
+      // Avoid duplicating the gate edge already added as wall
+      roads.push({ points:[{x:an.x,y:an.y},{x:bn.x,y:bn.y}], width:e.width, surface: e.kind==='alley'?'track':'dirt', hierarchy:e.kind });
+    }
+  }
+  // Use legacy sites/roads as a base, but post-process to make buildings front roads
+  const _sites = sites;
+  // (removed duplicate snap logic — already handled in the road-centric walk above)
   // Now continue with the rest of generateWorld's logic (decorations, convoys, buildings array)
   // We duplicate the tail of generateWorld here to keep it self-contained
   const decorations = generateDecorations(seed, worldSize, roads, sites, terrain);
