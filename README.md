@@ -45,7 +45,7 @@ python3 -m http.server 8000
 # then open http://localhost:8000
 ```
 
-Run the verification gate (lint + meta + sortie smoke):
+Run the verification gate (lint + meta + worldgen structure + sortie smoke):
 
 ```bash
 node tools/check.mjs
@@ -64,13 +64,13 @@ npm run format        # prettier
 npm run check         # same as node tools/check.mjs
 ```
 
-**Code layout:** `js/app.js` is the thin bootstrap/loop; sim logic lives in `js/sim/` (`state.js`, `movement.js`, `objectives.js`, `gameState.js`), world-gen in `js/terrain.js` + `js/world.js`, rendering in `js/render/` (`terrain.js`, `roads.js`, `hud.js`, `world.js`, `entities.js`), career in `js/meta.js`. See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the rebuild map.
+**Code layout:** `js/app.js` is the bootstrap/loop; sim logic lives in `js/sim/`, the geometry-first generator lives in `js/terrain.js` + `js/world/`, rendering in `js/render/`, and career state in `js/meta.js`. See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the data flow.
 
 ## Rebuild
 
 ```bash
 git clone https://github.com/OmegarusDev/Gunship.git && cd Gunship
-npm ci && node tools/check.mjs   # 33 files lint + 82 meta + 99 sortie
+npm ci && node tools/check.mjs   # syntax/invariants + meta + worldgen + sortie
 python3 -m http.server 8000      # http://localhost:8000
 ```
 

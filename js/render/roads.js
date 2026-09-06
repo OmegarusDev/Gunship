@@ -9,6 +9,8 @@ const ROAD_STYLE = {
   paved: { fill: '#7a6a4a', edge: '#5a4a2a', shoulder: 5 },
   dirt: { fill: '#9a8a5a', edge: '#6f6038', shoulder: 4 },
   track: { fill: '#a89868', edge: '#83744c', shoulder: 3 },
+  gravel: { fill: '#8d825f', edge: '#655b43', shoulder: 3 },
+  compacted: { fill: '#94845e', edge: '#6d5f40', shoulder: 4 },
 };
 
 function shadeHex(hex, amt) {
@@ -19,7 +21,15 @@ function shadeHex(hex, amt) {
   return `rgb(${r},${g},${b})`;
 }
 
-const HIER = { local: 0, secondary: 1, highway: 2 };
+const HIER = {
+  alley: 0,
+  service: 0,
+  local: 1,
+  perimeter: 1,
+  access: 2,
+  secondary: 3,
+  highway: 4,
+};
 
 export function drawRoads(ctx, cam, world) {
   if (!world || world.roads.length === 0) return;
@@ -73,7 +83,7 @@ export function drawRoads(ctx, cam, world) {
       ctx.setLineDash([4, 10]);
       tracePoly(road.points);
       ctx.setLineDash([]);
-    } else if (surface === 'track') {
+    } else if (surface === 'track' || road.hierarchy === 'alley') {
       const off = Math.max(1.5, road.width * 0.22);
       ctx.strokeStyle = withAlpha('#000000', 0.09);
       ctx.lineWidth = 1.2;
@@ -105,7 +115,7 @@ export function drawRoads(ctx, cam, world) {
 
 let _miniRoadsCache = null; // { S, c, worldKey }
 export function getMiniRoads(world, S) {
-  const key = world?.roads?.length + ':' + world?.worldSize;
+  const key = `${world?.seed}:${world?.worldGenVersion}:${world?.roads?.length}:${world?.worldSize}`;
   if (_miniRoadsCache && _miniRoadsCache.S === S && _miniRoadsCache.key === key)
     return _miniRoadsCache.c;
   const c = document.createElement('canvas');

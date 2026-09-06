@@ -65,7 +65,6 @@ export const TIMER = {
   baseTime: 180, // live — multiplied by difficulty.hunterEtaMultiplier & heatFactor
   jammerBonus: 60, // legacy — jammer meta upgrade not yet implemented
   maxJammerLevel: 3, // legacy
-  clearPenalties: { rural: 15, town: 30, camp: 20, base: 45 }, // legacy — now drives Heat, not direct timer
   fuelTankBonus: 20, // live — fuel depot chain explosion extends timer
   fuelTankerBonus: 10, // legacy — tanker subtype not separately spawned
   commandBuildingBonus: 30, // legacy — now merged into objective flow
@@ -102,11 +101,9 @@ export const PILOT_XP = [
   { level: 10, xpToNext: 5000 },
 ];
 
-export const SETTLEMENT_DETECTION_RADIUS = 80;
+/** Geometry-first Gulf generator. Older Site-based paths have been removed. */
+export const WORLD_GEN_VERSION = 4;
 
-/** World-gen version — 1 = blobs-on-roads (prototype, main), 3 = roads connect buildings (true street villages, walls for bases) */
-export const WORLD_GEN_VERSION = 3;
-
-/** Unarmed civilians who flee this far from their home site escape the
- *  battle entirely (removed, no longer block clearing the settlement). */
+/** Unarmed civilians who flee this far from their home post escape the
+ * battle entirely and no longer affect contact resolution. */
 export const CIVILIAN_ESCAPE_RADIUS = 900;

@@ -8,6 +8,7 @@
     "check": "node tools/check.mjs",
     "lint": "node tools/lint.mjs",
     "lint:eslint": "eslint js --ext .js,.mjs",
+    "check:worldgen": "node tools/worldgen-check.mjs",
     "format": "prettier --write \"**/*.{js,mjs,json,css,md}\"",
     "format:check": "prettier --check \"**/*.{js,mjs,json,css,md}\"",
     "dev": "python3 -m http.server 8000",

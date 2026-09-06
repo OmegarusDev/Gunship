@@ -26,10 +26,11 @@ export function objectiveComplete(world, enemies = []) {
   if (o.type === 'suppression') {
     let dead = 0;
     const pools = enemies.length ? enemies : [];
-    // also check site rosters that may not yet be spawned
-    if (pools.length === 0 && world.sites) {
-      for (const s of world.sites)
-        for (const e of s.enemies || []) if (e.objectiveTarget && e.state === 'dead') dead++;
+    // Also check encounter rosters that may not have spawned yet.
+    if (pools.length === 0 && world.encounters) {
+      for (const encounter of world.encounters)
+        for (const entry of encounter.roster || [])
+          if (entry.objectiveTarget && entry.state === 'dead') dead++;
     } else {
       for (const e of pools) if (e.objectiveTarget && e.state === 'dead') dead++;
     }
@@ -89,9 +90,9 @@ export function nearestExitPoint(heli) {
 export function objectiveHudText(world) {
   if (!world?.objective) return 'STANDBY';
   if (world.objective.type === 'strike')
-    return `DESTROY ${world.objective.targetSiteName || 'COMMAND TARGET'}`;
+    return `DESTROY ${world.objective.targetPlaceName || 'COMMAND TARGET'}`;
   if (world.objective.type === 'sabotage')
-    return `DISABLE ${world.objective.targetSiteName || 'RADAR RELAY'}`;
+    return `DISABLE ${world.objective.targetPlaceName || 'RADAR RELAY'}`;
   if (world.objective.type === 'intercept') return 'INTERCEPT SUPPLY CONVOY';
   if (world.objective.type === 'suppression') return 'DESTROY AIR DEFENSE UNITS';
   if (world.objective.type === 'recovery') return 'RECOVER SUPPLY CACHE';

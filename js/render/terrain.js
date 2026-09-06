@@ -33,7 +33,7 @@ export const BIOME = {
 
 function sampleTerrain(wx, wy) {
   const detail = 0.005;
-  const windAngle = 0.6;
+  const windAngle = _sharedTerrain?.windAngle ?? 0.6;
   let r, g, b;
   if (_sharedTerrain) {
     const ce = _sharedTerrain.typeAndElevation(wx, wy);

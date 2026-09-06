@@ -46,8 +46,8 @@ function objectiveComplete(world) {
   if (!o) return false;
   if (o.type === 'suppression') {
     let dead = 0;
-    for (const s of world.sites)
-      for (const e of s.enemies || []) {
+    for (const encounter of world.encounters)
+      for (const e of encounter.roster || []) {
         if (e.objectiveTarget && e.state === 'dead') dead++;
       }
     return dead >= (o.requiredCount || 0);
@@ -90,6 +90,16 @@ for (const scenarioId of Object.keys(SCENARIOS)) {
     const contract = { scenarioId, styleId: STYLE, difficultyId: DIFF, seed };
     const world = generateWorld({ seed, contract });
 
+    ok(world.worldGenVersion === 4, `[${scenarioId}/${seed}] uses WORLD_GEN v4`);
+    ok(!('sites' in world), `[${scenarioId}/${seed}] has no legacy sites collection`);
+    ok(
+      world.places.length >= 12 && world.places.length <= 18,
+      `[${scenarioId}/${seed}] physical destination count in range`
+    );
+    ok(
+      world.encounters.length >= 10 && world.encounters.length <= 14,
+      `[${scenarioId}/${seed}] contact count in range`
+    );
     ok(
       world.objective && world.objective.type === scenarioId,
       `[${scenarioId}/${seed}] objective built`
@@ -112,7 +122,8 @@ for (const scenarioId of Object.keys(SCENARIOS)) {
       );
     } else if (scenarioId === 'suppression') {
       let n = 0;
-      for (const s of world.sites) for (const e of s.enemies || []) if (e.objectiveTarget) n++;
+      for (const encounter of world.encounters)
+        for (const e of encounter.roster || []) if (e.objectiveTarget) n++;
       ok(
         n >= (world.objective.requiredCount || 0) && n > 0,
         `[${scenarioId}/${seed}] ${n} air-defense targets >= required ${world.objective.requiredCount}`
@@ -130,8 +141,8 @@ for (const scenarioId of Object.keys(SCENARIOS)) {
     } else if (scenarioId === 'intercept') {
       world.objective.target.destroyed = true;
     } else if (scenarioId === 'suppression') {
-      for (const s of world.sites)
-        for (const e of s.enemies || []) if (e.objectiveTarget) e.state = 'dead';
+      for (const encounter of world.encounters)
+        for (const e of encounter.roster || []) if (e.objectiveTarget) e.state = 'dead';
     } else if (scenarioId === 'recovery') {
       const crate = world.supplyCrates.find((c) => c.objective === true);
       if (crate) crate.collected = true;

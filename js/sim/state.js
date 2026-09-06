@@ -105,7 +105,7 @@ export function createBossState() {
     warningTimer: 0,
     spawned: false,
     defeated: false,
-    clearedSettlements: 0,
+    clearedEncounters: 0,
   };
 }
 
@@ -120,7 +120,7 @@ export function createSortieState() {
     appliedUpgrades: [],
     heat: { value: 0, tier: 0, lastContact: 0, lastEvent: '', eventTimer: 0, decayMultiplier: 1 },
     rewards: { objective: 0, supplies: 0, hunter: 0, secured: 0 },
-    stats: { kills: 0, crates: 0, sites: 0 },
+    stats: { kills: 0, crates: 0, places: 0, encounters: 0 },
     endTimer: 0,
   };
 }
@@ -145,7 +145,8 @@ export function resetSortieState(sortieState, activeContract) {
   sortieState.rewards.secured = 0;
   sortieState.stats.kills = 0;
   sortieState.stats.crates = 0;
-  sortieState.stats.sites = 0;
+  sortieState.stats.places = 0;
+  sortieState.stats.encounters = 0;
   sortieState.endTimer = 0;
 }
 
@@ -157,7 +158,7 @@ export function resetBossState(bossState, activeContract) {
   bossState.warningTimer = 0;
   bossState.spawned = false;
   bossState.defeated = false;
-  bossState.clearedSettlements = 0;
+  bossState.clearedEncounters = 0;
 }
 
 export function getHeatTier(value) {

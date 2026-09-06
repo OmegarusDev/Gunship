@@ -26,6 +26,9 @@ export let career = null;
 export let activeContract = null;
 export let sortieXpEarned = 0;
 export let sortieDollarsEarned = 0;
+export let contractBoard = [];
+export let titleMenuBoxes = [];
+export let briefingEquipmentBoxes = [];
 export function setCareer(c) {
   career = c;
 }
@@ -37,6 +40,9 @@ export function setSortieXp(n) {
 }
 export function setSortieDollars(n) {
   sortieDollarsEarned = n;
+}
+export function setContractBoard(b) {
+  contractBoard = b;
 }
 
 export const sortieState = createSortieState();

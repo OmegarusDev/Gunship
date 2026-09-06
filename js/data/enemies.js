@@ -4,7 +4,7 @@
  * loadout (weapon) is resolved on discovery based on difficulty.
  */
 
-import { ENEMY_CLASSES } from '../world.js';
+import { ENEMY_CLASSES } from './enemyClasses.js';
 import { mulberry32, seededRng, weightedPick, randFloat } from '../rng.js';
 
 // ══════════════════════════════════════════════════════════════
@@ -145,17 +145,25 @@ export function createEnemy(className, x, y, difficulty, seed, entry = null) {
   };
 }
 
-/** Create an enemy from a worldgen roster entry. */
-export function createEnemyFromRoster(entry, villageX, villageY, difficulty) {
-  const seed = `${entry.id || entry.className}:${difficulty}:${Math.floor(villageX)}:${Math.floor(villageY)}`;
-  const x = villageX + entry.offsetX;
-  const y = villageY + entry.offsetY;
+/**
+ * Create an enemy from a worldgen roster entry.
+ *
+ * V4 encounter rosters carry absolute positions. The origin/offset fallback
+ * keeps old generated worlds usable while the compatibility flag exists.
+ */
+export function createEnemyFromRoster(entry, originX = 0, originY = 0, difficulty = 0) {
+  const x = Number.isFinite(entry.x) ? entry.x : originX + (entry.offsetX || 0);
+  const y = Number.isFinite(entry.y) ? entry.y : originY + (entry.offsetY || 0);
+  const seed = `${entry.id || entry.className}:${difficulty}:${Math.floor(x)}:${Math.floor(y)}`;
   const enemy = createEnemy(entry.className, x, y, difficulty, seed, entry);
   if (enemy) {
-    // Home site position — fleeing civilians escape once beyond
-    // CIVILIAN_ESCAPE_RADIUS from here.
+    // Home post — fleeing civilians escape once beyond the configured radius.
     enemy.homeX = x;
     enemy.homeY = y;
+    enemy.encounterId = entry.encounterId || null;
+    enemy.placeId = entry.placeId || null;
+    enemy.districtId = entry.districtId || null;
+    enemy.parcelId = entry.parcelId || null;
   }
   return enemy;
 }

@@ -189,8 +189,13 @@ function buildOases(wadis, skeleton, half, rng) {
 
 export function createTerrain(seed, worldSize = 6000) {
   const rng = mulberry32(seed >>> 0);
+  const climateRng = mulberry32((seed ^ 0x47a1f3d5) >>> 0);
   const noise = createNoise(seed);
   const half = worldSize / 2;
+  const climate = {
+    windAngle: climateRng() * Math.PI * 2,
+    aridity: 0.72 + climateRng() * 0.24,
+  };
 
   const skeleton = buildSkeleton(rng, half, worldSize);
   const wadis = buildWadis(skeleton, half, rng, noise);
@@ -320,6 +325,37 @@ export function createTerrain(seed, worldSize = 6000) {
     return classify(x, y).type;
   }
 
+  function slope(x, y, span = 80) {
+    const ex = elevation(x + span, y) - elevation(x - span, y);
+    const ey = elevation(x, y + span) - elevation(x, y - span);
+    return Math.hypot(ex, ey) / (span * 2);
+  }
+
+  function floodRisk(x, y) {
+    const wadi = nearestWadi(x, y);
+    const oasis = nearestOasis(x, y);
+    const channelRisk = Math.exp(-wadi.dist / (wadi.order === 1 ? 180 : 110));
+    const oasisRisk = Math.exp(-oasis / 150) * 0.45;
+    const basinDist = Math.hypot(x - skeleton.basin.x, y - skeleton.basin.y);
+    const basinRisk = Math.exp(-basinDist / Math.max(300, skeleton.basin.radius)) * 0.35;
+    return clamp(channelRisk + oasisRisk + basinRisk, 0, 1);
+  }
+
+  function buildability(x, y) {
+    const sample = classify(x, y);
+    if (sample.type === TERRAIN_TYPES.ROCK || sample.type === TERRAIN_TYPES.WADI) return 0;
+    const grade = slope(x, y);
+    const stable =
+      sample.type === TERRAIN_TYPES.HARDPACK
+        ? 1
+        : sample.type === TERRAIN_TYPES.GRAVEL
+          ? 0.86
+          : sample.type === TERRAIN_TYPES.SAND
+            ? 0.64
+            : 0.35;
+    return clamp(stable * (1 - Math.min(1, grade / 0.8)) * (1 - floodRisk(x, y) * 0.7), 0, 1);
+  }
+
   // ── Settlement suitability — for world-gen site placement ──
   // High near water, moderate elevation, on stable ground.
   function suitability(x, y) {
@@ -344,6 +380,8 @@ export function createTerrain(seed, worldSize = 6000) {
     worldSize,
     half,
     // geographic skeleton (for world-gen)
+    climate,
+    windAngle: climate.windAngle,
     dip: skeleton.dip,
     highs: skeleton.highs,
     basin: skeleton.basin,
@@ -356,6 +394,9 @@ export function createTerrain(seed, worldSize = 6000) {
     type,
     typeAndElevation: classify,
     suitability,
+    buildability,
+    floodRisk,
+    slope,
     nearestWadi,
     nearestOasis,
   };

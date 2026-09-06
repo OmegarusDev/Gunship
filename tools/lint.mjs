@@ -69,6 +69,17 @@ try {
   console.error('  (could not read js/app.js for invariants)', e.message);
 }
 
+try {
+  const runtimeSource = files
+    .filter((file) => file.startsWith('js/'))
+    .map((file) => readFileSync(file, 'utf8'))
+    .join('\n');
+  check(!runtimeSource.includes('world.sites'), 'runtime has no world.sites dependency');
+  check(!/\bsiteId\b/.test(runtimeSource), 'runtime ownership uses placeId/encounterId, not siteId');
+} catch (e) {
+  console.error('  (could not inspect worldgen ownership invariants)', e.message);
+}
+
 // Optional eslint if installed
 let hasEslint = false;
 try {

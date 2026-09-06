@@ -1,6 +1,6 @@
 # GUNSHIP: FREEDOM PROTOCOL — COMPLETE GAME DESIGN DOCUMENT
 
-> **Version:** 2.0 (Final)
+> **Version:** 2.1 (Geometry-First Worldgen V4)
 > **Purpose:** Complete reference for any agent implementing this game. Every system, formula, data structure, and design decision is documented here. When in doubt, this document is authoritative.
 > **Tech:** Vanilla HTML + CSS + ES modules. Zero dependencies. 2D Canvas with faux-3D projection. No WebGL (yet — 3D conversion planned post-prototype).
 > **Setting:** 1990s Gulf War-inspired, fictional desert country. The player flies attack helicopters for the Coalition for Democratic Liberation (CDL), a well-intentioned but destructive military force "liberating" the region from terrorist cells. The sardonic framing: we believe we're the good guys. The locals call us the problem.
@@ -15,7 +15,7 @@
 4. [Technical Architecture](#4-technical-architecture)
 5. [Rendering System](#5-rendering-system)
 6. [World Generation](#6-world-generation)
-7. [Settlement Generation](#7-settlement-generation)
+7. [Place & Encounter Generation](#7-place--encounter-generation)
 8. [Gunships](#8-gunships)
 9. [Weapon System](#9-weapon-system)
 10. [Enemy System](#10-enemy-system)
@@ -73,7 +73,7 @@ A 2D top-down/isometric roguelite helicopter combat game. The player pilots atta
 
 1. **Zero assets** — everything procedurally generated on 2D canvas
 2. **Data-driven entities** — adding content = adding data entries, no new classes
-3. **Risk/reward** — clearing settlements makes boss come faster but gives loot
+3. **Risk/reward** — securing hostile contacts grants rewards but raises Heat and hastens the response
 4. **Infamy tension** — higher Infamy = stronger weapon AND stronger boss
 5. **Gunship progression** — each new gunship is a tangible upgrade with new capabilities
 6. **Environmental storytelling** — the player is the villain, never explicitly stated
@@ -95,7 +95,7 @@ A 2D top-down/isometric roguelite helicopter combat game. The player pilots atta
 [SPAWN at world center]
   |
   v
-[EXPLORE] ---> [DISCOVER SETTLEMENT] ---> [ENGAGE ENEMIES]
+[EXPLORE] ---> [IDENTIFY PLACE / CONTACT] ---> [ENGAGE ENEMIES]
   |                                            |
   |    <--- Infamy level-up popup (pause) <----+
   |                                            |
@@ -126,7 +126,7 @@ A 2D top-down/isometric roguelite helicopter combat game. The player pilots atta
 - Each Sortie = one procedurally generated world
 - World exists until the player dies OR defeats the boss
 - Boss arrives after a timer (base time + modifiers)
-- Clearing settlements ACCELERATES the timer (faster boss)
+- Securing encounters raises Heat, which accelerates the Hunter ETA
 - Destroying fuel depots EXTENDS the timer (+20s per depot)
 - Infamy level makes the boss STRONGER (more bodyguards, +5% HP per Infamy level)
 - Boss fight is mandatory — Sortie ends with boss encounter (win or lose)
@@ -135,39 +135,7 @@ A 2D top-down/isometric roguelite helicopter combat game. The player pilots atta
 
 ### 2.2 Boss Timer Mechanic
 
-```
-TIMER FORMULA:
-  remainingTime = baseTime + jammerBonus + fuelBonus - settlementPenalty
-
-Where:
-  baseTime = 180 seconds (3 minutes)
-  jammerBonus = 60 * jammerLevel (meta-upgrade, 0-3 levels)
-  fuelBonus = 20 * fuelDepotsDestroyed (fuel tanks) + 10 * fuelTankersDestroyed
-  settlementPenalty = varies by settlement type (see below)
-```
-
-```javascript
-BOSS_TIMER = {
-  baseTime: 180,
-  jammerBonus: 60,
-  maxJammerLevel: 3,
-
-  clearPenalties: {
-    rural: 15,
-    town: 30,
-    camp: 20,
-    base: 45,
-  },
-
-  fuelTankBonus: 20,
-  fuelTankerBonus: 10,
-  commandBuildingBonus: 30,
-  radarTowerBonus: 30,
-
-  bossSpawnDistance: 80,
-  bossWarningTime: 5,
-};
-```
+The Hunter uses one real-time ETA. Its clock rate rises with Heat and contract difficulty/style; securing an encounter adds Heat without changing the identity of its containing place. Fuel-target bonuses extend the remaining ETA. There is no whole-settlement clear penalty.
 
 ---
 
@@ -183,7 +151,7 @@ The CDL is a coalition of advanced military powers who genuinely believe their i
 
 **The sardonic frame:** The player IS the villain, but the game never explicitly tells you. The evidence is environmental:
 
-- Settlements you clear have no weapons in many of them
+- Civilian places can be neutral or only partly occupied; place identity never proves hostility
 - "Confirmed hostiles" who were fleeing (the unarmed enemy type)
 - The Infamy mechanic — the locals are afraid of YOU
 - Radio chatter that's cheerful about destruction
@@ -205,7 +173,7 @@ The CDL is a coalition of advanced military powers who genuinely believe their i
 
 Text pop-ups that appear at key moments. Zero assets, pure flavor.
 
-**On discovering a settlement:**
+**On identifying a place or discovering a contact:**
 
 ```
 "SECTOR 7: Al-Hilal checkpoint. Radio chatter: 'They're coming. Hold position.'"
@@ -214,7 +182,7 @@ Text pop-ups that appear at key moments. Zero assets, pure flavor.
 "SECTOR 3: [Arabic name]. Local militia. Light arms only."
 ```
 
-**On clearing a settlement:**
+**On securing an encounter:**
 
 ```
 "Area secured. Freedom index updated. No civilian casualties reported."
@@ -239,34 +207,13 @@ Text pop-ups that appear at key moments. Zero assets, pure flavor.
 "Signal lost. Guardian Angel [name] made the ultimate sacrifice."
 ```
 
-### 3.4 Settlement Naming
+### 3.4 Place Naming and Labels
 
-Arabic-sounding procedural names. Generated from syllable combinations:
-
-```javascript
-SYLLABLES = {
-  prefix: ['al', 'bi', 'kha', 'sha', 'mal', 'dar', 'kar', 'bur', 'suk', 'qal'],
-  root: ['am', 'ir', 'an', 'id', 'uk', 'ur', 'is', 'ah', 'un', 'at'],
-  suffix: ['abad', 'istan', 'iya', 'ani', 'pur', 'garh', 'abad', 'iyya'],
-};
-// Generate: prefix + root + suffix = "al-amabad", "kar-irani", "suk-istan"
-```
-
-Settlement TYPE labels:
-
-- Rural: "hamlet", "settlement", "outpost"
-- Town: "town", "district", "quarter"
-- Camp: "camp", "bivouac", "position"
-- Base: "facility", "compound", "stronghold"
-- Fuel Depot: "depot", "fuel point", "storage"
+`world.places` is named only after its physical geometry exists. Names are deterministic, fictional, and grounded in the setting; they never borrow real-world locations. Type labels describe the generated extent—town, village, farm, roadside services, industrial or fuel compound, checkpoint, military position, or SAM position—rather than assigning allegiance.
 
 ### 3.5 High-Priority Targets
 
-Certain structures have a reddish tint to distinguish them:
-
-- **Command buildings** (destroying them +30s to boss timer)
-- **Radar towers** (destroying them +30s to boss timer)
-- These are "high-value targets" — the player learns to recognize them visually
+Generated structures and features can carry semantic tags such as `command` or `radar`. Contracts select targets through those tags, and restrained visual treatment helps the player read the target itself. A tagged target does not make every structure or person in its containing place hostile.
 
 ---
 
@@ -274,55 +221,25 @@ Certain structures have a reddish tint to distinguish them:
 
 ### 4.1 Project Structure
 
-> **Note (2026-08 SHIPPED vs GDD):** The tree below is the _aspirational_ GDD v2. The _shipped_ tree follows it. Where they differ, code is truth.
-
-**Aspirational (GDD v2):**
+The world-generation portion of the shipped static ES-module tree is:
 
 ```
 gunship/
-  index.html
-  css/main.css
   js/
-    app.js, config.js, rng.js, input.js, camera.js, view25.js, prims25.js, drawUtil.js,
-    fx.js, palette.js, terrain.js, settlements.js, buildings.js, entities.js, helicopter.js,
-    gunships.js, enemies.js, projectiles.js, combat.js, infamy.js, boss.js, signal.js,
-    pilots.js, pilotSkills.js, equipment.js, modifiers.js, rewards.js, loot.js, minimap.js,
-    hud.js, lore.js, save.js
-    screens/title.js, briefing.js, hangar.js, pilotRecord.js, sortieSummary.js, infamyLevelUp.js
-    data/...
-    sim/world.js, sim.js, systems/movement.js, combat.js, ai.js, boss.js, signal.js, ...
-```
-
-**Shipped (2026-08) — actual filesystem:**
-
-```
-gunship/
-  index.html
-  css/main.css
-  js/
-    app.js                   # Bootstrap, screen router, loop (now delegates to sim/render)
-    config.js                # Tunables + TIMER/INFAMY (some fields legacy, see §11)
-    rng.js, noise.js, input.js, camera.js, view25.js, prims25.js, drawUtil.js, palette.js
-    terrain.js               # SSOT desert model (dip→wadis→oases)
-    world.js                 # Roads (A* MST), sites, convoys, decorations
-    contracts.js             # Scenario×Style×Difficulty orthogonal contracts
-    meta.js                  # Career, pilot, skill grid, hangar, persistence
-    upgrades.js              # Fear field-upgrade cards (8)
-    data/enemies.js          # Class→loadout resolution
-    screens_meta.js          # Hangar + Pilot Record canvas screens
-    appBridge.js             # Shared corner-bracket / back-button helpers
-    sim/
-      state.js               # SimState factories + FEAR/HEAT constants + hunterClockRate
-      movement.js            # Road-aware steering, terrain speed, convoy arc-length
-      objectives.js          # isTargetAlive, objectiveComplete, canExtract, focus
+    terrain.js               # Terrain single source of truth
+    world.js                 # Public generateWorld facade; v4 only
+    world/
+      geometry.js            # Polygon/polyline kernel and phase seed derivation
+      region.js              # Regional profiles, resource axes, destination demand
+      transport.js           # Connected demand-driven regional transport
+      places.js              # Place grammars and authoritative physical geometry
+      encounters.js          # Independent occupation/contact generation
+      generateV4.js          # Pipeline coordinator and semantic target planner
+    contracts.js             # Scenario target tags, style, and difficulty
     render/
-      terrain.js             # GPU-blitted terrain grid + grain/mottle/macro overlays
-      roads.js               # Hierarchy-aware road overdraw + minimap cache
-      hud.js                 # hudPlate, plateHeader, hudBar, offscreen markers
+      world.js               # Land use, place geometry, buildings, labels, contacts
   tools/
-    check.mjs                # Gate: lint + meta-check + sortie-smoke
-    lint.mjs                 # Zero-dep syntax + invariants + optional eslint
-    meta-check.mjs, sortie-smoke.mjs
+    worldgen-check.mjs       # Deterministic multi-seed invariant sweep
 ```
 
 ### 4.2 Game Loop
@@ -427,22 +344,18 @@ function createEntity(type, x, y, overrides = {}) {
 ### 4.6 World Bounds
 
 ```javascript
-// ARCHITECTURE DECISION: Invisible wall at map edges, camera clamps.
-// WHY: Clean, consistent behavior. Player cannot fly off the map.
-// Camera keeps helicopter in view at all times.
-
-const WORLD_BOUNDS = {
-  minX: 0,
-  minY: 0,
-  maxX: WORLD_SIZE * TILE_SIZE,
-  maxY: WORLD_SIZE * TILE_SIZE,
+const half = worldSize * 0.5;
+world.region.bounds = {
+  minX: -half,
+  minY: -half,
+  maxX: half,
+  maxY: half,
+  width: worldSize,
+  height: worldSize,
 };
-
-function clampToWorld(entity) {
-  entity.x = Math.max(WORLD_BOUNDS.minX, Math.min(WORLD_BOUNDS.maxX, entity.x));
-  entity.y = Math.max(WORLD_BOUNDS.minY, Math.min(WORLD_BOUNDS.maxY, entity.y));
-}
 ```
+
+V4 uses continuous world-space units centered on the origin; a typical 6000u sortie spans approximately -3000u to +3000u on each axis. Generated physical geometry stays inside `world.region.bounds`. The sortie/extraction rules, not a tile-grid site model, govern player behavior at the edge.
 
 ### 4.7 Collision Shapes
 
@@ -476,29 +389,13 @@ function applyDamage(target, amount) {
 }
 ```
 
-### 4.9 Settlement Detection Radius
+### 4.9 Place and Encounter Discovery
 
-```javascript
-// ARCHITECTURE DECISION: Settlements detected at ~80 tiles from player.
-// WHY: Gives player time to see settlement on minimap, plan approach,
-// and decide whether to engage. Not so far that everything is revealed.
+Places and encounters are discovered independently. Physical land use, roads, parcels, buildings, and enclosures already exist and remain visible as geography; proximity controls restrained place labels. Each encounter owns its tactical discovery radius and state. Revealing a contact can mark the containing place as known, but it does not turn the whole place hostile.
 
-const SETTLEMENT_DETECTION_RADIUS = 80; // tiles
-```
+### 4.10 Encounter Activation Timing
 
-### 4.10 Enemy Spawn Timing
-
-```javascript
-// ARCHITECTURE DECISION: Enemies generated on discovery, not upfront.
-// WHY: Settlement exists but has no enemies until player enters detection
-// radius. This means early discovery = easier enemies (lower Infamy).
-// Late discovery = tougher enemies (higher Infamy, higher difficulty).
-
-function onSettlementDiscovered(settlement, player, difficulty) {
-  settlement.discovered = true;
-  settlement.enemies = generateEnemyRoster(settlement.archetype, difficulty, player.infamyLevel);
-}
-```
+All `world.encounters` and their rosters are generated deterministically with the world. Runtime proximity may reveal a contact and activate precomputed hidden members, but discovery never rolls, rescales, or changes its roster. Outdoor contacts can be initialized when the sortie begins. Enemies carry `encounterId` and optional `placeId`.
 
 ---
 
@@ -581,14 +478,14 @@ class FxSystem {
    ctx.save()
    ctx.translate(-camera.x + canvas.width/2, -camera.y + canvas.height/2)
    ctx.scale(camera.zoom, camera.zoom)
-3. Render terrain chunks (cached offscreen canvases)
-4. Render settlement buildings (sorted by Y for depth)
-5. Render ground enemies (sorted by Y)
-6. Render helicopter
-7. Render projectiles (bullets, rockets)
-8. Render VFX/particles (explosions, trails, damage numbers)
+3. Render terrain from the shared terrain model
+4. Render land use and ground features (fields, canals, yards, walls, berms, fences)
+5. Render regional roads and local streets
+6. Extrude oriented building footprints, sorted for depth
+7. Render ground entities, helicopter, projectiles, and VFX
+8. Render restrained place labels and discovered tactical contacts
 9. ctx.restore()
-10. Render minimap (bottom-right corner)
+10. Render minimap with place extents and a separate contact layer
 11. Render HUD overlay (HP, Infamy, rocket ammo, equipment cooldown)
 12. Render screen-edge effects (boss direction arrow, low HP vignette)
 ```
@@ -615,256 +512,155 @@ function resizeCanvas(canvas) {
 
 ## 6. WORLD GENERATION
 
-### 6.1 Terrain System
+### 6.1 V4 Authority and Boundaries
 
-```javascript
-// ARCHITECTURE DECISION: Tile-based terrain with chunk caching.
-// WHY: Tiles are simple to generate, render, and query for collision/pathfinding.
-// Chunks cache rendered output to offscreen canvases.
+WORLD_GEN v4 is the sole final generator. It is implemented as static vanilla ES modules and receives a deterministic sortie seed, contract, and terrain model. `js/world.js` is only the public facade; it does not dispatch to legacy generators.
 
-const TILE_SIZE = 32;
-const CHUNK_SIZE = 32;
-const WORLD_SIZE = 500; // tiles per axis
-const CHUNKS_PER_AXIS = Math.ceil(WORLD_SIZE / CHUNK_SIZE); // ~16
-```
+- `js/terrain.js` remains the single source of truth for elevation, drainage, wadis, oases, and terrain queries.
+- `js/world/geometry.js` provides dependency-free world-space polygon and polyline operations.
+- `js/world/region.js` chooses the regional profile and emits resource axes, land use, and typed destination demand.
+- `js/world/transport.js` creates the connected regional road hierarchy and access routes.
+- `js/world/places.js` applies place grammars and creates districts, local streets, parcels, buildings, and enclosures.
+- `js/world/encounters.js` creates occupation and tactical contacts independently of place identity.
+- `js/world/generateV4.js` coordinates the phases and resolves a semantic contract target.
+- `tools/worldgen-check.mjs` sweeps seeds against the measurable v4 invariants.
 
-### 6.2 Terrain Types
-
-```javascript
-const TERRAIN = {
-  SAND: { id: 0, color: '#d4a76a', speedMod: 1.0 },
-  HARDPACK: { id: 1, color: '#c4975a', speedMod: 1.0 },
-  ROCK: { id: 2, color: '#8b7355', speedMod: 0.8 },
-  ROAD: { id: 3, color: '#6b5b4a', speedMod: 1.3 },
-  WADI: { id: 4, color: '#7a9bb5', speedMod: 0.5 },
-  OASIS: { id: 5, color: '#4a8b5a', speedMod: 0.7 },
-  DUNES: { id: 6, color: '#e8c88a', speedMod: 0.6 },
-};
-```
-
-### 6.3 Terrain Generation Algorithm
+### 6.2 Deterministic Causal Pipeline
 
 ```
-Step 1: Generate elevation noise (3 octaves, seeded)
-Step 2: Map elevation to terrain type
-  - < 0.2: WADI (dry riverbeds)
-  - 0.2-0.4: HARDPACK (flat desert floor)
-  - 0.4-0.6: SAND (standard desert)
-  - 0.6-0.8: DUNES (rolling sand dunes)
-  - > 0.8: ROCK (mountain ridges)
-Step 3: Post-process
-  - Carve roads between settlements
-  - Place oases at wadi intersections
-  - Smooth terrain transitions
-  - Ensure world center is always HARDPACK (spawn point)
-Step 4: Cache each chunk to offscreen canvas
+terrain regional profile
+  -> water / irrigation / relief / industry-resource axes
+  -> typed destination anchors
+  -> connected demand-driven transport
+  -> grounded place grammars
+  -> districts / streets / frontage parcels / buildings / walls
+  -> derived named world.places index
+  -> independent world.encounters occupation/contact layer
+  -> semantic contract target planner
 ```
+
+Every phase derives a stable random stream from the sortie seed. The same seed and contract must produce the same geometry, IDs, encounters, and objective. World generation never uses `Math.random`.
+
+Destination anchors express why and where physical development is demanded, including scale and orientation. They are generation inputs, not hostile entities, map markers, or a replacement for geometry.
+
+### 6.3 Grounded Regional Profiles
+
+Each sortie selects one fictional 1990s Gulf regional profile:
+
+- **Alluvial palm/irrigation:** settled alluvial ground organized by water control, canals, fields, and palm groves.
+- **Wadi/piedmont:** villages, farms, crossings, and defensive positions respond to seasonal drainage, gravel fans, relief, and high ground.
+- **Desert logistics:** long-haul roads support roadside services, industrial and fuel compounds, checkpoints, depots, and dispersed defenses.
+
+Water, irrigation, relief, and industrial/resource axes constrain destination suitability, orientation, land use, and transport demand. They prevent a uniform scatter of interchangeable locations.
+
+### 6.4 Demand-Driven Transport
+
+The regional network starts from external route demand and connects every typed destination through an appropriate road hierarchy. Major roads serve towns and freight movement; secondary roads and access tracks serve villages, farms, compounds, checkpoints, and defenses. Connectivity is explicit and measurable. Roads do not exist merely to join centroids, and the final network is not an MST.
+
+### 6.5 Runtime World Model
+
+The generated runtime record is:
+
+```
+world.region
+world.landUse
+world.roads
+world.parcels
+world.buildings
+world.features
+world.places
+world.encounters
+world.convoys
+world.supplyCrates
+world.fuelDepots
+world.radarSites
+world.objective
+```
+
+Physical geometry is authoritative. `world.places` is a named spatial index derived from that geometry, while `world.encounters` is an independent occupation/contact layer. There is no `world.sites` and no `siteId`.
 
 ---
 
-## 7. SETTLEMENT GENERATION
+## 7. PLACE & ENCOUNTER GENERATION
 
-### 7.1 Settlement Archetypes
+### 7.1 Geometry-First Place Model
 
-Settlements are NOT rigid templates. They emerge from a **rule-based procedural system**.
+A place is built as physical fabric, not as an archetype attached to a point. The grammar first establishes its extent and access, then generates districts and local streets, subdivides frontage parcels, places oriented building footprints, and adds walls, fences, yards, canals, fields, groves, berms, and revetments as appropriate.
 
-```javascript
-ARCHETYPES = {
-  rural: {
-    name: 'Rural Settlement',
-    buildingCount: [1, 5],
-    enemyCount: [1, 8],
-    enemyComposition: { unarmed: 0.7, rifleman: 0.25, rocketeer: 0.05 },
-    buildingTypes: ['hovel', 'shed', 'pen', 'well'],
-    layoutRules: { spacing: [1, 3], organic: true, roads: false, clustering: 0.3 },
-    fearReward: [5, 15],
-    dollarReward: [10, 50],
-    clearBonus: [5, 10],
-  },
+The completed geometry is authoritative. `world.places` is derived afterward as a named index for lookup, labels, and optional encounter association. A place centroid is only a convenience for indexing and text placement; it is never the thing rendered, targeted, occupied, or cleared.
 
-  town: {
-    name: 'Town',
-    buildingCount: [6, 20],
-    enemyCount: [10, 40],
-    enemyComposition: { unarmed: 0.5, rifleman: 0.35, rocketeer: 0.15 },
-    buildingTypes: ['house', 'shop', 'market', 'mosque', 'apartment'],
-    layoutRules: {
-      spacing: [1, 2],
-      organic: false,
-      roads: true,
-      clustering: 0.6,
-      coreBuilding: ['mosque', 'market'],
-    },
-    fearReward: [20, 60],
-    dollarReward: [50, 200],
-    clearBonus: [10, 25],
-  },
+### 7.2 Grounded Place Grammars
 
-  camp: {
-    name: 'Military Camp',
-    buildingCount: [3, 8],
-    enemyCount: [5, 15],
-    enemyComposition: { unarmed: 0, rifleman: 0.6, rocketeer: 0.4 },
-    buildingTypes: ['tent', 'commandTent', 'watchtower', 'vehicleBay', 'sandbagWall'],
-    layoutRules: {
-      spacing: [1, 2],
-      organic: false,
-      roads: false,
-      perimeter: true,
-      center: 'commandTent',
-    },
-    fearReward: [15, 40],
-    dollarReward: [30, 120],
-    clearBonus: [8, 15],
-  },
+- **Compact courtyard town:** one dense 500–900u urban extent with connected districts, irregular local streets, frontage parcels, perimeter walls, and courtyard-oriented building groups.
+- **Canal/ribbon village or farm:** 180–400u development follows a road, canal, wadi edge, or productive strip; fields, irrigation, and palm groves explain the built form.
+- **Roadside services:** small pull-offs, service yards, workshops, and fuel access face the transport corridor.
+- **Industrial/fuel compound:** graded yards, storage, tanks, utility structures, fences, walls, and controlled access form a coherent operational footprint.
+- **Checkpoint:** barriers, cover, inspection space, and short access geometry constrict an actual route.
+- **Military or SAM position:** dispersed elements use spacing, berms, revetments, and access tracks rather than a dense town-like cluster.
 
-  base: {
-    name: 'Military Base',
-    buildingCount: [8, 30],
-    enemyCount: [20, 80],
-    enemyComposition: {
-      unarmed: 0,
-      rifleman: 0.4,
-      rocketeer: 0.3,
-      technical: 0.15,
-      aa_gun: 0.1,
-      artillery: 0.05,
-    },
-    buildingTypes: [
-      'bunker',
-      'commandCenter',
-      'barracks',
-      'hangar',
-      'ammoDump',
-      'radarDish',
-      'motorPool',
-    ],
-    layoutRules: {
-      spacing: [1, 1],
-      organic: false,
-      roads: true,
-      perimeter: true,
-      grid: true,
-      gate: true,
-    },
-    fearReward: [40, 120],
-    dollarReward: [100, 500],
-    clearBonus: [20, 50],
-  },
+These are grammars, not rigid templates. Terrain, regional axes, access direction, parcel shape, and seed vary each result while preserving its function.
 
-  fuelDepot: {
-    name: 'Fuel Depot',
-    buildingCount: [3, 8],
-    enemyCount: [5, 20],
-    enemyComposition: { unarmed: 0.1, rifleman: 0.5, rocketeer: 0.4 },
-    buildingTypes: ['fuelTank', 'storageShed', 'guardTower', 'pipeNetwork'],
-    layoutRules: { spacing: [2, 4], organic: false, roads: true, explosive: true },
-    fearReward: [10, 30],
-    dollarReward: [20, 80],
-    clearBonus: [5, 12],
-    specialMechanic: 'fuelDepot',
-  },
-};
-```
+### 7.3 Sortie Content Rhythm
 
-### 7.2 Building Definitions
+A typical 6000u sortie contains:
 
-```javascript
-BUILDINGS = {
-  hovel: { width: 2, height: 2, hp: 10, destructible: true },
-  mosque: { width: 4, height: 4, hp: 30, destructible: true },
-  fuelTank: {
-    width: 2,
-    height: 2,
-    hp: 15,
-    destructible: true,
-    explosive: true,
-    explosionRadius: 60,
-    explosionDamage: 50,
-    onDeath: 'extendBossTimer',
-  },
-  watchtower: { width: 1, height: 1, hp: 20, destructible: true, spawnsEnemy: 'rocketeer' },
-  commandCenter: {
-    width: 3,
-    height: 3,
-    hp: 40,
-    destructible: true,
-    highPriority: true,
-    timerBonus: 30,
-  },
-  radarDish: {
-    width: 2,
-    height: 2,
-    hp: 25,
-    destructible: true,
-    highPriority: true,
-    timerBonus: 30,
-  },
-  bunker: { width: 3, height: 3, hp: 60, destructible: true },
-  barracks: { width: 4, height: 3, hp: 35, destructible: true },
-  hangar: { width: 5, height: 4, hp: 45, destructible: true },
-  ammoDump: {
-    width: 2,
-    height: 2,
-    hp: 20,
-    destructible: true,
-    explosive: true,
-    explosionRadius: 80,
-    explosionDamage: 80,
-  },
-  tent: { width: 2, height: 2, hp: 8, destructible: true },
-  commandTent: { width: 3, height: 3, hp: 15, destructible: true, highPriority: true },
-  sandbagWall: { width: 1, height: 1, hp: 25, destructible: true },
-  motorPool: { width: 4, height: 3, hp: 30, destructible: true },
-  storageShed: { width: 2, height: 2, hp: 12, destructible: true },
-  pipeNetwork: { width: 1, height: 1, hp: 8, destructible: true },
-  vehicleBay: { width: 3, height: 3, hp: 20, destructible: true },
-  house: { width: 2, height: 2, hp: 15, destructible: true },
-  shop: { width: 2, height: 2, hp: 12, destructible: true },
-  market: { width: 3, height: 3, hp: 20, destructible: true },
-  apartment: { width: 3, height: 4, hp: 30, destructible: true },
-  well: { width: 1, height: 1, hp: 10, destructible: true },
-  pen: { width: 2, height: 2, hp: 5, destructible: true },
-  shed: { width: 1, height: 1, hp: 8, destructible: true },
-};
-```
+- **12–18 physical destinations**
+- **10–14 tactical contacts**
+- **one 500–900u town**
+- **2–4 villages or compounds measuring 180–400u**
+- smaller farms, roadside services, checkpoints, depots, industrial/fuel compounds, dispersed defenses, and mobile convoys
 
-### 7.3 Settlement Placement Algorithm
+The rhythm alternates readable civilian fabric, productive land, logistics infrastructure, and tactical positions. It must not become an evenly spaced field of hostile markers.
 
-```
-1. Generate 15-25 settlement positions on the map
-   - Avoid water/wadi tiles
-   - Minimum 30-tile gap between settlements
-   - More settlements toward center (density falloff from center)
+### 7.4 Encounters Are Independent
 
-2. Assign archetype based on distance from center:
-   - 0-50 tiles:  rural only
-   - 50-100 tiles: rural + camp
-   - 100-200 tiles: town + camp
-   - 200-300 tiles: base + fuel depot appear
-   - 300+ tiles: all types, max difficulty
+`world.encounters` answers who is present and what tactical contact exists; it does not define the place beneath it.
 
-3. Generate settlement contents on DISCOVERY (not upfront):
-   - When player enters detection radius (~80 tiles)
-   - Enemy roster generated at discovery time
-   - Scaled by distance, Infamy level, and pilot level
-```
+- Hostility is never a property of a whole place.
+- Civilian towns, villages, farms, and compounds can be neutral or partly occupied.
+- Military or industrial places can contain hostile encounters.
+- One place can contain zero, one, or multiple encounters.
+- Encounters and rosters are generated with the world. Discovery only reveals or activates precomputed contact data.
+- Enemies reference `encounterId` and optional `placeId`; no entity uses `siteId`.
+- Clearing resolves an encounter and its reward/Heat effect. Towns and other places are not “cleared.”
 
-### 7.4 Settlement Procedural Layout Generation
+Mobile convoys remain route-bound contacts and can satisfy convoy semantics without being converted into a stationary place.
 
-```
-Pass 1: Skeleton
-  - Place core building(s) first
-  - For grid layouts: generate road grid
-  - For organic layouts: Poisson disk sampling
-  - Place perimeter structures if applicable
+### 7.5 Semantic Mission Placement
 
-Pass 2: Fill
-  - Fill remaining space with secondary buildings
-  - Apply density falloff (denser near center)
-  - Add props (fences, crates, vehicles as decoration)
-  - Place enemy spawn points
-```
+Contracts request meaning, not a location class. After geometry and encounters exist, the target planner selects generated records tagged with:
+
+- `command`
+- `radar`
+- `airDefense`
+- `supply`
+- `convoyRoute`
+
+The resulting `world.objective` references the matching physical feature, encounter, supply record, or route. Selection never uses a place centroid or archetype as a substitute target.
+
+### 7.6 Discovery and Visual Language
+
+World rendering communicates the generated extents directly:
+
+- show fields, canals, groves, yards, parcels, walls, fences, berms, and revetments;
+- extrude oriented building footprints instead of replacing them with generic icons;
+- use restrained proximity labels tied to the derived place index;
+- render tactical contacts as a separate layer with their own discovery and cleared state;
+- never draw large centroid marker shapes over a place.
+
+The minimap follows the same rule: muted place footprints and roads describe geography, while contacts, convoys, objectives, and the player use distinct tactical symbols.
+
+### 7.7 Measurable Invariants
+
+`tools/worldgen-check.mjs` sweeps deterministic seeds and verifies:
+
+1. Same seed and contract produce the same world output.
+2. A 6000u world stays within the destination, contact, town, village/compound, and scale bands in §7.3.
+3. Every physical destination has connected transport access appropriate to its grammar.
+4. Authoritative polygons, polylines, parcels, footprints, and enclosure geometry are valid and stay within world bounds.
+5. `world.places` is derived from physical geometry and all encounter/place references are valid.
+6. No generated record exposes `world.sites`, `siteId`, or a place-level hostility/cleared flag.
+7. Every contract objective resolves through the required semantic tags.
 
 ---
 
@@ -1682,7 +1478,7 @@ Every serious AA unit has an invisible threat radius. NOT shown on minimap. Play
 
 ### 10.5 Convoy/Patrol System
 
-Convoys drive between settlements on roads. Supply convoys have supply trucks. Patrols are infantry squads.
+Convoys move along generated transport routes between logistics demands. They remain mobile encounter/objective records rather than places. Supply convoys have supply trucks; patrols are infantry squads.
 
 ```javascript
 CONVOY_TYPES = {
@@ -1723,43 +1519,20 @@ CONVOY_TYPES = {
 
 ## 11. BOSS SYSTEM
 
-### 11.1 Boss Timer Mechanic
+### 11.1 Hunter ETA and Contact Heat
 
-```
-ARCHITECTURE DECISION: Real-time countdown timer, ACCELERATED by settlement
-clears, EXTENDED by fuel depot destruction.
-WHY: This creates a beautiful risk/reward tension:
-  - Clearing settlements = faster boss (but you get loot/XP/Infamy)
-  - Destroying fuel depots = more time (but they're guarded)
-  - Infamy level = stronger boss (more bodyguards, +5% HP per level)
-  - Jammer upgrade = longer base timer (meta-progression)
-
-TIMER FORMULA:
-  remainingTime = baseTime + jammerBonus + fuelBonus - settlementPenalty
-```
+The Hunter uses a real-time ETA whose clock rate rises with Heat and contract pressure. Securing an individual encounter grants its rewards and adds Heat; it never clears or penalizes the containing town, village, or compound. Destroying eligible fuel targets extends the remaining ETA.
 
 ### 11.2 Timer Values
 
 ```javascript
-BOSS_TIMER = {
-  baseTime: 180,
-  jammerBonus: 60,
-  maxJammerLevel: 3,
+clockRate =
+  (0.72 + (heat / 100) * 1.18) * difficulty.hunterEtaMultiplier * style.hunterRateMultiplier;
 
-  clearPenalties: { rural: 15, town: 30, camp: 20, base: 45 },
-  fuelTankBonus: 20,
-  fuelTankerBonus: 10,
-  commandBuildingBonus: 30,
-  radarTowerBonus: 30,
-
-  bossSpawnDistance: 80,
-  bossWarningTime: 5,
-};
+timeRemaining -= dt * clockRate;
 ```
 
-> **Shipped (2026-08):** Timer is now `Hunter ETA` driven by `hunterClockRate()` in `js/sim/state.js`:
-> `clockRate = (0.72 + heat/100*1.18) * difficulty.hunterEtaMultiplier * style.hunterRateMultiplier`
-> `timeRemaining -= dt * clockRate`. `baseTime` and `fuelTankBonus` are live; `clearPenalties` now feed Heat (see `js/app.js:applyClearPenalty`) not direct subtraction. Jammer/radar bonuses are legacy (not wired). `bossWarningTime 5s` unchanged. `TIMER` table in `js/config.js` is annotated legacy/live.
+`baseTime`, fuel-target bonuses, and the five-second warning govern the countdown. There is no settlement-type clear-penalty table.
 
 ### 11.3 Boss Spawning
 
@@ -1989,21 +1762,7 @@ Stronghold compositions scale by Act:
 
 ### 12.2 Infamy Gains
 
-```javascript
-// Per-kill weighted + settlement clear bonus
-function calculateInfamyGain(enemyType) {
-  return enemyType.fearWeight;
-}
-
-function calculateClearBonus(settlement) {
-  const size = settlement.buildings.length;
-  const archetype = settlement.archetype;
-  const baseBonus = archetype.clearBonus[0];
-  const maxBonus = archetype.clearBonus[1];
-  const t = Math.min(1, size / archetype.buildingCount[1]);
-  return Math.floor(baseBonus + (maxBonus - baseBonus) * t);
-}
-```
+Per-kill Fear/Infamy comes from the defeated enemy's `fearWeight`. Securing a contact reads score, XP, Dollars, and Heat from that encounter's reward record. Place size, place grammar, and the number of civilian buildings do not create a clear bonus.
 
 ### 12.3 Infamy Level Thresholds
 
@@ -2122,7 +1881,7 @@ PILOT_STAT_EFFECTS = {
 ### 13.4 Pilot Leveling
 
 ```javascript
-// Pilot gains XP from kills and settlement clears
+// Pilot gains XP from kills, secured encounters, and completed objectives
 // Level-ups happen BETWEEN Sorties only (not during)
 // Player spends skill points on pilot skill grid
 
@@ -2361,12 +2120,12 @@ EQUIPMENT = {
 
 ```
 XP (Pilot Experience):
-  - Earned from ALL kills and settlement clears
+  - Earned from kills, secured encounters, and completed objectives
   - Spent on Pilot Skill Grid (between Sorties)
   - LOST when pilot dies
 
 Dollars ($):
-  - Earned from settlement clear rewards and boss loot
+  - Earned from encounter/objective rewards and boss loot
   - Spent in Hangar on per-gunship upgrades
   - RETAINED when pilot dies (permanent)
 
@@ -2432,13 +2191,11 @@ Difficulty scaling per prestige:
   - Enemy damage +15%
   - Map size +25% (longer Sorties)
   - Boss timer +30s (more time before boss)
-  - Settlement count +2 (more targets)
   - Dollar rewards +30% (offsets difficulty)
 
 After 3 prestiges:
   - Maps are 75% larger
   - Boss timer is 90s longer
-  - 6 more settlements
   - Enemies are much tougher but rewards are better
 ```
 
@@ -2463,7 +2220,7 @@ After pilot death or boss defeat:
 1. Show summary:
    - Time survived
    - Enemies killed
-   - Settlements cleared
+   - Contacts secured
    - Infamy level reached
    - Boss defeated? (yes/no)
    - XP earned (total)
@@ -2508,12 +2265,12 @@ After pilot death or boss defeat:
 
 ```
 - Enemy health bars: appear only when damaged, fade after 3s
-- Settlement name/distance: appears when approaching
+- Place name/distance: appears near the generated extent
 - Kill count: briefly flashes on each kill
 - Damage numbers: float up from hit enemies
 - Low HP warning: red vignette on screen edges
 - Infamy level-up: full-screen overlay (pauses game)
-- Settlement clear: brief banner with name + reward
+- Contact secured: brief banner with encounter reward
 - Boss warning: pulsing red border + directional arrow
 - Rocket/equipment: shows ammo/cooldown when applicable
 - High-priority targets: reddish tint on command/radar buildings
@@ -2524,21 +2281,20 @@ After pilot death or boss defeat:
 ```
 Default: small (100x100px), bottom-right
   - Player (green dot)
-  - Enemies (red dots)
-  - Settlements (yellow diamonds)
+  - Muted road and place-footprint geography
+  - Discovered contacts (red dots)
   - Boss (large red triangle, when spawned)
   - Dark background with grid lines (radar aesthetic)
 
 Expanded (tap): 200x200px
-  - Building outlines
-  - Settlement names
+  - Building and place outlines
+  - Restrained nearby place names
   - Terrain color hints
   - Player view cone
 
 Fullscreen (double-tap):
   - Full world view
-  - All discovered settlements named
-  - Difficulty zones color-coded
+  - Known place extents and separately revealed contacts
   - Can tap to set waypoints
 ```
 
@@ -2635,7 +2391,7 @@ Planned sounds:
   - Alarm: boss approaching
   - UI clicks: short blip
   - Missile warning: alarm tone
-  - Settlement discovery: radio static + voice
+  - Place identification/contact discovery: radio static + voice
 ```
 
 ---
@@ -2655,12 +2411,12 @@ Planned sounds:
 
 ### Phase 2: World (Week 2)
 
-9. Terrain generation (noise-based, chunk system)
-10. Terrain rendering (cached chunk canvases)
-11. Settlement archetype data definitions
-12. Settlement placement algorithm
-13. Building procedural rendering
-14. Settlement discovery system
+9. Terrain single source of truth
+10. Regional profiles and water/irrigation/relief/industry axes
+11. Typed destination demand and connected transport
+12. Place grammars, districts, local streets, and frontage parcels
+13. Oriented buildings, land use, and enclosure geometry
+14. Derived place index, encounter layer, and multi-seed worldgen checks
 
 ### Phase 3: Helicopter (Week 2-3)
 
@@ -2676,7 +2432,7 @@ Planned sounds:
 21. Enemy entity system + entity factory
 22. Enemy AI behaviors (all 8 classes)
 23. Enemy rendering (silhouette system)
-24. Enemy spawning in settlements
+24. Encounter roster binding and deterministic activation
 25. Difficulty scaling (radial distance + Infamy)
 26. Enemy projectiles (bullets, rockets, missiles)
 27. Air defense bubble system
@@ -2690,7 +2446,7 @@ Planned sounds:
 32. Level-up trigger
 33. Upgrade card selection UI
 34. Weapon upgrade application
-35. Settlement clear detection + rewards
+35. Encounter clear detection + rewards/Heat
 
 ### Phase 6: Boss (Week 4)
 
@@ -2733,7 +2489,7 @@ Planned sounds:
 63. Contextual HUD elements
 64. Damage numbers / kill feed
 65. Low HP warning effects
-66. Settlement discovery/clear banners
+66. Place labels and contact discovery/secured banners
 67. Boss warning system
 68. Pause menu
 
@@ -2747,8 +2503,8 @@ Planned sounds:
 74. All gunship types rendering
 75. All 15 enemy types defined
 76. All weapon upgrades balanced
-77. All settlement archetypes implemented
-78. Lore text + settlement names
+77. All regional profiles and place grammars implemented
+78. Lore text + derived place names
 79. Radio chatter system
 80. Boss progression (all Acts)
 81. Convoy/patrol system
@@ -2780,10 +2536,10 @@ function getDifficultyMultiplier(distance, metaLevel, infamyLevel) {
 }
 ```
 
-### 20.2 Enemy Scaling in Settlements
+### 20.2 Encounter Roster Scaling
 
 ```javascript
-function scaleEnemyRoster(baseRoster, difficultyMultiplier) {
+function scaleEncounterRoster(baseRoster, difficultyMultiplier) {
   const scaledCount = Math.floor(baseRoster.count * difficultyMultiplier);
   const scaledComposition = { ...baseRoster.composition };
   if (difficultyMultiplier > 1.5) {
@@ -2800,11 +2556,7 @@ function scaleEnemyRoster(baseRoster, difficultyMultiplier) {
 
 ### 20.3 Loot Scaling
 
-```javascript
-function getLootMultiplier(gritStat, settlementSize) {
-  return (1 + (gritStat - 1) * 0.5) * (1 + settlementSize * 0.05);
-}
-```
+Rewards belong to encounter, objective, convoy, and supply records. They may respond to contract difficulty, but never to a place's area, grammar, centroid, or civilian building count.
 
 ### 20.4 Infamy Gain Scaling
 
@@ -2832,23 +2584,26 @@ function getBossStats(bossType, infamyLevel, prestigeLevel) {
 
 ## APPENDIX A: KEY ARCHITECTURE DECISIONS LOG
 
-| Decision              | Chosen                                                          | Rejected                | Why                                                         |
-| --------------------- | --------------------------------------------------------------- | ----------------------- | ----------------------------------------------------------- |
-| Sim/render coupling   | Fixed timestep (60Hz) sim + decoupled render                    | Coupled sim/render      | Deterministic sim regardless of display refresh rate        |
-| Canvas DPR            | DPR-aware scaling                                               | 1:1 pixel mapping       | Crisp on Retina/HiDPI displays                              |
-| Controls              | Canvas-drawn virtual joystick                                   | DOM elements            | Resolution-independent, same coord space as game            |
-| Terrain               | Tile-based + chunk caching                                      | Full world render       | O(1) render for visited chunks, memory efficient            |
-| Settlement generation | Rule-based procedural                                           | Template-based          | Infinite variation, maintainable archetype identity         |
-| Weapon system         | Single evolving weapon                                          | Multiple loadout slots  | Faster gameplay, deeper decisions (Vampire Survivors model) |
-| Boss timer            | Real-time countdown + settlement penalties + fuel depot bonuses | Distance-based trigger  | Player controls pacing through risk/reward choices          |
-| Infamy mechanic       | Pause + card choice                                             | Slow-mo overlay         | Clear decision moment, mobile-friendly reading time         |
-| Pilot system          | Single pilot per career                                         | Roster of pilots        | Simple, focused, the pilot IS the career                    |
-| Equipment             | Single slot + cooldown + limited uses                           | Multiple loadout        | One meaningful choice, no management overhead               |
-| Settlement naming     | Procedural Arabic syllables                                     | Static name list        | Infinite variety, authentic feel                            |
-| Lore delivery         | Environmental text popups                                       | Cutscenes/dialogue      | Zero assets, integrates with gameplay flow                  |
-| Entity system         | Data-driven (factory + templates)                               | Class-based inheritance | Adding content = adding data, never new classes             |
-| Gunships              | 5 real historical gunships                                      | Fictional designs       | Historically grounded, recognizable, meaningful progression |
-| Fear -> Infamy        | Renamed "Infamy" (we instill fear)                              | Keep "Fear"             | Clearer for player — THEY are feared, not afraid            |
+| Decision            | Chosen                                                   | Rejected                   | Why                                                          |
+| ------------------- | -------------------------------------------------------- | -------------------------- | ------------------------------------------------------------ |
+| Sim/render coupling | Fixed timestep (60Hz) sim + decoupled render             | Coupled sim/render         | Deterministic sim regardless of display refresh rate         |
+| Canvas DPR          | DPR-aware scaling                                        | 1:1 pixel mapping          | Crisp on Retina/HiDPI displays                               |
+| Controls            | Canvas-drawn virtual joystick                            | DOM elements               | Resolution-independent, same coord space as game             |
+| Terrain             | `js/terrain.js` is the shared terrain authority          | A second worldgen terrain  | Generation, rendering, and movement query one terrain model  |
+| World generation    | Deterministic geometry-first V4 pipeline                 | Site scatter/version paths | Regional cause precedes transport, fabric, and occupation    |
+| Transport           | Connected network driven by destination demand           | Centroid MST               | Every route serves a legible regional or local purpose       |
+| Place identity      | Named index derived from authoritative physical geometry | Authoritative point entity | Extents, parcels, footprints, and enclosures remain truthful |
+| Occupation          | Independent encounter/contact layer                      | Whole-place hostility      | Civilian fabric can be neutral or only partly occupied       |
+| Weapon system       | Single evolving weapon                                   | Multiple loadout slots     | Faster gameplay, deeper decisions                            |
+| Boss timer          | Heat-driven Hunter ETA plus fuel-target bonuses          | Settlement clear penalties | Tactical actions affect pressure without redefining places   |
+| Infamy mechanic     | Pause + card choice                                      | Slow-mo overlay            | Clear decision moment, mobile-friendly reading time          |
+| Pilot system        | Single pilot per career                                  | Roster of pilots           | Simple, focused, the pilot is the career                     |
+| Equipment           | Single slot + cooldown + limited uses                    | Multiple loadout           | One meaningful choice, no management overhead                |
+| Place naming        | Deterministic fictional names on derived place geometry  | Pre-geometry site labels   | Labels describe the generated world rather than define it    |
+| Lore delivery       | Environmental text popups                                | Cutscenes/dialogue         | Zero assets, integrates with gameplay flow                   |
+| Entity system       | Data-driven factory + templates                          | Class-based inheritance    | Adding content primarily means adding data                   |
+| Gunships            | 5 real historical gunships                               | Fictional designs          | Historically grounded and recognizable                       |
+| Fear -> Infamy      | Renamed "Infamy" (we instill fear)                       | Keep "Fear"                | They are feared, not afraid                                  |
 
 ---
 
@@ -2983,7 +2738,7 @@ SAVE_DATA = {
   // Milestones (permanent, across all pilots)
   milestones: {
     bossesDefeated: 5,
-    settlementsCleared: 22,
+    encountersSecured: 22,
     sortiesCompleted: 8,
     finalBossDefeated: false,
   },
@@ -3165,7 +2920,7 @@ PALETTE = {
     minimapSweep: 'rgba(50,200,50,0.1)', // radar sweep line
     player: '#44ff44', // bright green dot
     enemy: '#ff4444', // bright red dot
-    settlement: '#ffcc44', // yellow diamond
+    place: '#ffcc44', // muted place geometry/label
     boss: '#ff2222', // bright red triangle
     // Timer
     timer: '#88cc66', // green (normal)
@@ -3703,8 +3458,8 @@ MINIMAP:
   Grid: ui.minimapGrid (subtle olive lines)
   Border: ui.border (olive)
   Player: ui.player (green dot, center)
-  Enemies: ui.enemy (red dots)
-  Settlements: ui.settlement (yellow diamonds)
+  Places: ui.place (muted physical footprints)
+  Contacts: ui.enemy (red dots, separately revealed)
   Boss: ui.boss (large red triangle)
   View cone: triangle showing player's view direction
 ```
@@ -3716,22 +3471,21 @@ Default (small):
   - 100x100px, bottom-right
   - Dark background with grid
   - Player dot (green, center)
-  - Enemy dots (red, relative position)
-  - Settlement diamonds (yellow, relative position)
+  - Roads and muted place-footprint geometry
+  - Discovered contact dots (red, relative position)
   - Boss triangle (red, when spawned)
 
 Expanded (tap to expand):
   - 200x200px
-  - Building outlines (simple rectangles)
-  - Settlement names (text labels)
+  - Building and place outlines
+  - Restrained nearby place names
   - Terrain color hints (sand = tan, rock = brown)
   - Player view cone (triangle)
 
 Fullscreen (double-tap):
   - 300x300px or fullscreen overlay
   - Full world view
-  - All discovered settlements named
-  - Difficulty zones color-coded (green -> yellow -> red from center)
+  - Known place extents and separately revealed contacts
   - Can tap to set waypoints
 ```
 
@@ -3847,9 +3601,9 @@ Boss Warning:
   - Direction arrow: red chevron on screen edge pointing to boss
   - Distance counter: "1200m" text near arrow
 
-Settlement Clear:
+Contact Secured:
   - Brief banner (center screen)
-  - Text: settlement name + "CLEARED" + reward
+  - Text: "CONTACT SECURED" + encounter reward
   - Duration: 2s
   - Fade in/out animation
 

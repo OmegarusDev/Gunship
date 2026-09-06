@@ -113,7 +113,7 @@ export const P = {
     minimapSweep: 'rgba(50,200,50,0.1)',
     player: '#44ff44',
     enemy: '#ff4444',
-    settlement: '#ffcc44',
+    place: '#ffcc44',
     boss: '#ff2222',
     timer: '#88cc66',
     timerLow: '#ff4444',

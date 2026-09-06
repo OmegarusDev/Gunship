@@ -128,7 +128,7 @@ export const SKILL_GRID = [
   },
   // ── Recon (awareness) ──
   { id: 'sharpeyes', branch: 2, tier: 0, name: 'Sharp Eyes', desc: '+20% radar detail range' },
-  { id: 'intelnet', branch: 2, tier: 1, name: 'Intel Network', desc: '+15% settlement detection' },
+  { id: 'intelnet', branch: 2, tier: 1, name: 'Intel Network', desc: '+15% contact detection' },
   {
     id: 'fullspectrum',
     branch: 2,

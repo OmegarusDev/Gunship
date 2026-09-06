@@ -21,7 +21,7 @@ import { cyl25, box25, frustum25 } from './prims25.js';
 import { withAlpha, fillCircle, drawLine, drawTextShadow } from './drawUtil.js';
 import { mulberry32, clamp, pick } from './rng.js';
 import { createNoise } from './noise.js';
-import { generateWorld, getBuildingTemplate, getSpeedMod, ARCHETYPES } from './world.js';
+import { generateWorld } from './world.js';
 import { createTerrain } from './terrain.js';
 import { drawCornerBrackets, drawBackButton } from './appBridge.js';
 import {
@@ -76,7 +76,8 @@ import {
 } from './render/hud.js';
 import {
   drawBuilding as _drawBuilding,
-  drawSites as _drawSites,
+  drawPlaces as _drawPlaces,
+  drawWorldGround as _drawWorldGround,
   drawDecorations as _drawDecorations,
   drawScenarioOverlays as _drawScenarioOverlays,
   setWorldState as _setWorldState,
@@ -162,7 +163,7 @@ const IS_TOUCH = typeof window !== 'undefined' && 'ontouchstart' in window;
 let modeToastUntil = 0; // targeting-mode banner expiry (performance.now clock)
 
 // Position of the player's most recent gunshot — civilians panic only
-// when gunfire happens near them (or their site's defenders open up).
+// when gunfire happens near them (or nearby occupiers open up).
 let lastShotX = 0,
   lastShotY = 0,
   lastShotT = -999;
@@ -215,11 +216,16 @@ function toggleSettings() {
 }
 
 // ══════════════════════════════════════════════════════════════
-//  WORLD RENDERING — smooth noise terrain, roads, sites
+//  WORLD RENDERING — terrain, roads, physical places
 // ══════════════════════════════════════════════════════════════
 
 let world = null;
 let sharedTerrain = null;
+const worldgenParams =
+  typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
+const worldgenSeedText = worldgenParams.get('seed');
+const worldgenSeedOverride = worldgenSeedText === null ? Number.NaN : Number(worldgenSeedText);
+const debugWorldgen = worldgenParams.get('worldDebug') === '1';
 
 // ── Career (pilot + wallet + hangar) — persisted, loaded at boot ──
 let career = null;
@@ -244,9 +250,10 @@ function getMiniRoads(S) {
 // minimap road cache now in render/roads.js
 
 function initWorld(contract = null) {
-  const seed = contract?.seed ?? 42;
+  const seed = Number.isFinite(worldgenSeedOverride) ? worldgenSeedOverride : (contract?.seed ?? 42);
   sharedTerrain = createTerrain(seed, WORLD_SIZE);
   world = generateWorld({ seed, contract, terrain: sharedTerrain });
+  world.debugWorldgen = debugWorldgen;
   _roadSegsCache = null;
   _miniRoadsCache = null;
   terrainNoise = createNoise(seed);
@@ -258,16 +265,17 @@ function initWorld(contract = null) {
   GameState.setNoises(terrainNoise, moistureNoise, detailNoise);
 }
 
-/** Spawn all outdoor (non-indoor) enemies at sites immediately. */
+/** Spawn visible sentries and mobile contacts when a sortie begins. */
 function spawnOutdoorEnemies() {
   if (!world) return;
-  for (const s of world.sites) {
-    const difficulty = getDifficultyForEnemy(s.x, s.y);
-    for (const entry of s.enemies) {
+  for (const encounter of world.encounters) {
+    const difficulty = getDifficultyForEnemy(encounter.x, encounter.y);
+    for (const entry of encounter.roster) {
       if (entry.isIndoor) continue;
-      const enemy = createEnemyFromRoster(entry, s.x, s.y, difficulty);
+      const enemy = createEnemyFromRoster(entry, 0, 0, difficulty);
       if (enemy) {
-        enemy.siteId = s.id;
+        enemy.encounterId = encounter.id;
+        enemy.placeId = encounter.placeId;
         enemy.isIndoor = false;
         applyEnemyDifficulty(enemy);
         enemies.push(enemy);
@@ -303,9 +311,14 @@ function drawRoads(ctx, cam) {
 }
 // ROAD_STYLE + shadeHex now live in render/roads.js
 
-function drawSites(ctx, cam) {
+function drawPlaces(ctx, cam) {
   _setWorldState(world, heli, enemies, boss);
-  return _drawSites(ctx, cam);
+  return _drawPlaces(ctx, cam);
+}
+
+function drawWorldGround(ctx, cam) {
+  _setWorldState(world, heli, enemies, boss);
+  return _drawWorldGround(ctx, cam);
 }
 
 function drawDecorations(ctx, cam) {
@@ -355,7 +368,7 @@ function spawnExplosion(x, y, size = 1) {
 }
 
 // ══════════════════════════════════════════════════════════════
-//  ENEMIES — site-centric spawning
+//  ENEMIES — encounter-centric spawning
 // ══════════════════════════════════════════════════════════════
 
 const enemies = GameState.enemies; // shared
@@ -368,20 +381,24 @@ function getDifficulty(worldX, worldY) {
   return (1 + dist / 2500) * difficulty.radialMultiplier;
 }
 
-/** Discover a site: spawn indoor enemies who burst from buildings. */
-function discoverSettlement(settlement) {
-  if (settlement.discovered) return;
-  settlement.discovered = true;
-  sortieState.stats.sites++;
+/** Discover an occupied district or field position and activate its hidden roster. */
+function discoverEncounter(encounter) {
+  if (encounter.discovered) return;
+  encounter.discovered = true;
+  encounter.state = 'active';
+  sortieState.stats.encounters++;
+  const place = world.places.find((candidate) => candidate.id === encounter.placeId);
+  if (place) place.discovered = true;
 
-  const difficulty = getDifficulty(settlement.x, settlement.y);
+  const difficulty = getDifficulty(encounter.x, encounter.y);
 
-  for (const entry of settlement.enemies) {
+  for (const entry of encounter.roster) {
     if (!entry.isIndoor) continue;
     try {
-      const enemy = createEnemyFromRoster(entry, settlement.x, settlement.y, difficulty);
+      const enemy = createEnemyFromRoster(entry, 0, 0, difficulty);
       if (enemy) {
-        enemy.siteId = settlement.id;
+        enemy.encounterId = encounter.id;
+        enemy.placeId = encounter.placeId;
         enemy.isIndoor = true;
         applyEnemyDifficulty(enemy);
         enemies.push(enemy);
@@ -393,46 +410,44 @@ function discoverSettlement(settlement) {
   }
 }
 
-/** Check if a settlement is cleared (all enemies dead). */
-function checkSettlementClear(settlement) {
-  if (settlement.cleared) return false;
-  const alive = enemies.filter((e) => e.siteId === settlement.id && e.state !== 'dead');
-  if (alive.length === 0 && settlement.discovered && settlement.enemies.length > 0) {
-    settlement.cleared = true;
+/** Check if an individual contact has been secured. */
+function checkEncounterClear(encounter) {
+  if (encounter.cleared) return false;
+  const alive = enemies.filter(
+    (enemy) =>
+      enemy.encounterId === encounter.id && enemy.className !== 'unarmed' && enemy.state !== 'dead'
+  );
+  const armedRoster = encounter.roster.filter((entry) => entry.className !== 'unarmed');
+  if (alive.length === 0 && encounter.discovered && armedRoster.length > 0) {
+    encounter.cleared = true;
+    encounter.state = 'cleared';
     // Spawn CLEAR! popup
     floatingTexts.push({
-      x: settlement.x,
-      y: settlement.y - 30,
-      text: 'CLEAR!',
+      x: encounter.x,
+      y: encounter.y - 30,
+      text: 'CONTACT SECURED',
       color: '#44ff44',
       life: 1.5,
       maxLife: 1.5,
       vy: -40, // float upward
     });
     // Score bonus
-    const arch = world.sites.find((v) => v.id === settlement.id);
-    if (arch) {
-      const dist = Math.hypot(settlement.x, settlement.y);
-      const bonus = Math.floor(50 + dist * 0.02);
-      heli.score += bonus;
-      // Career earnings: Dollars from the site's wealth range, XP bonus.
-      if (arch && ARCHETYPES[arch.archetype]) {
-        const range = ARCHETYPES[arch.archetype].dollars;
-        sortieDollarsEarned += Math.floor(range[0] + Math.random() * (range[1] - range[0]));
-        GameState.setSortieDollars(sortieDollarsEarned);
-        sortieXpEarned += 30;
-        GameState.setSortieXp(sortieXpEarned);
-      }
-      floatingTexts.push({
-        x: settlement.x,
-        y: settlement.y - 50,
-        text: `+${bonus}`,
-        color: '#ffcc44',
-        life: 1.2,
-        maxLife: 1.2,
-        vy: -30,
-      });
-    }
+    const reward = encounter.reward || {};
+    const score = reward.score || Math.floor(50 + Math.hypot(encounter.x, encounter.y) * 0.02);
+    heli.score += score;
+    sortieDollarsEarned += reward.dollars || 0;
+    sortieXpEarned += reward.xp || 30;
+    GameState.setSortieDollars(sortieDollarsEarned);
+    GameState.setSortieXp(sortieXpEarned);
+    floatingTexts.push({
+      x: encounter.x,
+      y: encounter.y - 50,
+      text: `+${score}`,
+      color: '#ffcc44',
+      life: 1.2,
+      maxLife: 1.2,
+      vy: -30,
+    });
     return true;
   }
   return false;
@@ -473,7 +488,7 @@ function resetBossTimer() {
   bossState.warningTimer = 0;
   bossState.spawned = false;
   bossState.defeated = false;
-  bossState.clearedSettlements = 0;
+  bossState.clearedEncounters = 0;
 }
 
 function resetBoss() {
@@ -513,21 +528,20 @@ function spawnBoss() {
   bossState.spawned = true;
 }
 
-/** Apply settlement clear penalty to boss timer. */
-function applyClearPenalty(village) {
-  const archetype = village.archetype;
-  const penalty = TIMER.clearPenalties[archetype] || 15;
-  bossState.clearedSettlements++;
+/** Securing a contact raises the response level without changing place identity. */
+function applyClearPenalty(encounter) {
+  const heat = encounter.reward?.heat || 5;
+  bossState.clearedEncounters++;
   floatingTexts.push({
-    x: village.x,
-    y: village.y - 70,
-    text: `TIMER -${penalty}s`,
+    x: encounter.x,
+    y: encounter.y - 70,
+    text: `HEAT +${Math.round(heat)}`,
     color: '#ff8844',
     life: 1.5,
     maxLife: 1.5,
     vy: -25,
   });
-  addHeat(Math.min(12, penalty * 0.35), 'site cleared');
+  addHeat(Math.min(12, heat), 'contact secured');
 }
 
 const FEAR_THRESHOLDS = _FEAR_THRESHOLDS;
@@ -559,7 +573,8 @@ function resetSortieState() {
   sortieState.rewards.secured = 0;
   sortieState.stats.kills = 0;
   sortieState.stats.crates = 0;
-  sortieState.stats.sites = 0;
+  sortieState.stats.places = 0;
+  sortieState.stats.encounters = 0;
   sortieState.endTimer = 0;
 }
 
@@ -724,7 +739,8 @@ function damageWorldTarget(target, damage, x, y) {
       id: `crate-wreck-${target.id}`,
       x: target.x + (Math.random() - 0.5) * 30,
       y: target.y + (Math.random() - 0.5) * 30,
-      siteId: null,
+      encounterId: target.encounterId || null,
+      placeId: target.placeId || null,
       collected: false,
       objective: false,
       rewardType: pick(['repair', 'damage', 'speed', 'fear'], mulberry32(Date.now() & 0xffff)),
@@ -862,9 +878,9 @@ function checkObjectiveProgress() {
 function objectiveHudText() {
   if (!world?.objective) return 'STANDBY';
   if (world.objective.type === 'strike')
-    return `DESTROY ${world.objective.targetSiteName || 'COMMAND TARGET'}`;
+    return `DESTROY ${world.objective.targetPlaceName || 'COMMAND TARGET'}`;
   if (world.objective.type === 'sabotage')
-    return `DISABLE ${world.objective.targetSiteName || 'RADAR RELAY'}`;
+    return `DISABLE ${world.objective.targetPlaceName || 'RADAR RELAY'}`;
   if (world.objective.type === 'intercept') return 'INTERCEPT SUPPLY CONVOY';
   if (world.objective.type === 'suppression') return 'DESTROY AIR DEFENSE UNITS';
   if (world.objective.type === 'recovery') return 'RECOVER SUPPLY CACHE';
@@ -1207,7 +1223,8 @@ registerScreen('debrief', {
       ['CONTRACT', activeContract?.name || 'UNKNOWN'],
       ['OBJECTIVE', sortieState.objectiveComplete ? 'COMPLETE' : 'INCOMPLETE'],
       ['KILLS', `${sortieState.stats.kills}`],
-      ['SITES VISITED', `${sortieState.stats.sites}`],
+      ['PLACES VISITED', `${sortieState.stats.places}`],
+      ['CONTACTS FOUND', `${sortieState.stats.encounters}`],
       ['SUPPLY CACHES', `${sortieState.stats.crates}`],
       ['FEAR LEVEL', `${sortieState.fearLevel || 0}`],
       ['PEAK HEAT', `${Math.round(sortieState.heat.value)}`],
@@ -1742,10 +1759,12 @@ registerScreen('sortie', {
       GameState.setNoises(terrainNoise, moistureNoise, detailNoise);
     }
     if (world) {
-      for (const v of world.sites) {
-        v.discovered = false;
-        v.cleared = false;
-        for (const entry of v.enemies) entry.active = false;
+      for (const place of world.places) place.discovered = false;
+      for (const encounter of world.encounters) {
+        encounter.discovered = false;
+        encounter.cleared = false;
+        encounter.state = 'hidden';
+        for (const entry of encounter.roster) entry.active = false;
       }
     }
     spawnOutdoorEnemies();
@@ -2049,23 +2068,35 @@ registerScreen('sortie', {
       }
     }
 
-    // ── Settlement discovery ──
+    // ── Place and encounter discovery ──
     if (world) {
-      for (const v of world.sites) {
-        if (v.cleared) continue;
-        const dist = Math.hypot(v.x - heli.x, v.y - heli.y);
-        if (!v.discovered && dist < v.detectionRadius) {
-          discoverSettlement(v);
+      for (const place of world.places) {
+        if (place.discovered) continue;
+        const width = (place.bounds?.maxX ?? place.bounds?.x1 ?? place.x) -
+          (place.bounds?.minX ?? place.bounds?.x0 ?? place.x);
+        const height = (place.bounds?.maxY ?? place.bounds?.y1 ?? place.y) -
+          (place.bounds?.minY ?? place.bounds?.y0 ?? place.y);
+        const discoveryRadius = Math.max(300, Math.hypot(width, height) * 0.55 + 220);
+        if (Math.hypot(place.x - heli.x, place.y - heli.y) < discoveryRadius) {
+          place.discovered = true;
+          sortieState.stats.places++;
+        }
+      }
+      for (const encounter of world.encounters) {
+        if (encounter.cleared) continue;
+        const dist = Math.hypot(encounter.x - heli.x, encounter.y - heli.y);
+        if (!encounter.discovered && dist < encounter.radius) {
+          discoverEncounter(encounter);
         }
       }
     }
 
     // ── Update enemies ──
-    // Sites whose defenders opened fire last frame (civilians panic only
+    // Encounters whose defenders opened fire last frame (civilians panic only
     // once combat actually reaches them).
-    const sitesUnderAttack = new Set();
+    const encountersUnderAttack = new Set();
     for (const e of enemies) {
-      if (e.state === 'attack' && e.siteId) sitesUnderAttack.add(e.siteId);
+      if (e.state === 'attack' && e.encounterId) encountersUnderAttack.add(e.encounterId);
     }
 
     for (const e of enemies) {
@@ -2083,7 +2114,7 @@ registerScreen('sortie', {
           performance.now() / 1000 - lastShotT < COMBAT.gunfireMemorySec &&
           Math.hypot(e.x - lastShotX, e.y - lastShotY) < COMBAT.gunfireRadius;
         if (
-          (gunfireNear || (e.siteId && sitesUnderAttack.has(e.siteId))) &&
+          (gunfireNear || (e.encounterId && encountersUnderAttack.has(e.encounterId))) &&
           dist < COMBAT.civilianPanicRadius
         ) {
           e.state = 'flee';
@@ -2098,7 +2129,7 @@ registerScreen('sortie', {
             e.x += Math.cos(e.angle) * e.speed * dt;
             e.y += Math.sin(e.angle) * e.speed * dt;
           }
-          // Civilians who outrun the engagement area escape the site:
+          // Civilians who outrun the engagement area escape the contact:
           // they leave the battle and no longer block clearing it.
           if (
             e.homeX !== undefined &&
@@ -2197,11 +2228,11 @@ registerScreen('sortie', {
       if ((e.state === 'dead' && e.deathTimer <= 0) || e.escaped) enemies.splice(i, 1);
     }
 
-    // ── Check settlement clears ──
+    // ── Check encounter clears ──
     if (world) {
-      for (const v of world.sites) {
-        if (checkSettlementClear(v)) {
-          applyClearPenalty(v);
+      for (const encounter of world.encounters) {
+        if (checkEncounterClear(encounter)) {
+          applyClearPenalty(encounter);
         }
       }
     }
@@ -2525,6 +2556,7 @@ registerScreen('sortie', {
     cam.begin(ctx);
 
     drawSmoothTerrain(ctx, cam);
+    drawWorldGround(ctx, cam);
     drawRoads(ctx, cam);
     drawDecorations(ctx, cam);
 
@@ -2639,7 +2671,7 @@ registerScreen('sortie', {
         if (cam.isVisible(b.x, b.y, 80)) drawBuilding(ctx, b);
       }
     }
-    drawSites(ctx, cam);
+    drawPlaces(ctx, cam);
     drawScenarioOverlays(ctx, cam);
 
     // Draw enemies
@@ -3223,41 +3255,54 @@ registerScreen('sortie', {
         return d < revealR ? 1 : 0.25;
       };
 
-      // Sites — shape encodes archetype: dot=rural, square=town,
-      // triangle=camp, diamond=base
-      for (const s of world.sites) {
-        const isObj = world.objective && world.objective.targetSiteId === s.id;
-        const col = s.cleared ? '#3f7f3f' : s.discovered ? '#ffcc44' : 'rgba(255,204,68,0.5)';
-        ctx.globalAlpha = blipAlpha(s.x, s.y);
-        ctx.fillStyle = col;
-        const sx = mx(s.x),
-          sy = my(s.y);
-        if (s.archetype === 'town') {
-          ctx.fillRect(sx - 2.5, sy - 2.5, 5, 5);
-        } else if (s.archetype === 'camp') {
+      // Places are geography on the map, not hostile icons.
+      for (const place of world.places) {
+        ctx.globalAlpha = blipAlpha(place.x, place.y) * (place.discovered ? 0.9 : 0.38);
+        ctx.fillStyle =
+          place.category === 'military'
+            ? 'rgba(190,120,70,0.42)'
+            : place.category === 'industrial'
+              ? 'rgba(190,165,95,0.38)'
+              : 'rgba(220,195,120,0.30)';
+        ctx.strokeStyle =
+          place.category === 'military'
+            ? 'rgba(255,130,90,0.75)'
+            : 'rgba(225,205,145,0.62)';
+        ctx.lineWidth = 0.8;
+        const polygon = place.footprint || [];
+        if (polygon.length >= 3) {
           ctx.beginPath();
-          ctx.moveTo(sx, sy - 3);
-          ctx.lineTo(sx + 3, sy + 2.5);
-          ctx.lineTo(sx - 3, sy + 2.5);
+          ctx.moveTo(mx(polygon[0].x), my(polygon[0].y));
+          for (let i = 1; i < polygon.length; i++) ctx.lineTo(mx(polygon[i].x), my(polygon[i].y));
           ctx.closePath();
           ctx.fill();
-        } else if (s.archetype === 'base') {
-          ctx.save();
-          ctx.translate(sx, sy);
-          ctx.rotate(Math.PI / 4);
-          ctx.fillRect(-2.5, -2.5, 5, 5);
-          ctx.restore();
-        } else {
-          ctx.fillRect(sx - 2, sy - 2, 4, 4);
-        }
-        if (isObj && !s.cleared) {
-          const pr = 3.5 + Math.sin(performance.now() / 180) * 1.5;
-          ctx.strokeStyle = '#ff5544';
-          ctx.lineWidth = 1;
-          ctx.beginPath();
-          ctx.arc(sx, sy, pr, 0, Math.PI * 2);
           ctx.stroke();
+        } else {
+          ctx.fillRect(mx(place.x) - 1.5, my(place.y) - 1.5, 3, 3);
         }
+      }
+      ctx.globalAlpha = 1;
+
+      // Contacts are a tactical layer, revealed separately from place identity.
+      for (const encounter of world.encounters) {
+        if (!encounter.discovered && blipAlpha(encounter.x, encounter.y) < 1) continue;
+        ctx.globalAlpha = encounter.discovered ? 1 : 0.35;
+        ctx.fillStyle = encounter.cleared ? '#3f7f3f' : '#ff5544';
+        const ex = mx(encounter.x);
+        const ey = my(encounter.y);
+        ctx.beginPath();
+        ctx.arc(ex, ey, encounter.cleared ? 1.8 : 2.4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+      const objectiveTarget = world.objective?.target;
+      if (objectiveTarget) {
+        const pr = 4 + Math.sin(performance.now() / 180) * 1.5;
+        ctx.strokeStyle = '#ffcc44';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(mx(objectiveTarget.x), my(objectiveTarget.y), pr, 0, Math.PI * 2);
+        ctx.stroke();
       }
       // Convoys — heading ticks
       for (const c of world.convoys) {
@@ -3420,14 +3465,14 @@ registerScreen('sortie', {
       ctx.textBaseline = 'top';
       const secs = Math.floor((performance.now() - sortieStartedAt) / 1000);
       const tStr = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
-      const clearedN = world ? world.sites.filter((s) => s.cleared).length : 0;
-      const totalSites = world ? world.sites.length : 0;
+      const clearedN = world ? world.encounters.filter((encounter) => encounter.cleared).length : 0;
+      const totalEncounters = world ? world.encounters.length : 0;
       ctx.font = 'bold 11px "Courier New", monospace';
       ctx.fillStyle = P.ui.text;
       ctx.fillText(`KILLS ${sortieState.stats.kills}`, stX + 12, stY + 8);
       ctx.fillText(`TIME ${tStr}`, stX + 12, stY + 24);
       ctx.fillStyle = '#ffcc44';
-      ctx.fillText(`SITES ${clearedN}/${totalSites}`, stX + 62, stY + 8);
+      ctx.fillText(`CONTACTS ${clearedN}/${totalEncounters}`, stX + 62, stY + 8);
       ctx.font = 'bold 9px "Courier New", monospace';
       ctx.fillStyle = 'rgba(90,130,80,0.8)';
       ctx.fillText(`FPS ${lastFps}`, stX + 62, stY + 24);

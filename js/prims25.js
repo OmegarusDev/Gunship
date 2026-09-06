@@ -94,6 +94,43 @@ export function box25(ctx, cx, topY, w, d, h, m) {
   ctx.stroke();
 }
 
+/**
+ * Extrude an arbitrary ground-plane footprint upward.
+ *
+ * Worldgen V4 uses rotated courtyard and compound footprints. Keeping the
+ * polygon in world coordinates lets streets, parcels, hit areas and art share
+ * exactly the same geometry.
+ */
+export function footprintPrism25(ctx, polygon, h, m) {
+  if (!polygon || polygon.length < 3) return;
+  const top = polygon.map((point) => ({ x: point.x, y: point.y - h }));
+  const faces = [];
+  for (let i = 0; i < polygon.length; i++) {
+    const next = (i + 1) % polygon.length;
+    const a = polygon[i];
+    const b = polygon[next];
+    faces.push({
+      points: [top[i], top[next], b, a],
+      depth: (a.y + b.y) * 0.5,
+      color: b.x - a.x >= 0 ? m.side : m.sideDark,
+    });
+  }
+  faces.sort((a, b) => a.depth - b.depth);
+  for (const face of faces) {
+    ctx.fillStyle = face.color;
+    facePoly(ctx, face.points);
+  }
+  ctx.fillStyle = m.top;
+  facePoly(ctx, top);
+  ctx.strokeStyle = withAlpha('#ffffff', 0.13);
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(top[0].x, top[0].y);
+  for (let i = 1; i < top.length; i++) ctx.lineTo(top[i].x, top[i].y);
+  ctx.closePath();
+  ctx.stroke();
+}
+
 /** Draw a tapered cylinder (frustum). */
 export function frustum25(ctx, cx, topY, rxBot, rxTop, rise, m) {
   const ryBot = deckRy(rxBot);
