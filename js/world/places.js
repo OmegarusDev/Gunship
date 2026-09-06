@@ -14,6 +14,7 @@ import {
   orientedRectangle,
   pointAlongPolyline,
   polygonIntersectsPolygon,
+  polylineLength,
   regularPolygon,
 } from './geometry.js';
 import { nearestRoadPoint } from './transport.js';
@@ -31,6 +32,20 @@ const BUILDING_TYPES = Object.freeze({
   shop: { w: [25, 36], d: [20, 28], h: [9, 13], col: '#ae8d5e', tags: ['civilian', 'commerce'] },
   market: { w: [40, 54], d: [30, 42], h: [9, 13], col: '#b29364', tags: ['civilian', 'commerce', 'landmark'] },
   mosque: { w: [36, 48], d: [30, 40], h: [13, 18], col: '#c1a574', tags: ['civilian', 'civic', 'sacred', 'landmark'] },
+  minaret: {
+    w: [8, 11],
+    d: [8, 11],
+    h: [36, 52],
+    col: '#c4a876',
+    tags: ['civilian', 'civic', 'sacred', 'landmark'],
+  },
+  water_tower: {
+    w: [12, 16],
+    d: [12, 16],
+    h: [24, 36],
+    col: '#8d8668',
+    tags: ['civilian', 'landmark', 'water'],
+  },
   farm_house: { w: [27, 38], d: [22, 31], h: [8, 12], col: '#a58759', tags: ['civilian', 'farm'] },
   shed: { w: [19, 31], d: [15, 24], h: [6, 10], col: '#8e7652', tags: ['civilian', 'agriculture'] },
   depot: {
@@ -156,6 +171,10 @@ function placeName(anchor, index, rng, used) {
   return name;
 }
 
+function makeStreet(id, points, width, surface, hierarchy, tags) {
+  return { id, points, width, surface, hierarchy, tags };
+}
+
 function roadThrough(id, origin, angle, length, width, surface, hierarchy, tags, bend = 0) {
   const start = localToWorld(origin, angle, -length * 0.5, 0);
   const end = localToWorld(origin, angle, length * 0.5, 0);
@@ -163,7 +182,36 @@ function roadThrough(id, origin, angle, length, width, surface, hierarchy, tags,
     Math.abs(bend) > 0.01
       ? [start, localToWorld(origin, angle, 0, bend), end]
       : [start, end];
-  return { id, points, width, surface, hierarchy, tags };
+  return makeStreet(id, points, width, surface, hierarchy, tags);
+}
+
+function courtyardFootprint(center, w, d, rotation, wall, openAcross) {
+  const hw = w * 0.5;
+  const hd = d * 0.5;
+  const innerW = Math.max(4, hw - wall);
+  const innerD = Math.max(4, hd - wall);
+  if (openAcross < 0) {
+    return [
+      localToWorld(center, rotation, -hw, -hd),
+      localToWorld(center, rotation, hw, -hd),
+      localToWorld(center, rotation, hw, hd),
+      localToWorld(center, rotation, innerW, hd),
+      localToWorld(center, rotation, innerW, -innerD),
+      localToWorld(center, rotation, -innerW, -innerD),
+      localToWorld(center, rotation, -innerW, hd),
+      localToWorld(center, rotation, -hw, hd),
+    ];
+  }
+  return [
+    localToWorld(center, rotation, -hw, hd),
+    localToWorld(center, rotation, hw, hd),
+    localToWorld(center, rotation, hw, -hd),
+    localToWorld(center, rotation, innerW, -hd),
+    localToWorld(center, rotation, innerW, innerD),
+    localToWorld(center, rotation, -innerW, innerD),
+    localToWorld(center, rotation, -innerW, -hd),
+    localToWorld(center, rotation, -hw, -hd),
+  ];
 }
 
 function makeDistrict(id, placeId, kind, center, width, depth, rotation, tags) {
@@ -273,25 +321,72 @@ function streetsForAnchor(anchor, placeId, nextRoadId, rng) {
   const a = anchor.axis;
   const cross = a + Math.PI * 0.5;
   if (anchor.type === 'town') {
-    add(a, anchor.scale * 0.92, 14, 'compacted', 'local', ['main-street'], 0, 0, between(rng, -16, 16));
-    for (const offset of [-0.25, 0.03, 0.28]) {
-      add(
-        cross + between(rng, -0.09, 0.09),
-        anchor.scale * between(rng, 0.48, 0.68),
-        offset === 0.03 ? 11 : 8,
-        'dirt',
-        offset === 0.03 ? 'local' : 'alley',
-        ['quarter-lane'],
-        anchor.scale * offset,
-        0,
-        between(rng, -9, 9)
+    const spineLen = anchor.scale * 0.96;
+    const spinePts = [0, 0.3, 0.62, 1].map((t, index) =>
+      localToWorld(
+        anchor,
+        a,
+        -spineLen * 0.5 + spineLen * t,
+        index === 0 || index === 3 ? 0 : between(rng, -26, 26)
+      )
+    );
+    const spine = makeStreet(
+      nextRoadId(),
+      spinePts,
+      13,
+      'compacted',
+      'local',
+      ['place-street', `place:${placeId}`, 'souk-spine', 'main-street']
+    );
+    roads.push(spine);
+    const spineLength = polylineLength(spine.points);
+    const alleyCount = 4 + Math.floor(rng() * 2);
+    for (let i = 0; i < alleyCount; i++) {
+      const t = 0.13 + (i / Math.max(1, alleyCount - 1)) * 0.74 + between(rng, -0.03, 0.03);
+      const start = pointAlongPolyline(spine.points, spineLength * Math.max(0.08, Math.min(0.92, t)));
+      const side = i % 2 === 0 ? 1 : -1;
+      const deadEnd = i === alleyCount - 1 || rng() < 0.38;
+      const alleyLen = anchor.scale * (deadEnd ? between(rng, 0.2, 0.3) : between(rng, 0.38, 0.55));
+      const mid = localToWorld(start, a, between(rng, -12, 12), side * alleyLen * (deadEnd ? 1 : 0.52));
+      const end = localToWorld(start, a, between(rng, -16, 16), side * alleyLen);
+      roads.push(
+        makeStreet(
+          nextRoadId(),
+          deadEnd ? [start, end] : [start, mid, end],
+          deadEnd ? 6 : 8,
+          'dirt',
+          'alley',
+          [
+            'place-street',
+            `place:${placeId}`,
+            deadEnd ? 'dead-end' : 't-junction',
+            'quarter-lane',
+          ]
+        )
       );
     }
-    add(a + between(rng, -0.06, 0.06), anchor.scale * 0.68, 7, 'dirt', 'alley', ['residential-lane'], 0, anchor.scale * 0.22);
-    add(a + between(rng, -0.06, 0.06), anchor.scale * 0.58, 7, 'dirt', 'alley', ['residential-lane'], anchor.scale * -0.06, anchor.scale * -0.23);
+    add(
+      a + between(rng, -0.05, 0.05),
+      anchor.scale * 0.42,
+      7,
+      'dirt',
+      'alley',
+      ['back-lane'],
+      between(rng, -anchor.scale * 0.08, anchor.scale * 0.1),
+      (rng() < 0.5 ? -1 : 1) * anchor.scale * between(rng, 0.2, 0.3),
+      between(rng, -8, 8)
+    );
   } else if (anchor.type === 'village' || anchor.type === 'compound') {
-    add(a, anchor.scale * 0.88, 9, 'dirt', 'local', ['village-lane'], 0, 0, between(rng, -10, 10));
-    add(cross, anchor.scale * 0.48, 6, 'track', 'alley', ['farm-spur'], anchor.scale * 0.08);
+    add(a, anchor.scale * 0.88, 9, 'dirt', 'local', ['village-lane'], 0, 0, between(rng, -14, 14));
+    add(
+      cross + between(rng, -0.08, 0.08),
+      anchor.scale * between(rng, 0.34, 0.5),
+      6,
+      'track',
+      'alley',
+      ['farm-spur', rng() < 0.45 ? 'dead-end' : 't-junction'],
+      between(rng, -anchor.scale * 0.12, anchor.scale * 0.16)
+    );
   } else if (anchor.type === 'farm') {
     add(a, anchor.scale * 0.76, 7, 'track', 'local', ['farm-track']);
   } else if (anchor.type === 'roadside_service') {
@@ -300,7 +395,23 @@ function streetsForAnchor(anchor, placeId, nextRoadId, rng) {
     add(a, anchor.scale * 0.76, 11, 'compacted', 'service', ['yard-spine']);
     add(cross, anchor.scale * 0.56, 9, 'dirt', 'service', ['loading-lane']);
   } else if (anchor.type === 'checkpoint') {
-    add(a, anchor.scale * 0.92, 12, 'compacted', 'local', ['inspection-lane']);
+    const length = anchor.scale * 0.96;
+    const origin = { x: anchor.x, y: anchor.y };
+    roads.push(
+      makeStreet(
+        nextRoadId(),
+        [
+          localToWorld(origin, a, -length * 0.5, 0),
+          localToWorld(origin, a, -length * 0.16, 16),
+          localToWorld(origin, a, length * 0.16, -16),
+          localToWorld(origin, a, length * 0.5, 0),
+        ],
+        11,
+        'compacted',
+        'local',
+        ['place-street', `place:${placeId}`, 'inspection-lane', 'chicane']
+      )
+    );
   } else if (anchor.type === 'camp') {
     add(a, anchor.scale * 0.74, 10, 'dirt', 'local', ['parade-road']);
     add(cross, anchor.scale * 0.58, 9, 'dirt', 'service', ['motor-pool-road']);
@@ -324,9 +435,9 @@ function streetsForAnchor(anchor, placeId, nextRoadId, rng) {
 
 function buildingPlan(type, count) {
   const pools = {
-    town: ['courtyard_house', 'house', 'shop', 'courtyard_house', 'house', 'hut'],
-    village: ['house', 'courtyard_house', 'hut', 'shed'],
-    compound: ['courtyard_house', 'house', 'shed', 'hut'],
+    town: ['courtyard_house', 'courtyard_house', 'shop', 'house', 'courtyard_house', 'hut'],
+    village: ['courtyard_house', 'house', 'hut', 'shed'],
+    compound: ['courtyard_house', 'courtyard_house', 'shed', 'hut'],
     farm: ['farm_house', 'shed', 'shed', 'hut'],
     roadside_service: ['shop', 'garage', 'depot', 'house'],
     fuel_depot: ['fuel', 'fuel', 'depot', 'garage', 'guard_post'],
@@ -336,8 +447,8 @@ function buildingPlan(type, count) {
     sam_site: ['radar', 'bunker', 'garage', 'guard_post', 'tower'],
   };
   const guaranteed = {
-    town: ['market', 'mosque'],
-    village: ['courtyard_house'],
+    town: ['mosque', 'minaret', 'market'],
+    village: ['courtyard_house', 'water_tower'],
     compound: ['courtyard_house'],
     farm: ['farm_house'],
     roadside_service: ['shop'],
@@ -393,20 +504,31 @@ function makeBuilding(
   side,
   rng,
   nextParcelId,
-  nextBuildingId
+  nextBuildingId,
+  packed = false
 ) {
   const template = BUILDING_TYPES[type] || BUILDING_TYPES.house;
   const w = between(rng, template.w[0], template.w[1]);
   const d = between(rng, template.d[0], template.d[1]);
   const h = between(rng, template.h[0], template.h[1]);
-  const parcelWidth = w + between(rng, 8, 16);
-  const parcelDepth = d + between(rng, 10, 20);
+  const parcelWidth = w + (packed ? between(rng, 2.5, 5) : between(rng, 8, 16));
+  const parcelDepth = d + (packed ? between(rng, 3, 6) : between(rng, 10, 20));
   const normalAngle = rotation + Math.PI * 0.5;
-  const offset = side * (road.width * 0.5 + parcelDepth * 0.5 + between(rng, 3, 8));
+  const stagger = packed ? between(rng, 0.6, 2.8) : between(rng, 3, 8);
+  const offset = side * (road.width * 0.5 + d * 0.5 + stagger);
   const center = {
     x: point.x + Math.cos(normalAngle) * offset,
     y: point.y + Math.sin(normalAngle) * offset,
   };
+  const openAcross = side > 0 ? -1 : 1;
+  const usesCourt = type === 'courtyard_house' || type === 'mosque' || type === 'compound';
+  const wall = Math.max(5.5, Math.min(w, d) * 0.22);
+  const footprint = usesCourt
+    ? courtyardFootprint(center, w, d, rotation, wall, openAcross)
+    : orientedRectangle(center.x, center.y, w, d, rotation);
+  const court = usesCourt
+    ? localToWorld(center, rotation, 0, openAcross * Math.max(4, d * 0.12 - 2))
+    : null;
   const parcelId = nextParcelId();
   const parcel = {
     id: parcelId,
@@ -424,7 +546,7 @@ function makeBuilding(
         : template.tags.includes('industrial')
           ? 'industrial'
           : 'mixed',
-    tags: [...template.tags, 'frontage-parcel'],
+    tags: [...template.tags, packed ? 'party-wall' : 'frontage-parcel'],
   };
   const buildingId = nextBuildingId();
   const destructible =
@@ -440,7 +562,8 @@ function makeBuilding(
     col: template.col,
     type,
     rotation,
-    footprint: orientedRectangle(center.x, center.y, w, d, rotation),
+    footprint,
+    court,
     placeId: place.id,
     districtId: district.id,
     parcelId,
@@ -453,19 +576,97 @@ function makeBuilding(
     destroyed: false,
     flashTimer: 0,
     objectiveTag: null,
-    special: type === 'fuel' ? 'fuel' : null,
+    special: type === 'fuel' ? 'fuel' : type === 'minaret' ? 'minaret' : type === 'water_tower' ? 'water' : null,
     highPriority: template.tags.includes('highPriority'),
   };
   return { parcel, building };
 }
 
+function overlapsExisting(buildings, footprint) {
+  return buildings.some((building) => polygonIntersectsPolygon(building.footprint, footprint));
+}
+
+function commitBuilding(generated, parcels, buildings) {
+  parcels.push(generated.parcel);
+  buildings.push(generated.building);
+}
+
 function placeBuildings(anchor, place, districts, streets, rng, nextParcelId, nextBuildingId) {
   const parcels = [];
   const buildings = [];
+  const packed = ['town', 'village', 'compound', 'farm', 'roadside_service'].includes(anchor.type);
   const plan = buildingPlan(anchor.type, targetBuildingCount(anchor, rng));
   let planIndex = 0;
+
+  if (packed && streets[0]) {
+    const spine = streets[0];
+    const spineLen = polylineLength(spine.points);
+    const landmarkAt = pointAlongPolyline(spine.points, spineLen * 0.48);
+    const landmarkDistrict = nearestDistrict(districts, landmarkAt);
+    while (planIndex < plan.length && (plan[planIndex] === 'mosque' || plan[planIndex] === 'minaret' || plan[planIndex] === 'market' || plan[planIndex] === 'water_tower')) {
+      const type = plan[planIndex];
+      const side = type === 'minaret' || type === 'water_tower' ? 1 : -1;
+      const along = type === 'minaret' ? spineLen * 0.52 : type === 'market' ? spineLen * 0.42 : spineLen * 0.48;
+      const point = pointAlongPolyline(spine.points, Math.min(spineLen - 8, Math.max(8, along)));
+      const candidate = makeBuilding(
+        type,
+        point,
+        point.angle,
+        place,
+        landmarkDistrict,
+        spine,
+        side,
+        rng,
+        nextParcelId,
+        nextBuildingId,
+        true
+      );
+      if (!overlapsExisting(buildings, candidate.building.footprint)) {
+        commitBuilding(candidate, parcels, buildings);
+      }
+      planIndex++;
+    }
+
+    for (const road of streets) {
+      const lengths = cumulativePolylineLengths(road.points);
+      const total = lengths[lengths.length - 1];
+      if (total < 24) continue;
+      for (const side of [-1, 1]) {
+        let cursor = Math.min(12, total * 0.08);
+        let guard = 0;
+        while (planIndex < plan.length && cursor < total - 10 && guard++ < 80) {
+          const type = plan[planIndex];
+          const template = BUILDING_TYPES[type] || BUILDING_TYPES.house;
+          const width = (template.w[0] + template.w[1]) * 0.5;
+          if (cursor + width > total - 8) break;
+          const base = pointAlongPolyline(road.points, cursor + width * 0.5, lengths);
+          const candidate = makeBuilding(
+            type,
+            base,
+            base.angle,
+            place,
+            nearestDistrict(districts, base),
+            road,
+            side,
+            rng,
+            nextParcelId,
+            nextBuildingId,
+            true
+          );
+          if (overlapsExisting(buildings, candidate.building.footprint)) {
+            cursor += 5;
+            continue;
+          }
+          commitBuilding(candidate, parcels, buildings);
+          planIndex++;
+          cursor += candidate.building.w + between(rng, 0.9, 2.1);
+        }
+      }
+    }
+  }
+
   let attempts = 0;
-  while (planIndex < plan.length && attempts++ < plan.length * 8) {
+  while (planIndex < plan.length && attempts++ < plan.length * 10) {
     const road = streets[attempts % streets.length];
     const lengths = cumulativePolylineLengths(road.points);
     const total = lengths[lengths.length - 1];
@@ -474,7 +675,7 @@ function placeBuildings(anchor, place, districts, streets, rng, nextParcelId, ne
     const slot = laneIndex % slotsPerRoad;
     const amount = total * ((slot + 1) / (slotsPerRoad + 1));
     const base = pointAlongPolyline(road.points, amount, lengths);
-    const jitter = between(rng, -Math.min(9, total * 0.025), Math.min(9, total * 0.025));
+    const jitter = between(rng, -Math.min(7, total * 0.02), Math.min(7, total * 0.02));
     const point = {
       x: base.x + Math.cos(base.angle) * jitter,
       y: base.y + Math.sin(base.angle) * jitter,
@@ -491,14 +692,11 @@ function placeBuildings(anchor, place, districts, streets, rng, nextParcelId, ne
       side,
       rng,
       nextParcelId,
-      nextBuildingId
+      nextBuildingId,
+      packed
     );
-    const overlaps = buildings.some((building) =>
-      polygonIntersectsPolygon(building.footprint, candidate.building.footprint)
-    );
-    if (overlaps) continue;
-    parcels.push(candidate.parcel);
-    buildings.push(candidate.building);
+    if (overlapsExisting(buildings, candidate.building.footprint)) continue;
+    commitBuilding(candidate, parcels, buildings);
     planIndex++;
   }
   return { parcels, buildings };
@@ -542,7 +740,7 @@ function perimeterFeatures(anchor, place, nextFeatureId) {
   return output;
 }
 
-function landmarkFeatures(anchor, place, nextFeatureId, rng) {
+function landmarkFeatures(anchor, place, buildings, nextFeatureId, rng) {
   const output = [];
   if (['village', 'compound', 'farm'].includes(anchor.type)) {
     const point = localToWorld(anchor, anchor.axis, -anchor.scale * 0.18, anchor.scale * 0.12);
@@ -576,9 +774,10 @@ function landmarkFeatures(anchor, place, nextFeatureId, rng) {
     }
   }
   if (anchor.type === 'checkpoint') {
-    for (const side of [-1, 1]) {
-      const center = localToWorld(anchor, anchor.axis, side * anchor.scale * 0.12, 0);
-      const line = orientedRectangle(center.x, center.y, 6, anchor.scale * 0.48, anchor.axis);
+    for (const offset of [-0.22, -0.06, 0.08, 0.24]) {
+      const side = offset < 0 ? -1 : 1;
+      const center = localToWorld(anchor, anchor.axis, offset * anchor.scale, side * 14);
+      const line = orientedRectangle(center.x, center.y, 5, 22, anchor.axis + Math.PI * 0.5);
       output.push({
         id: nextFeatureId(),
         kind: 'barrier',
@@ -587,30 +786,47 @@ function landmarkFeatures(anchor, place, nextFeatureId, rng) {
         y: center.y,
         points: [line[0], line[1]],
         placeId: place.id,
-        tags: ['military', 'road-control', 'barrier'],
+        tags: ['military', 'road-control', 'barrier', 'chicane'],
+      });
+    }
+  }
+  if (anchor.type === 'fuel_depot') {
+    const tanks = buildings.filter((building) => building.placeId === place.id && building.type === 'fuel');
+    for (const tank of tanks) {
+      output.push({
+        id: nextFeatureId(),
+        kind: 'oil_tank',
+        type: 'oil_tank',
+        x: tank.x,
+        y: tank.y,
+        radius: Math.max(tank.w, tank.d) * 0.42,
+        placeId: place.id,
+        tags: ['industrial', 'fuel', 'landmark'],
       });
     }
   }
   return output;
 }
 
-function localLandUse(anchor, place) {
+function localLandUse(anchor, place, buildings = []) {
   const output = [];
+  const mosque = buildings.find((building) => building.placeId === place.id && building.type === 'mosque');
   if (anchor.type === 'town') {
+    const court = mosque || place;
     output.push({
       id: `landuse-${place.id}-court`,
       type: 'courtyard',
       kind: 'courtyard',
       polygon: orientedRectangle(
-        anchor.x,
-        anchor.y,
-        anchor.scale * 0.16,
-        anchor.scale * 0.13,
-        anchor.axis
+        court.x,
+        court.y,
+        (mosque?.w || anchor.scale * 0.16) * 1.55,
+        (mosque?.d || anchor.scale * 0.13) * 1.45,
+        mosque?.rotation ?? anchor.axis
       ),
       anchorId: anchor.id,
       placeId: place.id,
-      tags: ['civic-space', 'market-court'],
+      tags: ['civic-space', 'mosque-court'],
     });
   } else if (anchor.category === 'industrial') {
     output.push({
@@ -747,9 +963,9 @@ export function generatePlaces(seed, worldSize, terrain, region, transport, regi
     );
     const placeFeatures = [
       ...perimeterFeatures(anchor, place, nextFeatureId),
-      ...landmarkFeatures(anchor, place, nextFeatureId, rng),
+      ...landmarkFeatures(anchor, place, generated.buildings, nextFeatureId, rng),
     ];
-    const placeLandUse = localLandUse(anchor, place);
+    const placeLandUse = localLandUse(anchor, place, generated.buildings);
 
     districts.push(...placeDistricts);
     parcels.push(...generated.parcels);

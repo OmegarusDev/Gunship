@@ -58,20 +58,42 @@ function drawBuilding(ctx, b) {
     ctx.fill();
   }
 
-  if (b.type === 'tower') {
-    frustum25(ctx, cx, cy - b.h, b.w / 2, b.w / 2.5, b.h, m);
-    // Antenna on top
-    ctx.strokeStyle = P.building.antenna;
-    ctx.lineWidth = 1;
+  if (b.court && !b.destroyed) {
+    ctx.fillStyle = withAlpha('#7d6840', 0.38);
     ctx.beginPath();
-    ctx.moveTo(cx, cy - b.h - 8);
-    ctx.lineTo(cx, cy - b.h);
-    ctx.stroke();
-    // Antenna tip light
-    ctx.fillStyle = withAlpha('#ff4444', 0.6 + Math.sin(performance.now() / 300) * 0.3);
-    ctx.beginPath();
-    ctx.arc(cx, cy - b.h - 8, 1.5, 0, Math.PI * 2);
+    ctx.ellipse(
+      b.court.x,
+      b.court.y,
+      Math.max(5, b.w * 0.16),
+      Math.max(4, b.d * 0.14),
+      b.rotation || 0,
+      0,
+      Math.PI * 2
+    );
     ctx.fill();
+  }
+
+  if (b.type === 'tower' || b.type === 'minaret' || b.type === 'water_tower') {
+    const top = b.type === 'water_tower' ? b.w / 1.6 : b.w / 2.6;
+    frustum25(ctx, cx, cy - b.h, b.w / 2, top, b.h, m);
+    if (b.type !== 'minaret') {
+      ctx.strokeStyle = P.building.antenna;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - b.h - 8);
+      ctx.lineTo(cx, cy - b.h);
+      ctx.stroke();
+      ctx.fillStyle = withAlpha('#ff4444', 0.6 + Math.sin(performance.now() / 300) * 0.3);
+      ctx.beginPath();
+      ctx.arc(cx, cy - b.h - 8, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    if (b.type === 'water_tower') {
+      ctx.fillStyle = withAlpha('#6d684f', 0.7);
+      ctx.beginPath();
+      ctx.ellipse(cx, cy - b.h + 3, b.w * 0.42, b.w * 0.22, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
   } else if (b.footprint?.length >= 3) {
     footprintPrism25(ctx, b.footprint, b.h, m);
   } else {
@@ -124,7 +146,7 @@ function drawBuilding(ctx, b) {
   // Ground-facing outline on all buildings.
   ctx.strokeStyle = P.enemy.outline;
   ctx.lineWidth = 1.2;
-  if (b.type === 'tower') {
+  if (b.type === 'tower' || b.type === 'minaret' || b.type === 'water_tower') {
     ctx.beginPath();
     ctx.arc(cx, cy - b.h, b.w / 2 + 1, 0, Math.PI * 2);
     ctx.stroke();
@@ -146,7 +168,12 @@ function drawLandUseShape(ctx, shape) {
   const type = shape.kind || shape.type || 'yard';
   const polygon = shape.polygon || shape.footprint;
   const points = shape.points || shape.centerline;
-  if (type === 'canal' || type === 'irrigation') {
+  if (
+    type === 'canal' ||
+    type === 'irrigation' ||
+    type === 'irrigation_canal' ||
+    type === 'falaj_channel'
+  ) {
     if (!points || points.length < 2) return;
     ctx.strokeStyle = withAlpha('#57756d', 0.58);
     ctx.lineWidth = shape.width || 5;
@@ -211,14 +238,14 @@ function drawWorldGround(ctx, cam) {
     const type = feature.kind || feature.type;
     const points = feature.points || feature.polygon || feature.footprint;
     if (!points?.length) continue;
-    if (type === 'wall' || type === 'fence' || type === 'berm' || type === 'revetment') {
+    if (type === 'wall' || type === 'fence' || type === 'berm' || type === 'revetment' || type === 'barrier') {
       ctx.strokeStyle =
         type === 'fence'
           ? withAlpha('#524c3a', 0.62)
           : type === 'berm'
             ? withAlpha('#756342', 0.75)
             : withAlpha('#66583f', 0.82);
-      ctx.lineWidth = type === 'berm' ? 6 : type === 'wall' ? 4 : 2;
+      ctx.lineWidth = type === 'berm' ? 6 : type === 'wall' ? 4 : type === 'barrier' ? 3 : 2;
       ctx.setLineDash(type === 'fence' ? [5, 4] : []);
       ctx.beginPath();
       ctx.moveTo(points[0].x, points[0].y);

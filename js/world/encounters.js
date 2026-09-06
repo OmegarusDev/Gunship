@@ -112,6 +112,87 @@ function placeBuildings(place, buildings, districtId) {
   return owned.length ? owned : buildings.filter((building) => building.placeId === place.id);
 }
 
+function pickPost(kind, className, owned, place, encounter, rng) {
+  const isVehicle = ['technical', 'apc', 'shilka', 'sam', 'lightAA'].includes(className);
+  const access = place?.accessPoints?.[0] || null;
+  const courts = owned.filter((building) => building.court && !building.tags?.includes('sacred'));
+  const roofs = owned.filter((building) => !building.tags?.includes('sacred'));
+  if (isVehicle) {
+    if (access && rng() < 0.7) {
+      const angle = rng() * Math.PI * 2;
+      return {
+        x: access.x + Math.cos(angle) * between(rng, 10, 22),
+        y: access.y + Math.sin(angle) * between(rng, 10, 22),
+        post: 'gate',
+        building: null,
+        isIndoor: false,
+      };
+    }
+    const angle = rng() * Math.PI * 2;
+    return {
+      x: encounter.x + Math.cos(angle) * between(rng, 22, Math.min(70, encounter.radius * 0.28)),
+      y: encounter.y + Math.sin(angle) * between(rng, 22, Math.min(70, encounter.radius * 0.28)),
+      post: 'street',
+      building: null,
+      isIndoor: false,
+    };
+  }
+
+  const roll = rng();
+  const preferRoof = kind === 'occupied_district' || kind === 'local_cell' || kind === 'garrison';
+  if (preferRoof && roofs.length && roll < 0.42) {
+    const building = roofs[Math.floor(rng() * roofs.length)];
+    const angle = rng() * Math.PI * 2;
+    return {
+      x: building.x + Math.cos(angle) * Math.min(5, building.w * 0.16),
+      y: building.y + Math.sin(angle) * Math.min(5, building.d * 0.16),
+      post: 'rooftop',
+      building,
+      isIndoor: false,
+    };
+  }
+  if (courts.length && roll < 0.72) {
+    const building = courts[Math.floor(rng() * courts.length)];
+    const angle = rng() * Math.PI * 2;
+    return {
+      x: building.court.x + Math.cos(angle) * 4,
+      y: building.court.y + Math.sin(angle) * 4,
+      post: 'courtyard',
+      building,
+      isIndoor: false,
+    };
+  }
+  if (roofs.length && roll < 0.88) {
+    const building = roofs[Math.floor(rng() * roofs.length)];
+    const angle = rng() * Math.PI * 2;
+    return {
+      x: building.x + Math.cos(angle) * Math.min(6, building.w * 0.2),
+      y: building.y + Math.sin(angle) * Math.min(6, building.d * 0.2),
+      post: 'interior',
+      building,
+      isIndoor: !building.tags?.includes('sacred'),
+    };
+  }
+  if (access && rng() < 0.55) {
+    const angle = rng() * Math.PI * 2;
+    return {
+      x: access.x + Math.cos(angle) * between(rng, 6, 16),
+      y: access.y + Math.sin(angle) * between(rng, 6, 16),
+      post: 'gate',
+      building: null,
+      isIndoor: false,
+    };
+  }
+  const angle = rng() * Math.PI * 2;
+  return {
+    x: encounter.x + Math.cos(angle) * between(rng, 12, 48),
+    y: encounter.y + Math.sin(angle) * between(rng, 12, 48),
+    post: 'street',
+    building: null,
+    isIndoor: false,
+  };
+}
+
 function makeRoster(encounter, place, buildings, rng) {
   const count = rosterCount(encounter.kind, place, rng);
   const weights = classWeights(encounter.kind);
@@ -121,28 +202,18 @@ function makeRoster(encounter, place, buildings, rng) {
     let className = weightedPick(rng, weights);
     if (index === 0 && className === 'unarmed') className = 'rifleman';
     if (encounter.kind === 'air_defense' && index === 0) className = 'lightAA';
-    const isVehicle = ['technical', 'apc', 'shilka', 'sam', 'lightAA'].includes(className);
-    const building =
-      !isVehicle && owned.length && index % 4 === 3 ? owned[index % owned.length] : null;
-    const isIndoor = Boolean(building && !building.tags.includes('sacred'));
-    const angle = rng() * Math.PI * 2;
-    const distance = isVehicle ? between(rng, 24, encounter.radius * 0.32) : between(rng, 12, 72);
-    const x = building
-      ? building.x + Math.cos(angle) * Math.min(7, building.w * 0.18)
-      : encounter.x + Math.cos(angle) * distance;
-    const y = building
-      ? building.y + Math.sin(angle) * Math.min(7, building.d * 0.18)
-      : encounter.y + Math.sin(angle) * distance;
+    const post = pickPost(encounter.kind, className, owned, place, encounter, rng);
     roster.push({
       id: `${encounter.id}-unit-${String(index + 1).padStart(2, '0')}`,
       encounterId: encounter.id,
       placeId: encounter.placeId,
       districtId: encounter.districtId,
-      parcelId: building?.parcelId || null,
+      parcelId: post.building?.parcelId || null,
       className,
-      x,
-      y,
-      isIndoor,
+      x: post.x,
+      y: post.y,
+      post: post.post,
+      isIndoor: post.isIndoor,
       active: false,
       objectiveTarget: false,
       state: 'idle',
