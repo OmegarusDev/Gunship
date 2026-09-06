@@ -1852,6 +1852,7 @@ function makeFuelBuilding(id, x, y, type, opts = {}) {
 }
 
 function generateRoadCentricWorld(seed, worldSize, terrain, context) {
+  console.log('[WorldGen] ROAD-CENTRIC v3 — roads connect buildings (not blobs)');
   // WORLD_GEN 3: true road-centric — roads exist to connect buildings.
   // Generate highways first, then walk them and emit building slots along them,
   // then cluster slots into Sites (villages). A Site is a named cluster of
@@ -2033,15 +2034,7 @@ function generateRoadCentricWorld(seed, worldSize, terrain, context) {
     siteId++;
     sites.push(site);
   }
-  // Ensure at least 12 sites (pad with legacy water-anchored if needed)
-  if (sites.length < 12) {
-    const legacy = generateSites(seed, [], worldSize, terrain);
-    for (const s of legacy) {
-      if (sites.length >= 16) break;
-      if (sites.some(o=>Math.hypot(o.x-s.x,o.y-s.y)<300)) continue;
-      sites.push(s);
-    }
-  }
+  // No legacy pad — if we have <12 clusters, that's the desert (lonelier). Lonely huts are just buildings along the road, not Sites.
   // For each site, build a tiny StreetGraph that is the road segment(s) its buildings front onto, plus walls
   for (const site of sites) {
     if (site.streetGraph) continue; // already has
