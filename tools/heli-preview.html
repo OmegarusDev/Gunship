@@ -1,0 +1,57 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Gunship planforms</title>
+<style>
+  html,
+  body {
+    margin: 0;
+    background: #14140e;
+    color: #e8d8a0;
+    font: 13px/1.35 'Courier New', monospace;
+  }
+  canvas {
+    display: block;
+    margin: 16px auto;
+    background: #d4b56a;
+  }
+  p {
+    text-align: center;
+    margin: 8px 24px 24px;
+  }
+</style>
+<canvas id="c" width="1100" height="1540"></canvas>
+<p>
+  Airfix-style top-downs from US Army / Wikimedia 3-views. Left = planform (rotor hidden). Right =
+  in-game.
+</p>
+<script type="module">
+  import { drawGunship } from '../js/render/entities.js';
+  import { GUNSHIPS, GUNSHIP_ORDER } from '../js/meta.js';
+
+  const ctx = document.getElementById('c').getContext('2d');
+  const rows = GUNSHIP_ORDER;
+  rows.forEach((id, i) => {
+    const y = 110 + i * 240;
+    const def = GUNSHIPS[id];
+    ctx.fillStyle = '#6a5a30';
+    ctx.fillRect(20, y - 88, 1060, 220);
+    ctx.fillStyle = '#1a1810';
+    ctx.font = 'bold 16px "Courier New", monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText(`${def.name}  (${def.year})`, 36, y - 62);
+    ctx.font = '12px "Courier New", monospace';
+    ctx.fillText('PLANFORM', 150, y + 86);
+    ctx.fillText('IN-GAME', 720, y + 86);
+
+    const base = {
+      gunshipId: id,
+      rotorBlades: def.rotorBlades,
+      airframeScale: def.size || 1,
+      drawScale: 1.85,
+      bladeAngle: 0.55,
+      angle: 0,
+    };
+    drawGunship(ctx, { ...base, x: 250, y, hideRotor: true });
+    drawGunship(ctx, { ...base, x: 820, y, hideRotor: false });
+  });
+</script>

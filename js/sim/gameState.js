@@ -1,7 +1,6 @@
 /**
- * sim/gameState.js — minimal shared mutable state for the sortie screen.
- * Only the core that both app.js and screens/sortie.js need.
- * UI-only vars (titleMenuBoxes etc.) stay in app.js.
+ * Single mutable session store. Screens and the sortie tick read and write
+ * here; app.js must not keep a parallel world/career/board copy.
  */
 import { createHeli, createBoss, createBossState, createSortieState } from './state.js';
 
@@ -27,8 +26,8 @@ export let activeContract = null;
 export let sortieXpEarned = 0;
 export let sortieDollarsEarned = 0;
 export let contractBoard = [];
-export let titleMenuBoxes = [];
-export let briefingEquipmentBoxes = [];
+export const titleMenuBoxes = [];
+export const briefingEquipmentBoxes = [];
 export function setCareer(c) {
   career = c;
 }

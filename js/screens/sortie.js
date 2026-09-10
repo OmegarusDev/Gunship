@@ -1,12 +1,5 @@
 /**
- * screens/sortie.js — sortie screen (enter/tick/draw).
- * This file will eventually contain the full registerScreen('sortie') block.
- * For now it re-exports a placeholder so the import in app.js works.
+ * Sortie screen remains registered from app.js until draw is extracted.
+ * Simulation tick lives in js/sim/sortieTick.js.
  */
-export const sortieScreen = {
-  enter() {
-    console.log('sortie enter stub');
-  },
-  tick() {},
-  draw() {},
-};
+export { tickSortie } from '../sim/sortieTick.js';

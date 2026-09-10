@@ -6,6 +6,7 @@
 import {
   createCareer,
   createPilot,
+  randomNameParts,
   gainXp,
   xpToNext,
   canAllocate,
@@ -19,7 +20,12 @@ import {
   applyCareerToHeli,
   aggregateModifiers,
   loadCareer,
+  GUNSHIPS,
+  GUNSHIP_ORDER,
+  syncGunshipUnlocks,
+  selectGunship,
 } from '../js/meta.js';
+import { GUNSHIP_DRAW_IDS } from '../js/render/gunships.js';
 
 let pass = 0,
   fail = 0;
@@ -45,6 +51,25 @@ console.log('— pilot generation —');
     p2.name === p.name && JSON.stringify(p2.stats) === JSON.stringify(p.stats),
     'deterministic from seed'
   );
+  ok(p.nameParts.culture === 'american' || p.nameParts.culture === 'arab', 'pilot culture tagged');
+}
+
+console.log('— name banks —');
+{
+  const a = randomNameParts(99, 'american');
+  const b = randomNameParts(99, 'arab');
+  ok(a.culture === 'american' && b.culture === 'arab', 'culture can be forced');
+  ok(a.first !== b.first || a.last !== b.last || a.callsign !== b.callsign, 'banks differ');
+  let american = 0;
+  let arab = 0;
+  for (let seed = 1; seed <= 200; seed++) {
+    const parts = randomNameParts(seed);
+    if (parts.culture === 'american') american++;
+    else if (parts.culture === 'arab') arab++;
+  }
+  ok(american + arab === 200, 'every seed picks a culture');
+  ok(american >= 70 && american <= 130, `american share near 50% (${american}/200)`);
+  ok(arab >= 70 && arab <= 130, `arab share near 50% (${arab}/200)`);
 }
 
 console.log('— xp / leveling —');
@@ -160,6 +185,11 @@ console.log('— applyCareerToHeli —');
   c.pilot.allocated.push('laststand');
   applyCareerToHeli(heli, c.pilot, c.hangar, 'cobra');
   ok(heli.lastStand === true, 'last stand wired');
+  ok(heli.gunshipId === 'cobra', 'gunship id stamped');
+  ok(heli.rotorBlades === 2, 'stock AH-1G is 2-blade');
+  c.hangar.cobra.rotor = 2;
+  applyCareerToHeli(heli, c.pilot, c.hangar, 'cobra');
+  ok(heli.rotorBlades === 4, 'rotor 2 is 4-blade retrofit');
 }
 
 console.log('— save/load roundtrip (memory shim) —');
@@ -183,6 +213,55 @@ console.log('— save/load roundtrip (memory shim) —');
   const loaded = loadCareer();
   ok(loaded && loaded.dollars === 321, 'career persists to localStorage');
   ok(loaded.pilot.name === c.pilot.name, 'pilot survives roundtrip');
+}
+
+console.log('— gunship roster / unlocks —');
+{
+  ok(GUNSHIP_ORDER.join(',') === 'cobra,supercobra,apache,longbow,dap,comanche', 'roster order');
+  ok(
+    GUNSHIP_DRAW_IDS.slice().sort().join(',') === GUNSHIP_ORDER.slice().sort().join(','),
+    'every roster airframe has a renderer'
+  );
+  ok(GUNSHIPS.dap.year === 1990 && GUNSHIPS.dap.rotorBlades === 4, 'DAP is MH-60L 4-blade');
+  ok(GUNSHIPS.comanche.unlock === 'prestige', 'Comanche is post-game');
+  const c = createCareer(3);
+  syncGunshipUnlocks(c);
+  ok(c.unlocked.join(',') === 'cobra', 'fresh career is Cobra only');
+  c.campaign.act = 4;
+  syncGunshipUnlocks(c);
+  ok(c.unlocked.includes('longbow') && !c.unlocked.includes('dap'), 'Longbow before DAP');
+  c.campaign.act = 5;
+  syncGunshipUnlocks(c);
+  ok(c.unlocked.includes('dap') && !c.unlocked.includes('comanche'), 'DAP on campaign clear');
+  c.prestige = 1;
+  syncGunshipUnlocks(c);
+  ok(c.unlocked.includes('comanche'), 'Comanche on prestige');
+  const heli = { bulletDamage: 10, fireRate: 0.15, accel: 1, maxSpeed: 1, maxHp: 100, hp: 100 };
+  applyCareerToHeli(heli, c.pilot, c.hangar, 'dap');
+  ok(heli.gunshipId === 'dap' && heli.airframeScale === GUNSHIPS.dap.size, 'DAP scale stamped');
+  ok(heli.rotorBlades === 4, 'DAP keeps its native rotor count');
+  c.prestige = 1;
+  syncGunshipUnlocks(c);
+  for (const id of GUNSHIP_ORDER) {
+    const selected = selectGunship(c, id);
+    ok(selected.ok && c.gunship === id, `${id} can be selected once unlocked`);
+    const airframe = {
+      bulletDamage: 10,
+      fireRate: 0.15,
+      accel: 1,
+      maxSpeed: 1,
+      maxHp: 100,
+      hp: 100,
+    };
+    applyCareerToHeli(airframe, c.pilot, c.hangar, id);
+    ok(airframe.gunshipId === id, `${id} reaches the player renderer`);
+    ok(airframe.rotorBlades === GUNSHIPS[id].rotorBlades, `${id} keeps its native rotor count`);
+  }
+  const fresh = createCareer(8);
+  ok(
+    !selectGunship(fresh, 'apache').ok && fresh.gunship === 'cobra',
+    'locked airframe cannot be selected'
+  );
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -10,6 +10,100 @@ import { PILOT_XP } from './config.js';
 import { mulberry32, randInt, pick, clamp } from './rng.js';
 
 const SAVE_KEY = 'gunship_save_v1';
+const ROSTER_KEY = 'gunship_roster_v1';
+
+function newSlotId() {
+  return `pilot-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`;
+}
+
+function emptyRoster() {
+  return { version: 1, activeId: null, slots: [] };
+}
+
+function readJson(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+export function loadRoster() {
+  const stored = readJson(ROSTER_KEY);
+  if (stored?.slots?.length) return stored;
+  const legacy = readJson(SAVE_KEY);
+  if (legacy?.pilot) {
+    const id = newSlotId();
+    const roster = {
+      version: 1,
+      activeId: id,
+      slots: [{ id, lastPlayed: Date.now(), career: legacy }],
+    };
+    try {
+      localStorage.setItem(ROSTER_KEY, JSON.stringify(roster));
+    } catch {
+      /* ignore */
+    }
+    return roster;
+  }
+  return emptyRoster();
+}
+
+export function saveRoster(roster) {
+  try {
+    localStorage.setItem(ROSTER_KEY, JSON.stringify(roster));
+  } catch {
+    /* private mode */
+  }
+}
+
+export function listPilotSlots() {
+  const roster = loadRoster();
+  return roster.slots
+    .slice()
+    .sort((a, b) => (b.lastPlayed || 0) - (a.lastPlayed || 0))
+    .map((slot) => ({
+      id: slot.id,
+      lastPlayed: slot.lastPlayed || 0,
+      name: slot.career?.pilot?.name || 'UNKNOWN',
+      level: slot.career?.pilot?.level || 1,
+      dollars: slot.career?.dollars || 0,
+      act: slot.career?.campaign?.act || 1,
+      sortie: slot.career?.campaign?.sortie || 1,
+      active: slot.id === roster.activeId,
+    }));
+}
+
+export function activatePilotSlot(id) {
+  const roster = loadRoster();
+  const slot = roster.slots.find((s) => s.id === id);
+  if (!slot) return null;
+  roster.activeId = id;
+  slot.lastPlayed = Date.now();
+  saveRoster(roster);
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify(slot.career));
+  } catch {
+    /* ignore */
+  }
+  return slot.career;
+}
+
+export function addCareerToRoster(career) {
+  const roster = loadRoster();
+  const id = newSlotId();
+  roster.slots.push({ id, lastPlayed: Date.now(), career });
+  roster.activeId = id;
+  saveRoster(roster);
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify(career));
+  } catch {
+    /* ignore */
+  }
+  return id;
+}
 
 /** Shared holder so UI screens can read the career without circular imports. */
 export const metaState = { career: null };
@@ -18,58 +112,192 @@ export const metaState = { career: null };
 //  PILOT GENERATION
 // ─────────────────────────────────────────────────────────────────────────────
 
-const NAME_FIRST = [
-  'Tariq',
-  'Basim',
-  'Daud',
-  'Faisal',
-  'Hakim',
-  'Jalal',
-  'Karim',
-  'Nasir',
-  'Omar',
-  'Qasim',
-  'Rafi',
-  'Sami',
-  'Tariq',
-  'Zafir',
-  'Idris',
-  'Majed',
-];
-const NAME_CALL = [
-  'VIPER',
-  'GHOST',
-  'SABRE',
-  'NOMAD',
-  'RAVEN',
-  'DAGGER',
-  'HAWK',
-  'JACKAL',
-  'SCORPION',
-  'FALCON',
-  'MANTIS',
-  'DUNE',
-];
-const NAME_LAST = [
-  'al-Asad',
-  'al-Din',
-  'Haddad',
-  'Karam',
-  'Mahmoud',
-  'Nazari',
-  'Qadir',
-  'Sahim',
-  'Toma',
-  'Zahran',
-  'Farouk',
-  'Hakimi',
-];
+const NAME_BANKS = {
+  american: {
+    first: [
+      'Beau',
+      'Bo',
+      'Brody',
+      'Bubba',
+      'Cash',
+      'Chet',
+      'Cletus',
+      'Clint',
+      'Colt',
+      'Cody',
+      'Dallas',
+      'Duke',
+      'Dwight',
+      'Garth',
+      'Hank',
+      'Hunter',
+      'Jed',
+      'Jethro',
+      'Leroy',
+      'Maverick',
+      'Merle',
+      'Randy',
+      'Rip',
+      'Tanner',
+      'Travis',
+      'Wade',
+      'Waylon',
+      'Wyatt',
+    ],
+    call: [
+      'ACE',
+      'BANDIT',
+      'DUKE',
+      'EAGLE',
+      'FREEDOM',
+      'GUNNER',
+      'GUNNY',
+      'HAWG',
+      'MAVERICK',
+      'OUTLAW',
+      'PATRIOT',
+      'RAMBO',
+      'REBEL',
+      'SPARKY',
+      'YANKEE',
+      'YEEHAW',
+    ],
+    last: [
+      'Boone',
+      'Calhoun',
+      'Cutter',
+      'Dalton',
+      'Dodge',
+      'Earp',
+      'Fairchild',
+      'Gritton',
+      'Haggard',
+      'Hickok',
+      'Holster',
+      'Jackson',
+      'Ledoux',
+      'McGraw',
+      'Presley',
+      'Rambo',
+      'Redd',
+      'Steele',
+      'Truitt',
+      'Walker',
+    ],
+  },
+  arab: {
+    first: [
+      'Ahmed',
+      'Basim',
+      'Faisal',
+      'Farid',
+      'Hakim',
+      'Hassan',
+      'Ibrahim',
+      'Idris',
+      'Jalal',
+      'Karim',
+      'Khalid',
+      'Majed',
+      'Mustafa',
+      'Nabil',
+      'Nasir',
+      'Omar',
+      'Qasim',
+      'Rafi',
+      'Rashid',
+      'Sami',
+      'Tariq',
+      'Walid',
+      'Yusuf',
+      'Zafir',
+    ],
+    call: [
+      'BADR',
+      'DAGGER',
+      'DUNE',
+      'FALCON',
+      'FENNEC',
+      'HAWK',
+      'JACKAL',
+      'MANTIS',
+      'MIRAGE',
+      'NASR',
+      'NOMAD',
+      'SABRE',
+      'SAQR',
+      'SCORPION',
+      'SHAMS',
+      'VIPER',
+    ],
+    last: [
+      'Abdullah',
+      'al-Asad',
+      'al-Din',
+      'al-Rashid',
+      'Farouk',
+      'Haddad',
+      'Hakimi',
+      'Hussein',
+      'Karam',
+      'Khoury',
+      'Mahmoud',
+      'Mansour',
+      'Nasser',
+      'Nazari',
+      'Qadir',
+      'Rahman',
+      'Sahim',
+      'Saleh',
+      'Toma',
+      'Zahran',
+    ],
+  },
+};
+
+export function randomNameParts(seed = (Math.random() * 0xffffffff) >>> 0, culture = null) {
+  const rng = mulberry32(seed >>> 0);
+  const picked =
+    culture === 'american' || culture === 'arab' ? culture : rng() < 0.5 ? 'american' : 'arab';
+  const bank = NAME_BANKS[picked];
+  return {
+    culture: picked,
+    first: pick(bank.first, rng),
+    callsign: pick(bank.call, rng),
+    last: pick(bank.last, rng),
+  };
+}
+
+export function formatPilotName(first, callsign, last) {
+  const f = String(first || '').trim() || 'Pilot';
+  const c =
+    String(callsign || '')
+      .trim()
+      .toUpperCase() || 'GHOST';
+  const l = String(last || '').trim();
+  return l ? `${f} "${c}" ${l}` : `${f} "${c}"`;
+}
+
+export function setPilotName(pilot, parts) {
+  const first = parts.first ?? '';
+  const callsign = parts.callsign ?? '';
+  const last = parts.last ?? '';
+  const culture =
+    parts.culture === 'american' || parts.culture === 'arab'
+      ? parts.culture
+      : pilot.nameParts?.culture;
+  pilot.nameParts = { first, callsign, last, culture };
+  pilot.name = formatPilotName(first, callsign, last);
+  return pilot;
+}
 
 export function createPilot(seed = (Math.random() * 0xffffffff) >>> 0) {
   const rng = mulberry32(seed >>> 0);
+  const parts = randomNameParts(seed);
   const stat = () => 1 + rng() * 3; // 1–4, fractional growth via nodes
   return {
-    name: `${pick(NAME_FIRST, rng)} "${pick(NAME_CALL, rng)}" ${pick(NAME_LAST, rng)}`,
+    name: formatPilotName(parts.first, parts.callsign, parts.last),
+    nameParts: parts,
     level: 1,
     xp: 0,
     skillPoints: 0,
@@ -220,6 +448,87 @@ export function canAllocate(allocated, id) {
 //  countermeasures live in Equipment consumables).
 // ─────────────────────────────────────────────────────────────────────────────
 
+export const GUNSHIPS = {
+  cobra: { id: 'cobra', name: 'AH-1G Cobra', year: 1967, rotorBlades: 2, size: 1, unlock: 'start' },
+  supercobra: {
+    id: 'supercobra',
+    name: 'AH-1W SuperCobra',
+    year: 1986,
+    rotorBlades: 2,
+    size: 1.03,
+    unlock: 'act_2',
+  },
+  apache: {
+    id: 'apache',
+    name: 'AH-64 Apache',
+    year: 1986,
+    rotorBlades: 4,
+    size: 1.08,
+    unlock: 'act_3',
+  },
+  longbow: {
+    id: 'longbow',
+    name: 'AH-64D Longbow',
+    year: 1997,
+    rotorBlades: 4,
+    size: 1.08,
+    unlock: 'act_4',
+  },
+  dap: { id: 'dap', name: 'MH-60L DAP', year: 1990, rotorBlades: 4, size: 1.1, unlock: 'campaign' },
+  comanche: {
+    id: 'comanche',
+    name: 'RAH-66 Comanche',
+    year: 1996,
+    rotorBlades: 5,
+    size: 1,
+    unlock: 'prestige',
+  },
+};
+
+export const GUNSHIP_ORDER = ['cobra', 'supercobra', 'apache', 'longbow', 'dap', 'comanche'];
+
+export function gunshipDef(id = 'cobra') {
+  return GUNSHIPS[id] || GUNSHIPS.cobra;
+}
+
+function emptyHangarTree() {
+  return { engine: 0, armor: 0, weaponMount: 0, rotor: 0, avionics: 0 };
+}
+
+/** Grant airframes the career has earned. DAP after the campaign; Comanche on prestige. */
+export function syncGunshipUnlocks(career) {
+  if (!career || typeof career !== 'object') return career;
+  career.unlocked = Array.isArray(career.unlocked) ? career.unlocked : [];
+  career.hangar = career.hangar && typeof career.hangar === 'object' ? career.hangar : {};
+  if (!GUNSHIPS[career.gunship]) career.gunship = 'cobra';
+
+  const act = career.campaign?.act || 1;
+  const prestige = career.prestige || 0;
+  const add = (id) => {
+    if (!career.unlocked.includes(id)) career.unlocked.push(id);
+    if (!career.hangar[id]) career.hangar[id] = emptyHangarTree();
+  };
+  add('cobra');
+  if (act >= 2) add('supercobra');
+  if (act >= 3) add('apache');
+  if (act >= 4) add('longbow');
+  if (act >= 5 || prestige >= 1) add('dap');
+  if (prestige >= 1) add('comanche');
+  if (!career.unlocked.includes(career.gunship)) career.gunship = 'cobra';
+  return career;
+}
+
+/** Select an unlocked airframe and persist it with the active career. */
+export function selectGunship(career, id) {
+  syncGunshipUnlocks(career);
+  if (!GUNSHIPS[id]) return { ok: false, reason: 'UNKNOWN AIRFRAME' };
+  if (!career.unlocked.includes(id)) return { ok: false, reason: 'LOCKED AIRFRAME' };
+  career.gunship = id;
+  if (!career.hangar[id]) career.hangar[id] = emptyHangarTree();
+  saveCareer(career);
+  return { ok: true };
+}
+
 export const HANGAR_SLOTS = {
   engine: {
     name: 'ENGINE',
@@ -336,7 +645,7 @@ export function aggregateModifiers(pilot, hangar, gunshipId = 'cobra') {
   if (has('laststand')) m.lastStand = true;
 
   // Hangar levels
-  const h = hangar[gunshipId] || {};
+  const h = hangar?.[gunshipId] || {};
   const lvl = (slot) => h[slot] || 0;
   if (lvl('engine') >= 1) {
     m.maxSpeedMult *= 1.06;
@@ -373,7 +682,14 @@ export function aggregateModifiers(pilot, hangar, gunshipId = 'cobra') {
 
 /** Apply aggregated career modifiers onto a freshly-reset heli. */
 export function applyCareerToHeli(heli, pilot, hangar, gunshipId = 'cobra') {
-  const m = aggregateModifiers(pilot, hangar, gunshipId);
+  const id = GUNSHIPS[gunshipId] ? gunshipId : 'cobra';
+  const safeHangar = hangar && typeof hangar === 'object' ? hangar : {};
+  const m = aggregateModifiers(pilot, safeHangar, id);
+  const tree = safeHangar[id] || {};
+  heli.gunshipId = id;
+  const def = gunshipDef(id);
+  heli.airframeScale = def.size || 1;
+  heli.rotorBlades = def.rotorBlades === 5 ? 5 : (tree.rotor || 0) >= 2 ? 4 : def.rotorBlades;
   heli.bulletDamage = Math.max(1, Math.round(heli.bulletDamage * m.dmgMult));
   heli.fireRate = heli.fireRate * m.fireRateMult;
   heli.accel = heli.accel * m.accelMult;
@@ -445,15 +761,14 @@ export function createCareer(seed) {
 }
 
 export function loadCareer() {
-  try {
-    const raw = localStorage.getItem(SAVE_KEY);
-    if (!raw) return null;
-    const data = JSON.parse(raw);
-    if (!data || !data.pilot) return null;
-    return data;
-  } catch {
-    return null;
+  const roster = loadRoster();
+  const slot = roster.slots.find((s) => s.id === roster.activeId) || roster.slots[0];
+  if (slot?.career?.pilot) {
+    syncGunshipUnlocks(slot.career);
+    return slot.career;
   }
+  const legacy = readJson(SAVE_KEY);
+  return legacy?.pilot ? legacy : null;
 }
 
 export function saveCareer(career) {
@@ -461,6 +776,22 @@ export function saveCareer(career) {
     localStorage.setItem(SAVE_KEY, JSON.stringify(career));
   } catch {
     /* private mode etc. — play without persistence */
+  }
+  try {
+    const roster = loadRoster();
+    let slot = roster.slots.find((s) => s.id === roster.activeId);
+    if (!slot) {
+      const id = newSlotId();
+      slot = { id, lastPlayed: Date.now(), career };
+      roster.slots.push(slot);
+      roster.activeId = id;
+    } else {
+      slot.career = career;
+      slot.lastPlayed = Date.now();
+    }
+    saveRoster(roster);
+  } catch {
+    /* ignore roster write */
   }
 }
 

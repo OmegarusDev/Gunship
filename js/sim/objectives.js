@@ -3,18 +3,23 @@
  * Pure over world/boss/enemies — no DOM, no canvas. Shared by app.js and tools/.
  */
 import { WORLD_SIZE } from '../config.js';
+import { isRosterStub, resolveLiveTarget, resolveObjectiveAim } from './targeting.js';
 
 export function isAlive(target) {
   if (!target) return false;
+  if (isRosterStub(target)) return false;
   if (target.destroyed !== undefined) return !target.destroyed;
   if (target.state !== undefined) return target.state !== 'dead';
   if (target.collected !== undefined) return !target.collected;
   return target.hp === undefined || target.hp > 0;
 }
 
-export function isTargetAlive(world, boss, target) {
+export function isTargetAlive(world, boss, target, enemies = []) {
   if (!target) return false;
   if (target === boss) return Boolean(boss?.spawned) && boss.state !== 'dead';
+  const live = resolveLiveTarget(world, enemies, boss, target);
+  if (live) return true;
+  if (isRosterStub(target)) return false;
   if (target.state !== undefined) return target.state !== 'dead';
   if (target.collected || target.destroyed) return false;
   return target.hp === undefined || target.hp > 0;
@@ -50,24 +55,9 @@ export function canExtract(world, heli) {
 }
 
 export function getObjectiveFocus(world, boss, enemies, heli) {
-  const obj = world?.objective;
-  if (!obj) return null;
-  if (obj.type === 'suppression') {
-    let best = null,
-      bestD = Infinity;
-    for (const e of enemies) {
-      if (!e.objectiveTarget || e.state === 'dead') continue;
-      const d = Math.hypot(e.x - heli.x, e.y - heli.y);
-      if (d < bestD) {
-        bestD = d;
-        best = e;
-      }
-    }
-    return best ? { x: best.x, y: best.y } : null;
-  }
-  const t = obj.target;
-  if (!t || !isTargetAlive(world, boss, t) || t === boss) return null;
-  return { x: t.x, y: t.y };
+  const aim = resolveObjectiveAim(world, enemies, boss, heli);
+  if (!aim || aim === boss) return null;
+  return { x: aim.x, y: aim.y };
 }
 
 export function nearestExitPoint(heli) {

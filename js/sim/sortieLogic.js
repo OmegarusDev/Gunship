@@ -1,8 +1,8 @@
 /**
- * sim/sortieLogic.js — sortie-specific helpers (extracted from app.js).
- * This file will eventually hold the full tick logic; for now it re-exports
- * shared helpers so screens/sortie.js can import without circular deps.
+ * Shared sortie helpers used by screens and the extracted tick.
  */
 export * from './state.js';
 export * from './movement.js';
 export * from './objectives.js';
+export { updateEnemies } from './enemyAi.js';
+export { tickSortie } from './sortieTick.js';

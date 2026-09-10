@@ -164,6 +164,7 @@ export function createEnemyFromRoster(entry, originX = 0, originY = 0, difficult
     enemy.placeId = entry.placeId || null;
     enemy.districtId = entry.districtId || null;
     enemy.parcelId = entry.parcelId || null;
+    enemy.post = entry.post || 'street';
   }
   return enemy;
 }

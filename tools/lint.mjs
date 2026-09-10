@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // tools/lint.mjs — zero-dep lint gate (fast) + optional eslint if installed.
 // Runs node --check on every js/mjs file, plus a few project invariants.
-import { readdirSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join, extname } from 'node:path';
 
@@ -75,7 +75,10 @@ try {
     .map((file) => readFileSync(file, 'utf8'))
     .join('\n');
   check(!runtimeSource.includes('world.sites'), 'runtime has no world.sites dependency');
-  check(!/\bsiteId\b/.test(runtimeSource), 'runtime ownership uses placeId/encounterId, not siteId');
+  check(
+    !/\bsiteId\b/.test(runtimeSource),
+    'runtime ownership uses placeId/encounterId, not siteId'
+  );
 } catch (e) {
   console.error('  (could not inspect worldgen ownership invariants)', e.message);
 }
@@ -88,9 +91,12 @@ try {
 } catch {}
 if (hasEslint) {
   console.log('— lint: eslint —');
-  const r = spawnSync('npx', ['eslint', 'js', '--ext', '.js,.mjs', '--max-warnings', '100'], {
-    stdio: 'inherit',
-  });
+  const localEslint = 'node_modules/.bin/eslint';
+  const command = existsSync(localEslint) ? localEslint : 'npx';
+  const args = existsSync(localEslint)
+    ? ['js', '--ext', '.js,.mjs', '--max-warnings', '100']
+    : ['eslint', 'js', '--ext', '.js,.mjs', '--max-warnings', '100'];
+  const r = spawnSync(command, args, { stdio: 'inherit' });
   if (r.status !== 0) {
     // Don't fail gate on eslint warnings yet — just report
     console.log('(eslint reported issues — fix warnings to tighten gate)');

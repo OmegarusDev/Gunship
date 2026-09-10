@@ -62,6 +62,8 @@ export function createHeli() {
     lastStand: false,
     missileWarning: false,
     lastStandUsed: false,
+    gunshipId: 'cobra',
+    rotorBlades: 2,
     // per-sortie equipment
     equipmentType: null,
     equipmentUsed: false,

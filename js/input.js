@@ -24,6 +24,7 @@ export class Input {
     this.mouseX = 0;
     this.mouseY = 0;
     this.mouseOnScreen = false;
+    this.pointerDown = false;
 
     // Fire (held, not one-shot)
     this.fire = false;
@@ -89,9 +90,11 @@ export class Input {
     });
     c.addEventListener('mouseleave', () => {
       this.mouseOnScreen = false;
+      this.pointerDown = false;
     });
     c.addEventListener('mousedown', (e) => {
       e.preventDefault();
+      this.pointerDown = true;
       if (this.clickToTarget) {
         this.clickTargetX = e.clientX - c.getBoundingClientRect().left;
         this.clickTargetY = e.clientY - c.getBoundingClientRect().top;
@@ -103,6 +106,7 @@ export class Input {
     });
     c.addEventListener('mouseup', () => {
       this.fireHeld = false;
+      this.pointerDown = false;
     });
     c.addEventListener('contextmenu', (e) => e.preventDefault());
 
@@ -130,6 +134,10 @@ export class Input {
       const y = t.clientY - rect.top;
       const norm = { x: x / rect.width, y: y / rect.height };
       this.touches.set(t.identifier, { x, y, norm });
+      this.mouseX = x;
+      this.mouseY = y;
+      this.mouseOnScreen = true;
+      this.pointerDown = true;
 
       if (norm.x < 0.45) {
         // Left side = movement joystick
@@ -176,6 +184,8 @@ export class Input {
       this.joystickActive = false;
       this.moveX = 0;
       this.moveY = 0;
+      this.pointerDown = false;
+      this.mouseOnScreen = false;
     }
   }
 

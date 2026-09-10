@@ -29,6 +29,7 @@ export const P = {
     cockpit: '#88ccdd',
     cockpitHi: '#aaeeff',
     rotor: '#555555',
+    rotorTip: '#e6c84a',
     weaponPod: '#4a4a4a',
     weaponHi: '#5a5a5a',
     skid: '#333333',
@@ -36,6 +37,7 @@ export const P = {
     outline: '#222222',
     stealth: '#3a5a3a',
     stealthHi: '#4a6a4a',
+    boomStripe: '#d4b43a',
   },
 
   // === ENEMIES (all brown — simple, unified) ===
