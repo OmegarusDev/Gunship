@@ -51,7 +51,7 @@ js/
     state.js           # FEAR_THRESHOLDS, HEAT_LABELS, hunterClockRate, factories (createHeli/Boss/SortieState)
     movement.js        # nearestRoadPoint, steerAlongRoads, vehicleSpeedFactor, pointAlongRoute, getConvoyMembers (roadCache WeakMap)
     objectives.js      # isTargetAlive, objectiveComplete, canExtract, getObjectiveFocus, nearestExitPoint
-    gameState.js       # shared mutable world/heli/boss/sortieState/projectiles (single source, imported by app + screens/sortie)
+    gameState.js       # shared mutable world/heli/boss/sortieState/projectiles + campaign/practice context
     sortieLogic.js     # stub for helpers extracted from app.js (future)
     sortieTick.js      # stub for tickSortie (future, ~1000 lines currently in app.js)
   render/
@@ -64,10 +64,11 @@ js/
   screens/
     sortie.js          # stub for sortie screen (enter/tick/draw) — currently in app.js:1384-2924
 tools/
-  check.mjs            # gate: lint → meta-check → sortie-smoke
+  check.mjs            # gate: lint → meta → worldgen → sortie → targeting → browser smoke
   lint.mjs             # syntax + structural invariants + optional eslint
   meta-check.mjs       # career/skill/hangar/XP checks
   sortie-smoke.mjs     # objective, extraction, and meta-pipeline checks
+  browser-smoke.mjs    # boot, Practice, campaign KIA, and stronghold routing
   worldgen-check.mjs   # multi-seed v4 determinism, geometry, connectivity, and rhythm sweep
 ```
 
@@ -95,13 +96,13 @@ Destination anchors are planning inputs, not runtime “sites.” Regional roads
 
 ## Contracts → Sortie → Debrief
 
-`contracts.js` picks 4 `SCENARIO` (strike/intercept/sabotage/suppression/recovery) × compatible `STYLE` (loud/precision/deep/pursuit/low) × `DIFFICULTY` (routine/standard/hazardous/severe, `threatBudget`/`radial`/`hp`/`eta` multipliers). `world.js` exposes `generateWorld({seed, contract, terrain})`; v4 builds the geometry and then selects contract targets by semantic tags such as `command`, `radar`, `airDefense`, `supply`, or `convoyRoute`. Target selection never depends on a place centroid or settlement archetype. Sortie is `TITLE → OPERATIONS (4 offers) → briefing (choose EQUIPMENT) → SORTIE (complete objective → exit map edge) → debrief (commitSortieOutcome banks dollars/XP, KIA resets pilot)`. Extraction is `canExtract` in `sim/objectives.js`.
+`contracts.js` picks 4 `SCENARIO` (strike/intercept/sabotage/suppression/recovery) × compatible `STYLE` (loud/precision/deep/pursuit/low) × `DIFFICULTY` (routine/standard/hazardous/severe, `threatBudget`/`radial`/`hp`/`eta` multipliers). The four-act campaign replaces the fourth offer board with an unavoidable stronghold contract and attaches a boss profile to every campaign sortie. `world.js` exposes `generateWorld({seed, contract, terrain})`; v4 builds the geometry and then selects contract targets by semantic tags such as `command`, `radar`, `airDefense`, `supply`, or `convoyRoute`. Target selection never depends on a place centroid or settlement archetype. Sortie is `TITLE → OPERATIONS/PRACTICE → briefing (choose EQUIPMENT) → SORTIE (complete objective + commander) → debrief`; campaign debriefs bank rewards and apply KIA/prestige policy, while Practice never mutates the career. Extraction is `canExtract` in `sim/objectives.js`.
 
 ## Fear / Heat / Hunter
 
 - **Fear** (`FEAR_THRESHOLDS` in `sim/state.js`, alias `INFAMY` in `config.js` deprecated) — kills add `fearWeight`, secured encounters add Heat; thresholds `[10,25,50,85,130,190,270,370,500,660]` → Fear level → `FEAR GROWS` overlay with 3 cards from `upgrades.js`.
 - **Heat** (`HEAT_LABELS` QUIET→CRITICAL) — `addHeat`/`reduceHeat` in `app.js`, `getHeatTier` in `sim/state.js`, scales `COMBAT.aggroPerHeatTier` and `hunterClockRate = (0.72+heat/100*1.18)*difficulty*style`.
-- **Hunter** (`bossState.timeRemaining`, `TIMER.baseTime * hunterEtaMultiplier` in `config.js:60` live) — `bossWarningTime 5s` then `spawnBoss` (Hind, `approach→attack→retreat`), `bossState` in `sim/gameState.js`.
+- **Hunter / commander** (`bossState.timeRemaining`, `TIMER.baseTime * hunterEtaMultiplier` in `config.js:60` live) — normal sorties spawn a profiled commander after the ETA; strongholds spawn their commander immediately with a dedicated timer. Flight behavior currently uses the shared `approach→attack→retreat` controller, with profile-specific HP, labels, and bodyguards.
 
 ## Conventions for building upon
 

@@ -9,9 +9,10 @@
 # Gunship — Freedom Protocol
 
 A browser helicopter-combat roguelite. Take contracts, fly the op, complete the
-objective, then **exit the map** to extract. Bank dollars and pilot XP between
-sorties — level your pilot, spend skill points on a cross-linked skill grid, and
-buy chopper upgrades in the hangar. The campaign advances one sortie at a time.
+objective, defeat the responding commander, and return with the aircraft. Bank
+dollars and pilot XP between sorties — level your pilot, spend skill points on a
+cross-linked skill grid, and buy chopper upgrades in the hangar. The campaign has
+four acts of three normal sorties plus a stronghold.
 
 ## Play
 
@@ -29,11 +30,18 @@ It boots straight into the game — no setup.
 
 ## Loop
 
-`TITLE → OPERATIONS → contract → briefing → SORTIE → debrief → next board`
+`TITLE → OPERATIONS → contract → briefing → SORTIE → commander → debrief → next board`
 
-Complete the primary objective, then fly off the map edge to extract. Kills and
-objective completion award pilot XP and dollars; the debrief banks them into
-your persistent career.
+Complete the primary objective and defeat the commander. Kills, objectives, and
+commander victories award pilot XP and dollars; the debrief banks them into your
+persistent career. The final stronghold awards prestige and starts a new
+campaign with the Comanche unlocked.
+
+**Practice** is available from the campaign hub for testing. It uses the active
+campaign pilot and gunship, but grants no XP or dollars and cannot kill or reset
+the pilot. In campaign mode, a hull loss kills the current pilot and restarts
+campaign progress, while the selected gunship, hangar upgrades, unlocks, and
+dollars persist.
 
 ## Development
 
@@ -45,7 +53,7 @@ python3 -m http.server 8000
 # then open http://localhost:8000
 ```
 
-Run the verification gate (lint + meta + worldgen structure + sortie smoke):
+Run the verification gate (lint + meta + worldgen + sortie + targeting + browser smoke):
 
 ```bash
 node tools/check.mjs
@@ -53,6 +61,7 @@ node tools/check.mjs
 node tools/lint.mjs
 node tools/meta-check.mjs
 node tools/sortie-smoke.mjs
+node tools/browser-smoke.mjs
 ```
 
 With dev deps installed, you also get `eslint` + `prettier`:

@@ -825,7 +825,7 @@ export function commitSortieOutcome(career, status, xpEarned, dollarsEarned) {
       careerKills: career.pilot.careerKills,
     };
     career.pilot = createPilot((Math.random() * 0xffffffff) >>> 0);
-    career.pilot.sortiesFlown = keep.sortiesFlown + 1;
+    career.pilot.sortiesFlown = keep.sortiesFlown;
     career.pilot.careerKills = keep.careerKills;
     career.campaign = { act: 1, sortie: 1 };
   } else {
@@ -834,6 +834,27 @@ export function commitSortieOutcome(career, status, xpEarned, dollarsEarned) {
 
   saveCareer(career);
   return { died, levelsGained };
+}
+
+/** Advance the four-act campaign after a completed campaign sortie. */
+export function advanceCampaign(career) {
+  const act = career.campaign?.act || 1;
+  const sortie = career.campaign?.sortie || 1;
+  if (sortie < 4) {
+    career.campaign = { act, sortie: sortie + 1 };
+    return { prestige: false, act: career.campaign.act, sortie: career.campaign.sortie };
+  }
+  if (act < 4) {
+    career.campaign = { act: act + 1, sortie: 1 };
+    syncGunshipUnlocks(career);
+    return { prestige: false, act: career.campaign.act, sortie: career.campaign.sortie };
+  }
+
+  career.prestige = (career.prestige || 0) + 1;
+  career.campaign = { act: 1, sortie: 1 };
+  career.pilot = createPilot((Math.random() * 0xffffffff) >>> 0);
+  syncGunshipUnlocks(career);
+  return { prestige: true, act: 1, sortie: 1 };
 }
 
 /** Hangar purchase. Returns { ok, reason }. */

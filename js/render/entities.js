@@ -11,7 +11,6 @@ export function setBoss(boss) {
   _boss = boss;
 }
 
-
 function drawEnemy(ctx, e) {
   const cx = e.x,
     cy = e.y;
@@ -202,6 +201,10 @@ function drawEnemy(ctx, e) {
 
 function drawBoss(ctx) {
   if (!_boss.spawned || _boss.state === 'dead') return;
+  if (isGroundBoss(_boss)) {
+    drawGroundBoss(ctx);
+    return;
+  }
   const cx = _boss.x,
     cy = _boss.y;
   const s = _boss.size;
@@ -317,7 +320,97 @@ function drawBoss(ctx) {
   ctx.fillStyle = '#ff4444';
   ctx.font = 'bold 9px "Courier New", monospace';
   ctx.textAlign = 'center';
-  ctx.fillText('HIND PURSUIT GUNSHIP', cx, barY - 4);
+  ctx.fillText(_boss.name || 'HIND PURSUIT GUNSHIP', cx, barY - 4);
+}
+
+function isGroundBoss(boss) {
+  return /tank|fortified|sam|aa|column|brigade|complex|ad|combined/.test(boss.type || '');
+}
+
+function drawGroundBoss(ctx) {
+  const cx = _boss.x;
+  const cy = _boss.y;
+  const s = Math.max(18, _boss.size * 0.9);
+  const isFlashing = _boss.flashTimer > 0;
+  const isAirDefense = /sam|aa|air_defense|ad_complex|heavy_ad/.test(_boss.type || '');
+  const body = isFlashing ? '#ffffff' : isAirDefense ? '#4f665c' : '#665744';
+  const dark = isFlashing ? '#ffffff' : '#39352d';
+  const accent = isFlashing ? '#ffffff' : isAirDefense ? '#6f8f7b' : '#9b6a3d';
+
+  ctx.fillStyle = withAlpha('#000000', 0.4);
+  ctx.beginPath();
+  ctx.ellipse(cx + 5, cy + 8, s * 1.2, s * 0.42, _boss.angle, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(_boss.angle);
+  ctx.fillStyle = dark;
+  ctx.fillRect(-s * 1.1, -s * 0.72, s * 2.2, s * 0.22);
+  ctx.fillRect(-s * 1.1, s * 0.5, s * 2.2, s * 0.22);
+  ctx.fillStyle = body;
+  ctx.beginPath();
+  ctx.moveTo(-s * 0.9, -s * 0.55);
+  ctx.lineTo(s * 0.7, -s * 0.55);
+  ctx.lineTo(s, 0);
+  ctx.lineTo(s * 0.7, s * 0.55);
+  ctx.lineTo(-s * 0.9, s * 0.55);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = P.enemy.outline;
+  ctx.lineWidth = 1.8;
+  ctx.stroke();
+
+  ctx.fillStyle = dark;
+  ctx.beginPath();
+  ctx.arc(-s * 0.1, 0, s * 0.38, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+
+  if (isAirDefense) {
+    ctx.fillStyle = accent;
+    ctx.fillRect(-s * 0.2, -s * 0.46, s * 0.85, s * 0.12);
+    ctx.fillRect(-s * 0.2, s * 0.34, s * 0.85, s * 0.12);
+    ctx.strokeStyle = dark;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(-s * 0.1, -s * 0.62, s * 0.24, Math.PI, 0);
+    ctx.stroke();
+  } else {
+    ctx.fillStyle = accent;
+    ctx.fillRect(s * 0.05, -s * 0.07, s * 0.95, s * 0.14);
+    ctx.fillRect(s * 0.82, -s * 0.14, s * 0.16, s * 0.28);
+  }
+  ctx.restore();
+
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(_boss.turretAngle);
+  ctx.fillStyle = dark;
+  ctx.fillRect(s * 0.15, -s * 0.07, s * 0.95, s * 0.14);
+  ctx.strokeStyle = P.enemy.outline;
+  ctx.lineWidth = 1.2;
+  ctx.strokeRect(s * 0.15, -s * 0.07, s * 0.95, s * 0.14);
+  ctx.restore();
+
+  const barW = s * 3;
+  const barH = 5;
+  const barX = cx - barW / 2;
+  const barY = cy - s - 16;
+  ctx.fillStyle = '#1a1a1a';
+  ctx.fillRect(barX, barY, barW, barH);
+  const hpPct = _boss.hp / _boss.maxHp;
+  ctx.fillStyle = hpPct > 0.5 ? '#cc4444' : hpPct > 0.25 ? '#ff6644' : '#ff2222';
+  ctx.fillRect(barX, barY, barW * hpPct, barH);
+  ctx.strokeStyle = '#880000';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(barX, barY, barW, barH);
+  ctx.fillStyle = '#ff6666';
+  ctx.font = 'bold 9px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText(_boss.name || 'ARMORED COMMANDER', cx, barY - 4);
 }
 
 function drawHunter(ctx) {

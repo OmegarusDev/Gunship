@@ -33,6 +33,7 @@ import {
   metaState,
   loadCareer,
   commitSortieOutcome,
+  advanceCampaign,
   applyCareerToHeli,
   gainXp,
   xpToNext,
@@ -259,7 +260,9 @@ function toggleSettings() {
 let world = null;
 let sharedTerrain = null;
 const worldgenParams =
-  typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
+  typeof window !== 'undefined'
+    ? new URLSearchParams(window.location.search)
+    : new URLSearchParams();
 const worldgenSeedText = worldgenParams.get('seed');
 const worldgenSeedOverride = worldgenSeedText === null ? Number.NaN : Number(worldgenSeedText);
 const debugWorldgen = worldgenParams.get('worldDebug') === '1';
@@ -278,7 +281,9 @@ function getMiniRoads(S) {
 // minimap road cache now in render/roads.js
 
 function initWorld(contract = null) {
-  const seed = Number.isFinite(worldgenSeedOverride) ? worldgenSeedOverride : (contract?.seed ?? 42);
+  const seed = Number.isFinite(worldgenSeedOverride)
+    ? worldgenSeedOverride
+    : (contract?.seed ?? 42);
   sharedTerrain = createTerrain(seed, WORLD_SIZE);
   world = generateWorld({ seed, contract, terrain: sharedTerrain });
   world.debugWorldgen = debugWorldgen;
@@ -310,6 +315,40 @@ function spawnOutdoorEnemies() {
         entry.active = true;
       }
     }
+  }
+}
+
+function spawnStrongholdDefenses() {
+  const contract = GameState.activeContract;
+  const target = world?.objective?.target;
+  if (!contract?.stronghold || !target) return;
+  const act = contract.campaign?.act || 1;
+  const classesByAct = {
+    1: ['lightAA', 'rifleman', 'rifleman'],
+    2: ['lightAA', 'sam', 'rifleman', 'rifleman'],
+    3: ['sam', 'shilka', 'lightAA', 'rifleman', 'rifleman'],
+    4: ['sam', 'sam', 'shilka', 'tank', 'lightAA', 'rifleman'],
+  };
+  const classes = classesByAct[act] || classesByAct[4];
+  const radius = 90 + act * 12;
+  const difficulty = getDifficultyForEnemy(target.x, target.y);
+  for (let i = 0; i < classes.length; i++) {
+    const angle = (i / classes.length) * Math.PI * 2;
+    const entry = {
+      id: `stronghold-defense-${act}-${i}`,
+      className: classes[i],
+      x: target.x + Math.cos(angle) * radius,
+      y: target.y + Math.sin(angle) * radius,
+      isIndoor: false,
+    };
+    const enemy = createEnemyFromRoster(entry, 0, 0, difficulty);
+    if (!enemy) continue;
+    enemy.strongholdDefense = true;
+    enemy.state = 'idle';
+    enemy.homeX = enemy.x;
+    enemy.homeY = enemy.y;
+    applyEnemyDifficulty(enemy);
+    enemies.push(enemy);
   }
 }
 
@@ -463,8 +502,8 @@ function checkEncounterClear(encounter) {
     const reward = encounter.reward || {};
     const score = reward.score || Math.floor(50 + Math.hypot(encounter.x, encounter.y) * 0.02);
     heli.score += score;
-    GameState.setSortieDollars(GameState.sortieDollarsEarned + (reward.dollars || 0));
-    GameState.setSortieXp(GameState.sortieXpEarned + (reward.xp || 30));
+    GameState.addSortieDollars(reward.dollars || 0);
+    GameState.addSortieXp(reward.xp || 30);
     floatingTexts.push({
       x: encounter.x,
       y: encounter.y - 50,
@@ -508,8 +547,9 @@ const boss = GameState.boss; // shared
 
 function resetBossTimer() {
   const difficulty = getDifficultyProfile(GameState.activeContract?.difficultyId);
-  bossState.timeRemaining = TIMER.baseTime * difficulty.hunterEtaMultiplier;
-  bossState.active = true;
+  const stronghold = GameState.activeContract?.stronghold === true;
+  bossState.timeRemaining = stronghold ? 0 : TIMER.baseTime * difficulty.hunterEtaMultiplier;
+  bossState.active = !stronghold;
   bossState.warning = false;
   bossState.warningTimer = 0;
   bossState.spawned = false;
@@ -522,6 +562,10 @@ function resetBoss() {
   boss.maxHp = 0;
   boss.state = 'approach';
   boss.spawned = false;
+  boss.name = 'HIND PURSUIT GUNSHIP';
+  boss.type = 'pursuit_gunship';
+  boss.bodyguards = 0;
+  boss.bodyguardsSpawned = false;
 }
 
 /** Spawn the boss from a random map edge direction. */
@@ -535,23 +579,57 @@ function spawnBoss() {
   boss.spawnAngle = angle;
   boss.angle = angle + Math.PI; // face toward the theatre
   const difficulty = getDifficultyProfile(GameState.activeContract?.difficultyId);
+  const profile = GameState.activeContract?.bossProfile;
   // A Hind-pattern pursuit gunship: fast enough to pressure extraction,
   // but still readable through attack passes and a long firing cooldown.
-  boss.hp = Math.round(280 * difficulty.hunterHpMultiplier);
+  const fearScale = 1 + (sortieState.fearLevel || 0) * 0.05;
+  const groundBoss = /tank|fortified|sam|aa|column|brigade|complex|ad|combined/.test(
+    profile?.type || ''
+  );
+  boss.hp = Math.round((profile?.hp || 280) * difficulty.hunterHpMultiplier * fearScale);
   boss.maxHp = boss.hp;
-  boss.speed = 145;
-  boss.damage = Math.max(1, 14 * difficulty.hunterDamageMultiplier);
-  boss.range = 430;
-  boss.fireRate = 1.8;
+  boss.speed = profile?.type === 'fighter' ? 220 : groundBoss ? 75 : 145;
+  boss.damage = Math.max(1, (groundBoss ? 20 : 14) * difficulty.hunterDamageMultiplier);
+  boss.range = groundBoss ? 360 : 430;
+  boss.fireRate = profile?.final ? 1.1 : groundBoss ? 1.25 : 1.8;
   boss.fireCooldown = 2.0;
   boss.state = 'approach';
   boss.flashTimer = 0;
   boss.deathTimer = 0;
   boss.phaseTimer = 0;
-  boss.size = 22;
+  boss.size = profile?.final ? 30 : groundBoss ? 24 : 22;
+  boss.name = profile?.name || 'HIND PURSUIT GUNSHIP';
+  boss.type = profile?.type || 'pursuit_gunship';
+  boss.bodyguards = profile?.bodyguards || 0;
+  boss.bodyguardsSpawned = false;
   boss.turretAngle = angle + Math.PI;
   boss.spawned = true;
   bossState.spawned = true;
+
+  if (boss.bodyguards > 0 && !boss.bodyguardsSpawned) {
+    const guardClass = /sam|air_defense|ad_complex|heavy_ad|aa/.test(boss.type)
+      ? 'lightAA'
+      : 'rifleman';
+    const guardDifficulty = getDifficultyForEnemy(boss.x, boss.y);
+    for (let i = 0; i < boss.bodyguards; i++) {
+      const guardAngle = (i / boss.bodyguards) * Math.PI * 2;
+      const guardRadius = 42 + (i % 3) * 18;
+      const entry = {
+        id: `boss-guard-${boss.type}-${i}`,
+        className: guardClass,
+        x: boss.x + Math.cos(guardAngle) * guardRadius,
+        y: boss.y + Math.sin(guardAngle) * guardRadius,
+        isIndoor: false,
+      };
+      const guard = createEnemyFromRoster(entry, 0, 0, guardDifficulty);
+      if (!guard) continue;
+      guard.state = 'attack';
+      guard.bossGuard = true;
+      applyEnemyDifficulty(guard);
+      enemies.push(guard);
+    }
+    boss.bodyguardsSpawned = true;
+  }
 }
 
 /** Securing a contact raises the response level without changing place identity. */
@@ -597,6 +675,9 @@ function resetSortieState() {
   sortieState.rewards.supplies = 0;
   sortieState.rewards.hunter = 0;
   sortieState.rewards.secured = 0;
+  sortieState.strongholdTimeRemaining = GameState.activeContract?.stronghold
+    ? GameState.activeContract.strongholdTime || 300
+    : 0;
   sortieState.stats.kills = 0;
   sortieState.stats.crates = 0;
   sortieState.stats.places = 0;
@@ -664,7 +745,8 @@ function addFear(amount, reason = 'confirmed hostile') {
 function openFearUpgrade() {
   const level = sortieState.fearLevel || 1;
   const seed =
-    ((GameState.activeContract?.seed ?? 42) + level * 7919 + sortieState.pendingLevelUps * 97) >>> 0;
+    ((GameState.activeContract?.seed ?? 42) + level * 7919 + sortieState.pendingLevelUps * 97) >>>
+    0;
   sortieState.upgradeChoices = createUpgradeChoices(seed, sortieState.appliedUpgrades);
   if (sortieState.upgradeChoices.length > 0) sortieState.levelUpOpen = true;
 }
@@ -753,8 +835,8 @@ function damageWorldTarget(target, damage, x, y) {
       // Different reward track from buildings: bounty + fear, and the
       // burning tailings drop salvage.
       heli.score += 150;
-      GameState.setSortieXp(GameState.sortieXpEarned + 40);
-      GameState.setSortieDollars(GameState.sortieDollarsEarned + 60);
+      GameState.addSortieXp(40);
+      GameState.addSortieDollars(60);
       addFear(3, 'convoy ambushed');
       spawnFloatingText(target.x, target.y - 30, 'CONVOY DESTROYED', '#aaff88');
       spawnFloatingText(target.x, target.y - 48, '+150', '#ffcc44');
@@ -877,30 +959,43 @@ function completeObjective() {
     world.objective.progress = world.objective.requiredCount || 1;
   }
   if (world?.extraction) world.extraction.active = true;
-  sortieState.rewards.objective = GameState.activeContract?.reward || 0;
+  if (!GameState.isPracticeSortie()) {
+    sortieState.rewards.objective = GameState.activeContract?.reward || 0;
+  }
+  GameState.addSortieDollars(GameState.activeContract?.reward || 0);
+  GameState.addSortieXp(40);
   addFear(8, 'primary objective complete');
   addHeat(6, 'primary objective reported');
   spawnFloatingText(heli.x, heli.y - 42, 'OBJECTIVE COMPLETE', '#aaff88');
-  spawnFloatingText(heli.x, heli.y - 58, 'EXIT THE MAP', '#44ddff');
+  spawnFloatingText(
+    heli.x,
+    heli.y - 58,
+    bossState.defeated ? 'EXIT THE MAP' : 'DEFEAT THE COMMANDER',
+    '#44ddff'
+  );
 }
 
 function checkObjectiveProgress() {
   if (!world?.objective || sortieState.objectiveComplete) return;
   const objective = world.objective;
+  const commanderDefeated = !GameState.activeContract?.stronghold || bossState.defeated;
   if (objective.type === 'suppression') {
     const targetEnemies = enemies.filter((enemy) => enemy.objectiveTarget);
     const destroyed = targetEnemies.filter((enemy) => enemy.state === 'dead').length;
     objective.progress = destroyed;
-    if (destroyed >= objective.requiredCount) completeObjective();
+    if (destroyed >= objective.requiredCount && commanderDefeated) completeObjective();
   } else if (objective.type === 'recovery') {
-    if (objective.target?.collected) completeObjective();
-  } else if (objective.target && !isTargetAlive(objective.target)) {
+    if (objective.target?.collected && commanderDefeated) completeObjective();
+  } else if (objective.target && !isTargetAlive(objective.target) && commanderDefeated) {
     completeObjective();
   }
 }
 
 function objectiveHudText() {
   if (!world?.objective) return 'STANDBY';
+  if (sortieState.objectiveComplete && !bossState.defeated) {
+    return 'PRIMARY COMPLETE — DEFEAT THE COMMANDER';
+  }
   if (world.objective.type === 'strike')
     return `DESTROY ${world.objective.targetPlaceName || 'COMMAND TARGET'}`;
   if (world.objective.type === 'sabotage')
@@ -917,7 +1012,8 @@ function collectSupplyCrates() {
     if (crate.collected || Math.hypot(crate.x - heli.x, crate.y - heli.y) > 24) continue;
     crate.collected = true;
     sortieState.stats.crates++;
-    sortieState.rewards.supplies += 60;
+    if (!GameState.isPracticeSortie()) sortieState.rewards.supplies += 60;
+    GameState.addSortieDollars(60);
     addHeat(1.5, 'supply recovery reported');
     if (crate.rewardType === 'repair') {
       heli.hp = Math.min(heli.maxHp, heli.hp + 25);
@@ -945,6 +1041,7 @@ function updateExtraction(dt) {
     sortieState.status !== 'active'
   )
     return;
+  if (!bossState.defeated) return;
   const lim = WORLD_SIZE * 0.48;
   if (Math.abs(heli.x) > lim || Math.abs(heli.y) > lim) finishSortie('complete');
 }
@@ -959,18 +1056,25 @@ function finishSortie(status) {
   sortieState.status = status;
   bossState.active = false;
   sortieState.rewards.secured =
-    status === 'complete'
+    status === 'complete' && !GameState.isPracticeSortie()
       ? sortieState.rewards.objective + sortieState.rewards.supplies + sortieState.rewards.hunter
       : 0;
   sortieState.endTimer = 1.0;
   projectiles.length = 0;
   heli.target = null;
   heli.manualTarget = null;
+  const practiceLabel = GameState.isPracticeSortie();
   spawnFloatingText(
     heli.x,
     heli.y - 45,
-    status === 'complete' ? 'SORTIE COMPLETE' : 'PILOT KIA',
-    status === 'complete' ? '#aaff88' : '#ff4444'
+    practiceLabel
+      ? status === 'complete'
+        ? 'PRACTICE COMPLETE'
+        : 'PRACTICE HULL LOSS'
+      : status === 'complete'
+        ? 'SORTIE COMPLETE'
+        : 'PILOT KIA',
+    status === 'complete' ? '#aaff88' : practiceLabel ? '#ffcc44' : '#ff4444'
   );
 }
 
@@ -1053,7 +1157,9 @@ registerScreen('title', {
     const t = performance.now() / 1000;
     const split = L.landscape && h < 600;
     const brandCx = split ? L.content.x + L.content.w * 0.3 : w / 2;
-    const brandCy = split ? h * 0.48 : L.content.y + Math.min(L.phone ? 56 : 72, L.content.h * 0.22);
+    const brandCy = split
+      ? h * 0.48
+      : L.content.y + Math.min(L.phone ? 56 : 72, L.content.h * 0.22);
     const sweepR = Math.min(w, h) * (split ? 0.26 : 0.28);
     ctx.globalAlpha = 0.5;
     drawRadarSweep(ctx, brandCx, brandCy, sweepR, t);
@@ -1066,12 +1172,16 @@ registerScreen('title', {
 
     const entries = [
       { label: 'OPERATIONS', sub: 'SELECT CONTRACT', target: 'contracts' },
+      {
+        label: 'PRACTICE',
+        sub: 'NO PILOT RISK · NO REWARDS',
+        target: 'contracts',
+        sortieMode: 'practice',
+      },
       { label: 'HANGAR', sub: 'BUY CHOPPER PARTS', target: 'hangar' },
       { label: 'SKILLS', sub: 'LEVEL & TALENTS', target: 'pilot' },
     ];
-    const menuW = split
-      ? Math.min(340, L.content.w * 0.44)
-      : Math.min(400, L.content.w);
+    const menuW = split ? Math.min(340, L.content.w * 0.44) : Math.min(400, L.content.w);
     const menuX = split ? L.content.x + L.content.w - menuW : (w - menuW) / 2;
     const btnH = L.btnH;
     const stackH = entries.length * btnH + (entries.length - 1) * L.btnGap;
@@ -1083,7 +1193,14 @@ registerScreen('title', {
     for (const entry of entries) {
       const rect = { x: menuX, y: my, w: menuW, h: btnH };
       drawMenuButton(ctx, rect, { label: entry.label, sub: entry.sub });
-      GameState.titleMenuBoxes.push({ ...rect, action: 'screen', target: entry.target });
+      GameState.titleMenuBoxes.push({
+        ...rect,
+        action: 'screen',
+        target: entry.target,
+        sortieMode: entry.sortieMode,
+        label: entry.label,
+        sub: entry.sub,
+      });
       my += btnH + L.btnGap;
     }
 
@@ -1162,30 +1279,38 @@ let debriefInfo = null;
 
 registerScreen('debrief', {
   enter() {
-    // Commit the sortie to the career: XP/levels if the pilot survived,
-    // fresh pilot if KIA. Dollars always banked. Campaign advances on win.
-    const res = commitSortieOutcome(
-      GameState.career,
-      sortieState.status,
-      GameState.sortieXpEarned,
-      GameState.sortieDollarsEarned
-    );
-    if (sortieState.status === 'complete') {
-      GameState.career.campaign.sortie += 1;
-      if (GameState.career.campaign.sortie > 4) {
-        GameState.career.campaign.sortie = 1;
-        GameState.career.campaign.act += 1;
+    if (GameState.sortieContext.outcomeCommitted) return;
+    const practice = GameState.isPracticeSortie();
+    const reportPilotName = GameState.sortieContext.pilotName || GameState.career.pilot.name;
+    let res;
+    let progression = { prestige: false };
+
+    if (practice) {
+      res = { died: false, levelsGained: 0, practice: true };
+    } else {
+      // Campaign outcomes mutate the persistent career: XP/levels on survival,
+      // a replacement pilot on KIA, and retained hangar/gunship progression.
+      res = commitSortieOutcome(
+        GameState.career,
+        sortieState.status,
+        GameState.sortieXpEarned,
+        GameState.sortieDollarsEarned
+      );
+      if (sortieState.status === 'complete') {
+        progression = advanceCampaign(GameState.career);
+        syncGunshipUnlocks(GameState.career);
+        saveCareer(GameState.career);
       }
-      syncGunshipUnlocks(GameState.career);
-      saveCareer(GameState.career);
     }
+    GameState.sortieContext.outcomeCommitted = true;
     debriefInfo = {
       ...res,
-      xp: GameState.sortieXpEarned,
-      dollars: GameState.sortieDollarsEarned,
+      xp: practice ? 0 : GameState.sortieXpEarned,
+      dollars: practice ? 0 : GameState.sortieDollarsEarned,
       level: GameState.career.pilot.level,
-      pilotName: GameState.career.pilot.name,
+      pilotName: reportPilotName,
       sp: GameState.career.pilot.skillPoints,
+      prestige: progression.prestige,
     };
     metaState.career = GameState.career;
   },
@@ -1194,11 +1319,32 @@ registerScreen('debrief', {
     const h = cam.screenH;
     const success = sortieState.status === 'complete';
     const aborted = sortieState.status === 'abandoned';
+    const practice = GameState.isPracticeSortie();
     drawScreenBackground(
       ctx,
       cam,
-      success ? 'SORTIE COMPLETE' : aborted ? 'SORTIE ABORTED' : 'PILOT KIA',
-      success ? 'OPERATIONAL REPORT' : aborted ? 'PILOT RECOVERED' : 'SIGNAL LOST'
+      practice
+        ? success
+          ? 'PRACTICE COMPLETE'
+          : aborted
+            ? 'PRACTICE ABORTED'
+            : 'PRACTICE FAILED'
+        : success
+          ? debriefInfo?.prestige
+            ? 'CAMPAIGN COMPLETE'
+            : 'SORTIE COMPLETE'
+          : aborted
+            ? 'SORTIE ABORTED'
+            : 'PILOT KIA',
+      practice
+        ? 'PILOT SAFE · CAMPAIGN UNCHANGED · NO REWARDS'
+        : success
+          ? debriefInfo?.prestige
+            ? 'PRESTIGE AWARDED · NEW CAMPAIGN READY'
+            : 'OPERATIONAL REPORT'
+          : aborted
+            ? 'PILOT RECOVERED'
+            : 'SIGNAL LOST'
     );
     ctx.save();
     ctx.scale(cam.dpr, cam.dpr);
@@ -1239,12 +1385,19 @@ registerScreen('debrief', {
       ['SUPPLY CACHES', `${sortieState.stats.crates}`],
       ['FEAR LEVEL', `${sortieState.fearLevel || 0}`],
       ['PEAK HEAT', `${Math.round(sortieState.heat.value)}`],
-      ['SECURED PAY', `$${sortieState.rewards.secured}`],
+      ['SECURED PAY', practice ? 'NONE — PRACTICE' : `$${sortieState.rewards.secured}`],
       [
         'XP EARNED',
-        debriefInfo ? `${debriefInfo.xp}${debriefInfo.died ? ' (LOST — KIA)' : ''}` : '0',
+        practice
+          ? 'NONE — PRACTICE'
+          : debriefInfo
+            ? `${debriefInfo.xp}${debriefInfo.died ? ' (LOST — KIA)' : ''}`
+            : '0',
       ],
-      ['DOLLARS EARNED', `$${debriefInfo ? debriefInfo.dollars : 0}`],
+      [
+        'DOLLARS EARNED',
+        practice ? 'NONE — PRACTICE' : `$${debriefInfo ? debriefInfo.dollars : 0}`,
+      ],
       [
         'PILOT LEVEL',
         debriefInfo
@@ -1268,9 +1421,29 @@ registerScreen('debrief', {
     }
     const afterRows = y + padIn + 36 + Math.ceil(rows.length / cols) * rowH + 14;
     ctx.font = `bold ${L.compact ? 10 : 11}px "Courier New", monospace`;
-    if (debriefInfo?.died) {
+    if (practice) {
+      ctx.fillStyle = '#ffcc44';
+      ctx.fillText(
+        success
+          ? 'PRACTICE COMPLETE — PILOT SAFE — CAMPAIGN UNCHANGED'
+          : 'PRACTICE HULL LOSS — PILOT SAFE — CAMPAIGN UNCHANGED',
+        x + padIn,
+        afterRows
+      );
+    } else if (debriefInfo?.prestige) {
+      ctx.fillStyle = '#ffcc44';
+      ctx.fillText(
+        `CAMPAIGN COMPLETE — PRESTIGE ${GameState.career.prestige} — COMANCHE UNLOCKED`,
+        x + padIn,
+        afterRows
+      );
+    } else if (debriefInfo?.died) {
       ctx.fillStyle = '#ff6666';
-      ctx.fillText('PILOT KIA — NEW PILOT ASSIGNED', x + padIn, afterRows);
+      ctx.fillText(
+        `PILOT KIA — ${debriefInfo.pilotName} — NEW PILOT ASSIGNED — GUNSHIP RETAINED`,
+        x + padIn,
+        afterRows
+      );
     } else if (debriefInfo?.levelsGained) {
       ctx.fillStyle = '#44cccc';
       ctx.fillText(
@@ -1288,7 +1461,10 @@ registerScreen('debrief', {
     }
 
     const showPilot =
-      debriefInfo && (debriefInfo.sp > 0 || debriefInfo.levelsGained) && !debriefInfo.died;
+      !practice &&
+      debriefInfo &&
+      (debriefInfo.sp > 0 || debriefInfo.levelsGained) &&
+      !debriefInfo.died;
     const blink2 = Math.sin(performance.now() / 500) > -0.4;
     if (showPilot) {
       const pair = footerPairRects(L, { backLabel: 'SKILLS ▸', primaryMinW: 200 });
@@ -1374,8 +1550,9 @@ function drawScreenBackground(ctx, cam, title, subtitle = '') {
 
 function contractCardRect(index, w, h) {
   const L = layoutOf(w, h);
-  const cols = L.landscape || w >= 700 ? 2 : 1;
-  const rows = Math.ceil(4 / cols);
+  const count = Math.max(1, GameState.contractBoard.length);
+  const cols = count === 1 ? 1 : L.landscape || w >= 700 ? 2 : 1;
+  const rows = Math.ceil(count / cols);
   const gap = L.btnGap;
   const cardW = Math.min(400, (L.content.w - gap * (cols - 1)) / cols);
   const cardH = Math.min(176, (L.content.h - gap * (rows - 1)) / rows);
@@ -1459,7 +1636,11 @@ function drawContractCard(ctx, card, rect, selected = false) {
     rect.y + rect.h - 28
   );
   ctx.fillStyle = '#ffcc44';
-  ctx.fillText(`PAY    $${card.reward}`, rect.x + 16, rect.y + rect.h - 14);
+  ctx.fillText(
+    GameState.isPracticeSortie() ? 'PAY    NONE — PRACTICE' : `PAY    $${card.reward}`,
+    rect.x + 16,
+    rect.y + rect.h - 14
+  );
   ctx.restore();
   ctx.restore();
 }
@@ -1484,7 +1665,8 @@ function wrapText(text, maxChars) {
 registerScreen('contracts', {
   enter() {
     const seed = (mulberry32(Date.now())() * 0xffffffff) >>> 0;
-    GameState.setContractBoard(createContractBoard(seed, { act: 1, sortie: 1 }));
+    const campaign = GameState.career?.campaign || { act: 1, sortie: 1 };
+    GameState.setContractBoard(createContractBoard(seed, campaign));
   },
   draw(ctx, cam) {
     const w = cam.screenW;
@@ -1494,7 +1676,9 @@ registerScreen('contracts', {
       ctx,
       cam,
       'AVAILABLE OPERATIONS',
-      `ACT ${camp.act} · SORTIE ${camp.sortie} — SELECT ONE CONTRACT`
+      GameState.isPracticeSortie()
+        ? `PRACTICE · ACT ${camp.act} · NO PILOT RISK · NO REWARDS`
+        : `ACT ${camp.act} · SORTIE ${camp.sortie} — SELECT ONE CONTRACT`
     );
     ctx.save();
     ctx.scale(cam.dpr, cam.dpr);
@@ -1520,7 +1704,11 @@ registerScreen('briefing', {
       ctx,
       cam,
       'SORTIE BRIEFING',
-      GameState.activeContract ? `CONTRACT SEED ${GameState.activeContract.seed}` : 'NO CONTRACT'
+      GameState.isPracticeSortie()
+        ? 'PRACTICE SORTIE · PILOT SAFE · NO REWARDS'
+        : GameState.activeContract
+          ? `CONTRACT SEED ${GameState.activeContract.seed}`
+          : 'NO CONTRACT'
     );
     ctx.save();
     ctx.scale(cam.dpr, cam.dpr);
@@ -1554,7 +1742,10 @@ registerScreen('briefing', {
     ctx.fillText(scenario.objectiveLabel, leftX + 20, panelY + 50);
     ctx.fillStyle = P.ui.text;
     ctx.font = `${L.compact ? 10 : 11}px "Courier New", monospace`;
-    const descriptionLines = wrapText(scenario.description, Math.max(22, Math.floor((leftW - 40) / 7.2)));
+    const descriptionLines = wrapText(
+      scenario.description,
+      Math.max(22, Math.floor((leftW - 40) / 7.2))
+    );
     const maxDesc = L.compact ? 2 : 3;
     for (let i = 0; i < descriptionLines.length && i < maxDesc; i++)
       ctx.fillText(descriptionLines[i], leftX + 20, panelY + 72 + i * 16);
@@ -1568,10 +1759,20 @@ registerScreen('briefing', {
       detailY + 40
     );
     ctx.fillStyle = '#ffcc44';
-    ctx.fillText(`BASE PAY    $${GameState.activeContract?.reward || 0}`, leftX + 20, detailY + 60);
+    ctx.fillText(
+      GameState.isPracticeSortie()
+        ? 'BASE PAY    NONE — PRACTICE'
+        : `BASE PAY    $${GameState.activeContract?.reward || 0}`,
+      leftX + 20,
+      detailY + 60
+    );
     ctx.fillStyle = P.ui.textDim;
     ctx.fillText('Fear levels you up. Heat accelerates the Hunter.', leftX + 20, detailY + 86);
-    ctx.fillText('Complete the objective, then leave the map.', leftX + 20, detailY + 104);
+    ctx.fillText(
+      'Complete the objective, defeat the commander, then return.',
+      leftX + 20,
+      detailY + 104
+    );
 
     const eqKeys = Object.keys(EQUIPMENT);
     const eqPanelX = rightX;
@@ -1625,6 +1826,7 @@ registerScreen('briefing', {
 registerScreen('sortie', {
   enter(contract) {
     GameState.setActiveContract(contract || GameState.activeContract);
+    GameState.captureSortieSnapshot();
     resetSortieState();
     enemies.length = 0;
     projectiles.length = 0;
@@ -1660,7 +1862,12 @@ registerScreen('sortie', {
     heli.salvoTimer = 0;
     heli.adrenalineT = 0;
     heli.flareT = 0;
-    applyCareerToHeli(heli, GameState.career.pilot, GameState.career.hangar, GameState.career.gunship);
+    applyCareerToHeli(
+      heli,
+      GameState.career.pilot,
+      GameState.career.hangar,
+      GameState.career.gunship
+    );
     GameState.setSortieXp(0);
     GameState.setSortieDollars(0);
     try {
@@ -1688,8 +1895,10 @@ registerScreen('sortie', {
       }
     }
     spawnOutdoorEnemies();
+    spawnStrongholdDefenses();
     resetBossTimer();
     resetBoss();
+    if (GameState.activeContract?.stronghold) spawnBoss();
   },
 
   tick(dt) {
@@ -1962,16 +2171,19 @@ registerScreen('sortie', {
     const rph = narrow ? 118 : 124;
     const rpx = W - rpw - hudPad;
 
+    const practice = GameState.isPracticeSortie();
     const nToggles = (input.autofire ? 1 : 0) + (input.clickToTarget ? 1 : 0);
     const equipReady = sortieState.status === 'active' && heli.equipmentType && !heli.equipmentUsed;
     const objText =
       world?.objective && !sortieState.objectiveComplete
         ? objectiveHudText()
         : sortieState.objectiveComplete
-          ? 'RTB — EXIT THE MAP'
+          ? bossState.defeated
+            ? 'RTB — EXIT THE MAP'
+            : 'PRIMARY COMPLETE — DEFEAT THE COMMANDER'
           : null;
     const objWrap = objText
-        ? wrapText(objText, Math.max(16, Math.floor((lpw - 32) / 6))).slice(0, 2)
+      ? wrapText(objText, Math.max(16, Math.floor((lpw - 32) / 6))).slice(0, 2)
       : [];
     const showProgress = !!(
       world?.objective &&
@@ -1981,6 +2193,7 @@ registerScreen('sortie', {
     const sysH =
       46 +
       nToggles * 16 +
+      (practice ? 16 : 0) +
       (equipReady ? 16 : 0) +
       objWrap.length * 14 +
       (showProgress ? 14 : 0) +
@@ -2175,12 +2388,17 @@ registerScreen('sortie', {
     }
 
     // ── Boss timer ──
-    if (bossState.active && !bossState.defeated) {
-      const secs = Math.max(0, Math.ceil(bossState.timeRemaining));
+    const strongholdClock =
+      GameState.activeContract?.stronghold && sortieState.strongholdTimeRemaining > 0;
+    if ((bossState.active && !bossState.defeated) || strongholdClock) {
+      const remaining = strongholdClock
+        ? sortieState.strongholdTimeRemaining
+        : bossState.timeRemaining;
+      const secs = Math.max(0, Math.ceil(remaining));
       const mins = Math.floor(secs / 60);
       const rem = secs % 60;
       const timerStr = `${mins}:${rem.toString().padStart(2, '0')}`;
-      const urgent = bossState.timeRemaining < 30;
+      const urgent = remaining < 30;
       const flash = urgent && Math.sin(performance.now() / 200) > 0;
       const bw = 190,
         bx = W / 2 - bw / 2,
@@ -2190,10 +2408,14 @@ registerScreen('sortie', {
       ctx.font = 'bold 13px "Courier New", monospace';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
-      ctx.fillText(`HUNTER ETA ${timerStr}`, W / 2, by + 5);
+      ctx.fillText(
+        `${strongholdClock ? 'STRONGHOLD T-' : 'HUNTER ETA '}${timerStr}`,
+        W / 2,
+        by + 5
+      );
       // Time-remaining underline (normalized against base timer)
       const baseT = Math.max(1, TIMER.baseTime);
-      const frac = clamp(bossState.timeRemaining / baseT, 0, 1);
+      const frac = clamp(remaining / (strongholdClock ? 300 : baseT), 0, 1);
       ctx.fillStyle = urgent ? 'rgba(255,68,68,0.8)' : 'rgba(120,180,100,0.6)';
       ctx.fillRect(bx + 8, by + 20, (bw - 16) * frac, 2);
     }
@@ -2203,7 +2425,7 @@ registerScreen('sortie', {
       const bossBarW = 220,
         bossBarH = 9;
       const bossBarX = W / 2 - bossBarW / 2;
-      const etaShowing = bossState.active && !bossState.defeated;
+      const etaShowing = (bossState.active && !bossState.defeated) || strongholdClock;
       const bossBarY = etaShowing ? hudEtaY + 40 : hudEtaY;
       hudPlate(ctx, bossBarX - 8, bossBarY - 16, bossBarW + 16, 30, 'rgba(255,68,68,0.55)');
       ctx.fillStyle = '#1a1a1a';
@@ -2218,7 +2440,7 @@ registerScreen('sortie', {
       ctx.font = 'bold 9px "Courier New", monospace';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
-      ctx.fillText('HIND PURSUIT GUNSHIP', W / 2, bossBarY - 12);
+      ctx.fillText(boss.name || 'HIND PURSUIT GUNSHIP', W / 2, bossBarY - 12);
     }
 
     // Target indicator + mode
@@ -2322,6 +2544,11 @@ registerScreen('sortie', {
         ctx.fillText('[SHIFT/V]', px + 108, py + 22);
       }
       let ty = py + 40;
+      if (practice) {
+        ctx.fillStyle = '#ffcc44';
+        ctx.fillText('PRACTICE · NO REWARDS', px + 14, ty);
+        ty += 16;
+      }
       for (let i = 0; i < nToggles; i++) {
         ctx.fillStyle = P.ui.rocket;
         ctx.fillText(i === 0 && input.autofire ? 'AUTOFIRE' : 'CLICK-TARGET', px + 14, ty);
@@ -2442,9 +2669,7 @@ registerScreen('sortie', {
               ? 'rgba(190,165,95,0.38)'
               : 'rgba(220,195,120,0.30)';
         ctx.strokeStyle =
-          place.category === 'military'
-            ? 'rgba(255,130,90,0.75)'
-            : 'rgba(225,205,145,0.62)';
+          place.category === 'military' ? 'rgba(255,130,90,0.75)' : 'rgba(225,205,145,0.62)';
         ctx.lineWidth = 0.8;
         const polygon = place.footprint || [];
         if (polygon.length >= 3) {
@@ -2958,6 +3183,7 @@ canvas.addEventListener('click', (e) => {
           switchScreen('menu');
           return;
         }
+        if (box.target === 'contracts') GameState.setSortieMode(box.sortieMode || 'campaign');
         metaReturnScreen = 'title';
         switchScreen(box.target);
         return;

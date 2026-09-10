@@ -12,6 +12,50 @@ function lerp(a, b, t) {
   return a + (b - a) * t;
 }
 
+function isGroundBoss(boss) {
+  return /tank|fortified|sam|aa|column|brigade|complex|ad|combined/.test(boss.type || '');
+}
+
+function fireBossPattern(boss, spawnProjectile) {
+  const aim = boss.turretAngle;
+  const type = boss.type || '';
+  if (type === 'supergunship') {
+    const phase = boss.hp / boss.maxHp;
+    const count = phase < 0.5 ? 12 : phase < 0.75 ? 10 : 8;
+    for (let i = 0; i < count; i++) {
+      const angle = aim + (i / count) * Math.PI * 2;
+      spawnProjectile(boss.x, boss.y, angle, 180 + (i % 2) * 35, boss.damage * 0.7, true, 2.8);
+    }
+    spawnProjectile(boss.x, boss.y, aim, 270, boss.damage * 1.3, true, 2.1);
+    return;
+  }
+  if (type === 'fighter') {
+    for (const offset of [-0.12, 0, 0.12]) {
+      spawnProjectile(boss.x, boss.y, aim + offset, 360, boss.damage * 0.75, true, 1.4);
+    }
+    return;
+  }
+  if (isGroundBoss(boss)) {
+    const airDefense = /sam|aa|air_defense|ad_complex|heavy_ad/.test(type);
+    const offsets = airDefense ? [-0.24, -0.12, 0, 0.12, 0.24] : [-0.08, 0.08];
+    for (const offset of offsets) {
+      spawnProjectile(
+        boss.x,
+        boss.y,
+        aim + offset,
+        airDefense ? 300 : 250,
+        boss.damage * (airDefense ? 0.65 : 0.9),
+        true,
+        2.0
+      );
+    }
+    return;
+  }
+  spawnProjectile(boss.x, boss.y, aim - 0.07, 280, boss.damage, true, 1.8);
+  spawnProjectile(boss.x, boss.y, aim + 0.07, 280, boss.damage, true, 1.8);
+  spawnProjectile(boss.x, boss.y, aim, 220, boss.damage * 1.4, true, 2.1);
+}
+
 export function tickSortie(dt, deps) {
   const {
     camera,
@@ -55,6 +99,16 @@ export function tickSortie(dt, deps) {
     return;
   }
 
+  if (GameState.activeContract?.stronghold && sortieState.strongholdTimeRemaining > 0) {
+    sortieState.strongholdTimeRemaining -= dt;
+    if (sortieState.strongholdTimeRemaining <= 0) {
+      sortieState.strongholdTimeRemaining = 0;
+      spawnFloatingText(heli.x, heli.y - 42, 'STRONGHOLD TIMER EXPIRED', '#ff4444');
+      finishSortie('failed');
+      return;
+    }
+  }
+
   const TARGET_MODES = ['closest', 'strongest', 'infrastructure'];
   if (input.cycleTarget || input.cycleMode) {
     heli.targetCycleIndex = (heli.targetCycleIndex + 1) % TARGET_MODES.length;
@@ -66,7 +120,8 @@ export function tickSortie(dt, deps) {
   if (input.clickTarget && input.clickToTarget) {
     const worldPos = camera.screenToWorld(input.clickTargetX, input.clickTargetY);
     const extra = [];
-    if (world?.objective?.type === 'recovery' && world.objective.target) extra.push(world.objective.target);
+    if (world?.objective?.type === 'recovery' && world.objective.target)
+      extra.push(world.objective.target);
     const clicked = pickClickedTarget(world, enemies, boss, worldPos, {
       extra,
       convoyMembers: getConvoyMembers,
@@ -153,7 +208,9 @@ export function tickSortie(dt, deps) {
   const fireRate = heli.fireRate * (heli.adrenalineT > 0 ? 0.6 : 1.0);
   const wantsFire = input.fire || (input.autofire && heli.target);
   if (wantsFire && heli.fireCooldown <= 0) {
-    let aimA = heli.target ? Math.atan2(heli.target.y - heli.y, heli.target.x - heli.x) : heli.angle;
+    let aimA = heli.target
+      ? Math.atan2(heli.target.y - heli.y, heli.target.x - heli.x)
+      : heli.angle;
     let dmg = heli.bulletDamage;
     if (heli.target) {
       const td = Math.hypot(heli.target.x - heli.x, heli.target.y - heli.y);
@@ -183,7 +240,12 @@ export function tickSortie(dt, deps) {
     heli.fireCooldown = fireRate;
   }
 
-  if (input.equipment && heli.equipmentType && !heli.equipmentUsed && sortieState.status === 'active') {
+  if (
+    input.equipment &&
+    heli.equipmentType &&
+    !heli.equipmentUsed &&
+    sortieState.status === 'active'
+  ) {
     heli.equipmentUsed = true;
     if (heli.equipmentType === 'repair') {
       heli.hp = Math.min(heli.maxHp, heli.hp + 40);
@@ -206,7 +268,15 @@ export function tickSortie(dt, deps) {
       const tx = heli.target ? heli.target.x : heli.x + Math.cos(heli.angle) * 400;
       const ty = heli.target ? heli.target.y : heli.y + Math.sin(heli.angle) * 400;
       const angle = Math.atan2(ty - heli.y, tx - heli.x) + (Math.random() - 0.5) * 0.14;
-      spawnProjectile(heli.x + Math.cos(angle) * 22, heli.y + Math.sin(angle) * 22, angle, 340, 15, false, 1.6);
+      spawnProjectile(
+        heli.x + Math.cos(angle) * 22,
+        heli.y + Math.sin(angle) * 22,
+        angle,
+        340,
+        15,
+        false,
+        1.6
+      );
       heli.salvoShots--;
       heli.salvoTimer = 0.12;
     }
@@ -254,7 +324,11 @@ export function tickSortie(dt, deps) {
 
   if (bossState.active && !bossState.defeated) {
     bossState.timeRemaining -= dt * hunterClockRate();
-    if (bossState.timeRemaining <= TIMER.bossWarningTime && !bossState.warning && !bossState.spawned) {
+    if (
+      bossState.timeRemaining <= TIMER.bossWarningTime &&
+      !bossState.warning &&
+      !bossState.spawned
+    ) {
       bossState.warning = true;
       bossState.warningTimer = TIMER.bossWarningTime;
     }
@@ -292,10 +366,12 @@ export function tickSortie(dt, deps) {
         boss.phaseTimer = 0;
       }
     } else if (boss.state === 'attack') {
+      const ground = isGroundBoss(boss);
       const strafeDir = boss.phaseTimer % 8 < 4 ? 1 : -1;
-      const tangential = trackAngle + (Math.PI / 2) * strafeDir;
-      boss.x += Math.cos(tangential) * boss.speed * 0.85 * dt;
-      boss.y += Math.sin(tangential) * boss.speed * 0.85 * dt;
+      const travelAngle = ground ? trackAngle : trackAngle + (Math.PI / 2) * strafeDir;
+      const travelSpeed = ground ? 0.45 : 0.85;
+      boss.x += Math.cos(travelAngle) * boss.speed * travelSpeed * dt;
+      boss.y += Math.sin(travelAngle) * boss.speed * travelSpeed * dt;
       if (dist > boss.range * 0.8) {
         boss.x += Math.cos(trackAngle) * boss.speed * 0.55 * dt;
         boss.y += Math.sin(trackAngle) * boss.speed * 0.55 * dt;
@@ -303,15 +379,13 @@ export function tickSortie(dt, deps) {
         boss.x -= Math.cos(trackAngle) * boss.speed * 0.7 * dt;
         boss.y -= Math.sin(trackAngle) * boss.speed * 0.7 * dt;
       }
-      let hdiff = tangential - boss.angle;
+      let hdiff = travelAngle - boss.angle;
       while (hdiff > Math.PI) hdiff -= Math.PI * 2;
       while (hdiff < -Math.PI) hdiff += Math.PI * 2;
       boss.angle += hdiff * Math.min(1, 1.5 * dt);
       boss.fireCooldown -= dt;
       if (boss.fireCooldown <= 0 && dist < boss.range) {
-        spawnProjectile(boss.x, boss.y, boss.turretAngle - 0.07, 280, boss.damage, true, 1.8);
-        spawnProjectile(boss.x, boss.y, boss.turretAngle + 0.07, 280, boss.damage, true, 1.8);
-        spawnProjectile(boss.x, boss.y, boss.turretAngle, 220, boss.damage * 1.4, true, 2.1);
+        fireBossPattern(boss, spawnProjectile);
         boss.fireCooldown = boss.fireRate;
       }
       if (boss.hp < boss.maxHp * 0.35) {
@@ -419,8 +493,10 @@ export function tickSortie(dt, deps) {
             boss.deathTimer = 2.0;
             bossState.defeated = true;
             bossState.active = false;
-            sortieState.rewards.hunter += 300;
-            GameState.setSortieDollars(GameState.sortieDollarsEarned + 250);
+            if (!GameState.isPracticeSortie()) {
+              sortieState.rewards.hunter += 300;
+              GameState.addSortieDollars(250);
+            }
             heli.score += 500;
             addFear(12, 'Hunter destroyed');
             reduceHeat(18, 'Hunter destroyed');
@@ -442,12 +518,16 @@ export function tickSortie(dt, deps) {
             e.state = 'dead';
             e.deathTimer = 0.5;
             heli.score += e.points;
-            GameState.setSortieXp(GameState.sortieXpEarned + e.points);
+            GameState.addSortieXp(e.points);
             sortieState.stats.kills++;
             let fearGain = 1;
             if (e.category === 'vehicle') fearGain = 4;
             else if (e.category === 'emplacement') fearGain = 3;
-            else if (e.weaponName === 'RPG' || e.weaponName === 'ATGM' || e.weaponName === 'MANPADS') {
+            else if (
+              e.weaponName === 'RPG' ||
+              e.weaponName === 'ATGM' ||
+              e.weaponName === 'MANPADS'
+            ) {
               fearGain = 2;
             }
             addFear(fearGain, e.className);
@@ -488,6 +568,9 @@ export function tickSortie(dt, deps) {
   }
 
   checkObjectiveProgress();
+  if (bossState.defeated && sortieState.objectiveComplete && sortieState.status === 'active') {
+    finishSortie('complete');
+  }
   updateExtraction(dt);
 
   for (let i = explosions.length - 1; i >= 0; i--) {

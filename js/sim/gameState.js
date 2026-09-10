@@ -28,6 +28,12 @@ export let sortieDollarsEarned = 0;
 export let contractBoard = [];
 export const titleMenuBoxes = [];
 export const briefingEquipmentBoxes = [];
+export const sortieContext = {
+  mode: 'campaign',
+  pilotName: null,
+  gunshipId: null,
+  outcomeCommitted: false,
+};
 export function setCareer(c) {
   career = c;
 }
@@ -40,8 +46,30 @@ export function setSortieXp(n) {
 export function setSortieDollars(n) {
   sortieDollarsEarned = n;
 }
+export function addSortieXp(n) {
+  if (sortieContext.mode === 'practice' || !Number.isFinite(n) || n <= 0) return;
+  sortieXpEarned += n;
+}
+export function addSortieDollars(n) {
+  if (sortieContext.mode === 'practice' || !Number.isFinite(n) || n <= 0) return;
+  sortieDollarsEarned += n;
+}
 export function setContractBoard(b) {
   contractBoard = b;
+}
+export function setSortieMode(mode = 'campaign') {
+  sortieContext.mode = mode === 'practice' ? 'practice' : 'campaign';
+  sortieContext.pilotName = null;
+  sortieContext.gunshipId = null;
+  sortieContext.outcomeCommitted = false;
+}
+export function captureSortieSnapshot() {
+  sortieContext.pilotName = career?.pilot?.name || 'UNKNOWN PILOT';
+  sortieContext.gunshipId = career?.gunship || 'cobra';
+  sortieContext.outcomeCommitted = false;
+}
+export function isPracticeSortie() {
+  return sortieContext.mode === 'practice';
 }
 
 export const sortieState = createSortieState();

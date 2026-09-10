@@ -94,6 +94,10 @@ export function createBoss() {
     spawnAngle: 0,
     phaseTimer: 0,
     size: 22,
+    name: 'HIND PURSUIT GUNSHIP',
+    type: 'pursuit_gunship',
+    bodyguards: 0,
+    bodyguardsSpawned: false,
     turretAngle: 0,
     spawned: false,
   };
@@ -123,6 +127,7 @@ export function createSortieState() {
     heat: { value: 0, tier: 0, lastContact: 0, lastEvent: '', eventTimer: 0, decayMultiplier: 1 },
     rewards: { objective: 0, supplies: 0, hunter: 0, secured: 0 },
     stats: { kills: 0, crates: 0, places: 0, encounters: 0 },
+    strongholdTimeRemaining: 0,
     endTimer: 0,
   };
 }
@@ -149,6 +154,7 @@ export function resetSortieState(sortieState, activeContract) {
   sortieState.stats.crates = 0;
   sortieState.stats.places = 0;
   sortieState.stats.encounters = 0;
+  sortieState.strongholdTimeRemaining = 0;
   sortieState.endTimer = 0;
 }
 

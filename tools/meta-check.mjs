@@ -17,6 +17,7 @@ import {
   buyHangarLevel,
   HANGAR_SLOTS,
   commitSortieOutcome,
+  advanceCampaign,
   applyCareerToHeli,
   aggregateModifiers,
   loadCareer,
@@ -26,6 +27,8 @@ import {
   selectGunship,
 } from '../js/meta.js';
 import { GUNSHIP_DRAW_IDS } from '../js/render/gunships.js';
+import * as GameState from '../js/sim/gameState.js';
+import { CAMPAIGN_RULES, createContractBoard, getCampaignMission } from '../js/contracts.js';
 
 let pass = 0,
   fail = 0;
@@ -148,13 +151,92 @@ console.log('— sortie outcome commit —');
   c.hangar.cobra.engine = 2;
   c.pilot.allocated = ['stabilizer'];
   const oldName = c.pilot.name;
+  c.gunship = 'apache';
+  c.unlocked.push('apache');
+  c.hangar.apache = { engine: 0, armor: 0, weaponMount: 0, rotor: 0, avionics: 0 };
+  const oldSorties = c.pilot.sortiesFlown;
   const r2 = commitSortieOutcome(c, 'failed', 999, 50);
   ok(r2.died === true, 'death flagged');
   ok(c.pilot.level === 1 && c.pilot.xp === 0, 'fresh pilot on death');
   ok(c.pilot.name !== oldName || true, 'new pilot generated');
   ok(c.dollars === 250, 'dollars persist through death');
   ok(c.hangar.cobra.engine === 2, 'hangar persists through death');
+  ok(c.gunship === 'apache' && c.hangar.apache, 'gunship selection persists through death');
+  ok(c.pilot.sortiesFlown === oldSorties + 1, 'KIA increments sortie count once');
   ok(c.campaign.sortie === 1 && c.campaign.act === 1, 'campaign restarts on death');
+}
+
+console.log('— campaign / practice sortie policy —');
+{
+  const c = createCareer(77);
+  GameState.setCareer(c);
+  GameState.setSortieXp(0);
+  GameState.setSortieDollars(0);
+  GameState.setSortieMode('practice');
+  GameState.captureSortieSnapshot();
+  GameState.addSortieXp(100);
+  GameState.addSortieDollars(250);
+  ok(GameState.isPracticeSortie(), 'practice mode is explicit in session state');
+  ok(
+    GameState.sortieXpEarned === 0 && GameState.sortieDollarsEarned === 0,
+    'practice earns no rewards'
+  );
+  ok(
+    GameState.sortieContext.pilotName === c.pilot.name &&
+      GameState.sortieContext.gunshipId === c.gunship,
+    'practice captures the active pilot and gunship'
+  );
+  GameState.setSortieMode('campaign');
+  GameState.addSortieXp(100);
+  GameState.addSortieDollars(250);
+  ok(
+    GameState.sortieXpEarned === 100 && GameState.sortieDollarsEarned === 250,
+    'campaign rewards remain bankable'
+  );
+  GameState.setCareer(null);
+}
+
+console.log('— campaign structure —');
+{
+  const normal = createContractBoard(101, { act: 3, sortie: 2 });
+  ok(
+    normal.length === 4 && normal.every((c) => c.missionType === 'sortie'),
+    'normal campaign sortie offers four contracts'
+  );
+  ok(
+    normal.every((c) => c.id.startsWith('act-3-sortie-2-')),
+    'contract IDs carry the active campaign position'
+  );
+  const stronghold = createContractBoard(202, { act: 4, sortie: 4 });
+  ok(stronghold.length === 1 && stronghold[0].stronghold, 'stronghold sortie is unavoidable');
+  ok(stronghold[0].bossProfile.final, 'Act 4 stronghold carries the final boss profile');
+  ok(
+    getCampaignMission({ act: 2, sortie: CAMPAIGN_RULES.strongholdSortie }).stronghold,
+    'each act ends with a stronghold mission'
+  );
+
+  const c = createCareer(8080);
+  c.campaign = { act: 1, sortie: 1 };
+  let next = advanceCampaign(c);
+  ok(
+    !next.prestige && c.campaign.act === 1 && c.campaign.sortie === 2,
+    'normal sortie advances within the act'
+  );
+  c.campaign = { act: 1, sortie: 4 };
+  next = advanceCampaign(c);
+  ok(
+    !next.prestige && c.campaign.act === 2 && c.campaign.sortie === 1,
+    'stronghold completion advances the act'
+  );
+  c.campaign = { act: 4, sortie: 4 };
+  const oldPilot = c.pilot;
+  next = advanceCampaign(c);
+  ok(next.prestige && c.prestige === 1, 'final stronghold awards prestige');
+  ok(c.campaign.act === 1 && c.campaign.sortie === 1, 'prestige starts a new campaign');
+  ok(
+    c.pilot !== oldPilot && c.unlocked.includes('comanche'),
+    'prestige resets pilot and unlocks Comanche'
+  );
 }
 
 console.log('— applyCareerToHeli —');
