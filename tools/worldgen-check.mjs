@@ -91,6 +91,7 @@ for (const seed of seeds) {
     scenarioId: ['strike', 'intercept', 'sabotage', 'suppression', 'recovery'][seed % 5],
     styleId: 'precision_strike',
     difficultyId: 'standard',
+    campaign: { act: 1, sortie: 1 },
   };
   const world = generateWorld({ seed, contract });
   const again = generateWorld({ seed, contract });
@@ -105,6 +106,7 @@ for (const seed of seeds) {
     world.places.some((place) => place.kind === 'town' && (place.scale || 0) >= 500),
     `${label}: large town present`
   );
+  ok(Number.isFinite(world.hour) && world.hour >= 0 && world.hour < 24, `${label}: sortie hour`);
   ok(
     world.places.some(
       (place) =>
@@ -199,6 +201,12 @@ for (const seed of seeds) {
   }
 
   ok(world.objective?.target, `${label}: semantic objective target exists`);
+  ok(
+    (world.objective?.intel?.required || 0) >= 1 &&
+      (world.objective.intel.holders || []).length >= world.objective.intel.required,
+    `${label}: intel sites placed`
+  );
+  ok(world.objective?.target?.objectiveHidden, `${label}: primary target hidden pending intel`);
   ok(
     !world.objective?.targetPlaceId || placeIds.has(world.objective.targetPlaceId),
     `${label}: objective place resolves`

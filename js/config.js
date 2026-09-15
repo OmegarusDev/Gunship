@@ -11,15 +11,29 @@ export const CHUNKS_PER_AXIS = Math.ceil(WORLD_SIZE / CHUNK_SIZE);
 export const PITCH_DEG = 24;
 
 export const HELI = {
-  accel: 1400,
+  accel: 760,
   drag: 0.91,
-  maxSpeed: 400,
-  turnSpeed: 3.5,
+  maxSpeed: 220,
+  turnSpeed: 1.55,
   brakeDrag: 0.8,
-  fireRate: 3,
-  bulletSpeed: 500,
-  bulletDamage: 10,
+  // Cooldown seconds. 2 rds/sec at the start; skills/Fear cards shrink this.
+  fireRate: 0.5,
+  bulletSpeed: 400,
+  bulletDamage: 5,
 };
+
+/** Dossiers show every class with live kill counts (including 0). Also `?dev=1`. */
+export const DEV_UNLOCK_DOSSIERS = true;
+
+export function isDevUnlock() {
+  if (DEV_UNLOCK_DOSSIERS) return true;
+  if (typeof window === 'undefined') return false;
+  try {
+    return new URLSearchParams(window.location.search).has('dev');
+  } catch {
+    return false;
+  }
+}
 
 export const CAMERA = {
   lerpSpeed: 0.08,

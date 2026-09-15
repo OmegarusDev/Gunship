@@ -6,13 +6,14 @@
  */
 
 import { mulberry32, pick, shuffle } from './rng.js';
+import { hourFromSeed } from './sun.js';
 
 export const SCENARIOS = {
   strike: {
     id: 'strike',
     name: 'STRIKE',
     objectiveLabel: 'Destroy the command target',
-    description: 'Break the local command structure before the response closes in.',
+    description: 'Secure the intel, smash the command post, then extract across the border.',
     targetTags: ['command', 'military', 'industrial'],
     styles: ['loud_assault', 'precision_strike', 'deep_raid'],
     threatTags: ['armor', 'command', 'patrol'],
@@ -22,7 +23,7 @@ export const SCENARIOS = {
     id: 'intercept',
     name: 'INTERCEPT',
     objectiveLabel: 'Stop the supply convoy',
-    description: 'Find the route, catch the convoy, and leave before the net closes.',
+    description: 'Secure the intel to reveal the route, wreck the convoy, then extract.',
     targetTags: ['convoyRoute', 'logistics'],
     styles: ['pursuit', 'loud_assault', 'deep_raid'],
     threatTags: ['convoy', 'mobility', 'armor'],
@@ -32,7 +33,7 @@ export const SCENARIOS = {
     id: 'sabotage',
     name: 'SABOTAGE',
     objectiveLabel: 'Disable the radar relay',
-    description: 'Blind the local network, then reach extraction before the reply.',
+    description: 'Secure the intel, blind the relay, then extract across the border.',
     targetTags: ['radar', 'communications', 'military'],
     styles: ['precision_strike', 'deep_raid', 'low_profile'],
     threatTags: ['radar', 'manpads', 'low_intel'],
@@ -42,7 +43,7 @@ export const SCENARIOS = {
     id: 'suppression',
     name: 'SUPPRESSION',
     objectiveLabel: 'Destroy three air-defense units',
-    description: 'Remove the guns protecting the sector. Every kill will be reported.',
+    description: 'Secure the intel to mark the guns, destroy them, then extract.',
     targetTags: ['airDefense', 'military'],
     styles: ['loud_assault', 'precision_strike', 'deep_raid'],
     threatTags: ['air_defense', 'coordinated', 'high_heat'],
@@ -52,7 +53,7 @@ export const SCENARIOS = {
     id: 'recovery',
     name: 'RECOVERY',
     objectiveLabel: 'Recover the supply cache',
-    description: 'Take the cache and get out. The package is worth more than the firefight.',
+    description: 'Secure the intel to locate the cache, grab it, then extract.',
     targetTags: ['supply', 'logistics'],
     styles: ['precision_strike', 'deep_raid', 'low_profile'],
     threatTags: ['supply', 'exposure', 'extraction'],
@@ -276,6 +277,16 @@ function nextSeed(rng) {
   return Math.floor(rng() * 0xffffffff) >>> 0;
 }
 
+export function intelCountForCampaign(campaign = { act: 1 }) {
+  return Math.max(1, Math.min(4, campaign.act || 1));
+}
+
+function withHour(card) {
+  card.hour = hourFromSeed(card.seed);
+  card.intelCount = intelCountForCampaign(card.campaign);
+  return card;
+}
+
 function chooseDifficulty(slot, rng) {
   if (slot === 0) return 'routine';
   if (slot === 1) return rng() < 0.7 ? 'standard' : 'routine';
@@ -292,7 +303,7 @@ export function createContractBoard(boardSeed, campaign = { act: 1, sortie: 1 })
     const difficulty = DIFFICULTIES[stronghold.difficultyId];
     const style = STYLES[stronghold.styleId];
     return [
-      {
+      withHour({
         id: `act-${mission.act}-sortie-${mission.sortie}-stronghold`,
         seed: nextSeed(rng),
         boardSeed: boardSeed >>> 0,
@@ -313,7 +324,7 @@ export function createContractBoard(boardSeed, campaign = { act: 1, sortie: 1 })
         difficultyRating: difficulty.rating,
         threatTags: ['stronghold', 'command', 'reinforcements'],
         reward: Math.round(500 * difficulty.rewardMultiplier),
-      },
+      }),
     ];
   }
   const scenarioIds = shuffle(Object.keys(SCENARIOS), rng).slice(0, 4);
@@ -328,7 +339,7 @@ export function createContractBoard(boardSeed, campaign = { act: 1, sortie: 1 })
       scenario.baseReward * difficulty.rewardMultiplier * (1 + (style.supplyChance - 0.4) * 0.15)
     );
 
-    return {
+    return withHour({
       id: `act-${campaign.act}-sortie-${campaign.sortie}-offer-${index + 1}`,
       seed: nextSeed(rng),
       boardSeed: boardSeed >>> 0,
@@ -349,7 +360,7 @@ export function createContractBoard(boardSeed, campaign = { act: 1, sortie: 1 })
       stronghold: false,
       strongholdTime: 0,
       bossProfile: mission.bossProfile,
-    };
+    });
   });
 }
 

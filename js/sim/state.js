@@ -4,7 +4,7 @@
  * Holds the per-sortie mutable state that was previously top-level lets in app.js.
  */
 
-import { TIMER } from '../config.js';
+import { TIMER, HELI } from '../config.js';
 import { getDifficulty as getDifficultyProfile, getStyle } from '../contracts.js';
 
 export const FEAR_THRESHOLDS = [10, 25, 50, 85, 130, 190, 270, 370, 500, 660];
@@ -28,12 +28,12 @@ export function createHeli() {
     hp: 100,
     maxHp: 100,
     fireCooldown: 0,
-    fireRate: 0.15,
-    bulletSpeed: 500,
-    bulletDamage: 8,
+    fireRate: HELI.fireRate,
+    bulletSpeed: HELI.bulletSpeed,
+    bulletDamage: HELI.bulletDamage,
     weaponRange: 350,
-    accel: 1400,
-    maxSpeed: 400,
+    accel: HELI.accel,
+    maxSpeed: HELI.maxSpeed,
     heatDecayMultiplier: 1,
     targetAssist: 0,
     target: null,
@@ -64,6 +64,8 @@ export function createHeli() {
     lastStandUsed: false,
     gunshipId: 'cobra',
     rotorBlades: 2,
+    yawRate: 0,
+    bank: 0,
     // per-sortie equipment
     equipmentType: null,
     equipmentUsed: false,

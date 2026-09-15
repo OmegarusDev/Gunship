@@ -3,7 +3,7 @@
  */
 console.log('[Gunship] app.js loading...');
 
-import { SIM_DT, WORLD_SIZE, TIMER, HUD } from './config.js';
+import { SIM_DT, WORLD_SIZE, TIMER, HUD, HELI } from './config.js';
 import { WorldCamera } from './camera.js';
 import { Input } from './input.js';
 import { P, mats } from './palette.js';
@@ -11,6 +11,7 @@ import { VIEW25, deckRy } from './view25.js';
 import { cyl25, box25, frustum25 } from './prims25.js';
 import { withAlpha, fillCircle, drawLine, drawTextShadow } from './drawUtil.js';
 import { mulberry32, clamp, pick } from './rng.js';
+import { formatClock, periodLabel, setSun, drawSunWash } from './sun.js';
 import { createNoise } from './noise.js';
 import { generateWorld } from './world.js';
 import { createTerrain } from './terrain.js';
@@ -23,15 +24,16 @@ import {
   paintBackdrop,
   paintScreenBackdrop,
   footerPairRects,
+  footerNavRects,
   fearUpgradeRects,
   setMenuPointer,
   menuCursor,
   applyMenuHitTransform,
   paintMenuGlow,
+  drawFooterStrip,
 } from './appBridge.js';
 import {
   metaState,
-  loadCareer,
   commitSortieOutcome,
   advanceCampaign,
   applyCareerToHeli,
@@ -39,20 +41,17 @@ import {
   xpToNext,
   saveCareer,
   syncGunshipUnlocks,
+  recordDossierKill,
 } from './meta.js';
-import { hangarScreen, pilotScreen, handleHangarClick, handlePilotClick } from './screens_meta.js';
 import {
-  splashScreen,
-  menuScreen,
-  newPilotScreen,
-  loadPilotScreen,
-  hitFlowBox,
-  confirmNewPilot,
-  continueCareer,
-  loadSlot,
-  hideNameField,
-  applyFlowBox,
-} from './screens_flow.js';
+  hangarScreen,
+  pilotScreen,
+  dossiersScreen,
+  handleHangarClick,
+  handlePilotClick,
+  handleDossiersClick,
+} from './screens_meta.js';
+import { splashScreen, bootCareer } from './screens_flow.js';
 import { createEnemyFromRoster } from './data/enemies.js';
 import {
   createContractBoard,
@@ -80,7 +79,10 @@ import {
   canExtract as _canExtract,
   getObjectiveFocus as _getObjectiveFocus,
   nearestExitPoint as _nearestExitPoint,
+  intelProgress as _intelProgress,
+  objectiveHudText as _objectiveHudText,
 } from './sim/objectives.js';
+import { revealObjectiveTarget } from './world/generateV4.js';
 import {
   setTerrain as _setTerrain,
   drawSmoothTerrain as _drawSmoothTerrain,
@@ -211,7 +213,7 @@ const IS_TOUCH = typeof window !== 'undefined' && 'ontouchstart' in window;
 const EQUIPMENT = _EQUIPMENT;
 let briefingBackBox = null;
 let briefingLaunchBox = null;
-let contractsBackBox = null;
+let contractsNavBoxes = [];
 let debriefNextBox = null;
 let debriefPilotBox = null;
 
@@ -305,6 +307,7 @@ function spawnOutdoorEnemies() {
     const difficulty = getDifficultyForEnemy(encounter.x, encounter.y);
     for (const entry of encounter.roster) {
       if (entry.isIndoor) continue;
+      if (entry.objectiveHidden) continue;
       const enemy = createEnemyFromRoster(entry, 0, 0, difficulty);
       if (enemy) {
         enemy.encounterId = encounter.id;
@@ -321,7 +324,7 @@ function spawnOutdoorEnemies() {
 function spawnStrongholdDefenses() {
   const contract = GameState.activeContract;
   const target = world?.objective?.target;
-  if (!contract?.stronghold || !target) return;
+  if (!contract?.stronghold || !target || target.objectiveHidden) return;
   const act = contract.campaign?.act || 1;
   const classesByAct = {
     1: ['lightAA', 'rifleman', 'rifleman'],
@@ -589,7 +592,7 @@ function spawnBoss() {
   boss.hp = Math.round((profile?.hp || 280) * difficulty.hunterHpMultiplier * fearScale);
   boss.maxHp = boss.hp;
   boss.speed = profile?.type === 'fighter' ? 220 : groundBoss ? 75 : 145;
-  boss.damage = Math.max(1, (groundBoss ? 20 : 14) * difficulty.hunterDamageMultiplier);
+  boss.damage = Math.max(1, (groundBoss ? 28 : 20) * difficulty.hunterDamageMultiplier);
   boss.range = groundBoss ? 360 : 430;
   boss.fireRate = profile?.final ? 1.1 : groundBoss ? 1.25 : 1.8;
   boss.fireCooldown = 2.0;
@@ -918,6 +921,7 @@ function damageWorldTarget(target, damage, x, y) {
       addHeat(4, 'priority target destroyed');
     }
     if (target === world?.objective?.target) completeObjective();
+    else if (target?.intelHolder) noteIntelSecured(target);
   }
   return true;
 }
@@ -925,21 +929,32 @@ function damageWorldTarget(target, damage, x, y) {
 function hitDestructibleWorldTarget(projectile) {
   if (!world) return false;
   const objectiveTarget = world.objective?.target;
-  if (objectiveTarget && objectiveTarget !== boss && isTargetAlive(objectiveTarget)) {
+  if (
+    objectiveTarget &&
+    !objectiveTarget.objectiveHidden &&
+    objectiveTarget !== boss &&
+    isTargetAlive(objectiveTarget)
+  ) {
     const radius = objectiveTarget.w ? Math.max(objectiveTarget.w, objectiveTarget.d) * 0.55 : 14;
     if (Math.hypot(objectiveTarget.x - projectile.x, objectiveTarget.y - projectile.y) < radius) {
       return damageWorldTarget(objectiveTarget, projectile.damage, projectile.x, projectile.y);
     }
   }
   for (const building of world.buildings) {
-    if (!building.destructible || building.destroyed || building === objectiveTarget) continue;
+    if (
+      !building.destructible ||
+      building.destroyed ||
+      building.objectiveHidden ||
+      building === objectiveTarget
+    )
+      continue;
     const radius = Math.max(building.w, building.d) * 0.55;
     if (Math.hypot(building.x - projectile.x, building.y - projectile.y) < radius) {
       return damageWorldTarget(building, projectile.damage, projectile.x, projectile.y);
     }
   }
   for (const convoy of world.convoys) {
-    if (!convoy.active || convoy.destroyed) continue;
+    if (!convoy.active || convoy.destroyed || convoy.objectiveHidden) continue;
     // Test every member of the column, not just the lead vehicle.
     for (const m of getConvoyMembers(convoy)) {
       const r = m.isVeh ? 12 : 6;
@@ -951,8 +966,49 @@ function hitDestructibleWorldTarget(projectile) {
   return false;
 }
 
+function noteIntelSecured(holder) {
+  if (!holder || holder.intelTaken) return;
+  holder.intelTaken = true;
+  holder.destroyed = true;
+  if (world?.objective?.intel) {
+    world.objective.intel.secured = _intelProgress(world).secured;
+  }
+  const prog = _intelProgress(world);
+  spawnFloatingText(holder.x, holder.y - 28, `INTEL ${prog.secured}/${prog.required}`, '#44ddff');
+  addFear(3, 'intel secured');
+  addHeat(2, 'intel site hit');
+  if (prog.complete) revealMissionTarget();
+}
+
+function revealMissionTarget() {
+  if (!world || world.objective?.revealed) return;
+  revealObjectiveTarget(world);
+  spawnFloatingText(heli.x, heli.y - 48, 'TARGET REVEALED', '#ffcc44');
+  spawnOutdoorHiddenObjective();
+  spawnStrongholdDefenses();
+}
+
+function spawnOutdoorHiddenObjective() {
+  if (!world) return;
+  const difficulty = getDifficultyForEnemy(heli.x, heli.y);
+  for (const encounter of world.encounters) {
+    for (const entry of encounter.roster) {
+      if (entry.isIndoor || !entry.objectiveTarget || entry.active) continue;
+      const enemy = createEnemyFromRoster(entry, 0, 0, getDifficultyForEnemy(entry.x, entry.y) || difficulty);
+      if (!enemy) continue;
+      enemy.encounterId = encounter.id;
+      enemy.placeId = encounter.placeId;
+      enemy.objectiveTarget = true;
+      applyEnemyDifficulty(enemy);
+      enemies.push(enemy);
+      entry.active = true;
+    }
+  }
+}
+
 function completeObjective() {
   if (sortieState.objectiveComplete || sortieState.status !== 'active') return;
+  if (!_intelProgress(world).complete) return;
   sortieState.objectiveComplete = true;
   if (world?.objective) {
     world.objective.complete = true;
@@ -967,49 +1023,38 @@ function completeObjective() {
   addFear(8, 'primary objective complete');
   addHeat(6, 'primary objective reported');
   spawnFloatingText(heli.x, heli.y - 42, 'OBJECTIVE COMPLETE', '#aaff88');
-  spawnFloatingText(
-    heli.x,
-    heli.y - 58,
-    bossState.defeated ? 'EXIT THE MAP' : 'DEFEAT THE COMMANDER',
-    '#44ddff'
-  );
+  spawnFloatingText(heli.x, heli.y - 58, 'CROSS THE BORDER TO EXTRACT', '#44ddff');
 }
 
 function checkObjectiveProgress() {
   if (!world?.objective || sortieState.objectiveComplete) return;
+  const intel = _intelProgress(world);
+  if (!intel.complete) return;
+  if (!world.objective.revealed) revealMissionTarget();
   const objective = world.objective;
-  const commanderDefeated = !GameState.activeContract?.stronghold || bossState.defeated;
   if (objective.type === 'suppression') {
     const targetEnemies = enemies.filter((enemy) => enemy.objectiveTarget);
     const destroyed = targetEnemies.filter((enemy) => enemy.state === 'dead').length;
     objective.progress = destroyed;
-    if (destroyed >= objective.requiredCount && commanderDefeated) completeObjective();
+    if (destroyed >= objective.requiredCount) completeObjective();
   } else if (objective.type === 'recovery') {
-    if (objective.target?.collected && commanderDefeated) completeObjective();
-  } else if (objective.target && !isTargetAlive(objective.target) && commanderDefeated) {
+    if (objective.target?.collected) completeObjective();
+  } else if (objective.target && !objective.target.objectiveHidden && !isTargetAlive(objective.target)) {
     completeObjective();
   }
 }
 
 function objectiveHudText() {
-  if (!world?.objective) return 'STANDBY';
-  if (sortieState.objectiveComplete && !bossState.defeated) {
-    return 'PRIMARY COMPLETE — DEFEAT THE COMMANDER';
-  }
-  if (world.objective.type === 'strike')
-    return `DESTROY ${world.objective.targetPlaceName || 'COMMAND TARGET'}`;
-  if (world.objective.type === 'sabotage')
-    return `DISABLE ${world.objective.targetPlaceName || 'RADAR RELAY'}`;
-  if (world.objective.type === 'intercept') return 'INTERCEPT SUPPLY CONVOY';
-  if (world.objective.type === 'suppression') return 'DESTROY AIR DEFENSE UNITS';
-  if (world.objective.type === 'recovery') return 'RECOVER SUPPLY CACHE';
-  return 'COMPLETE OPERATION';
+  return _objectiveHudText(world, {
+    objectiveComplete: sortieState.objectiveComplete,
+  });
 }
 
 function collectSupplyCrates() {
   if (!world?.supplyCrates) return;
   for (const crate of world.supplyCrates) {
-    if (crate.collected || Math.hypot(crate.x - heli.x, crate.y - heli.y) > 24) continue;
+    if (crate.collected || crate.objectiveHidden || Math.hypot(crate.x - heli.x, crate.y - heli.y) > 24)
+      continue;
     crate.collected = true;
     sortieState.stats.crates++;
     if (!GameState.isPracticeSortie()) sortieState.rewards.supplies += 60;
@@ -1033,15 +1078,15 @@ function collectSupplyCrates() {
   }
 }
 
-/** Extraction = cross the map boundary. No LZ, no hold timer. */
+/** Extraction = cross the map boundary after the objective. */
 function updateExtraction(dt) {
+  void dt;
   if (
     !world?.extraction?.active ||
     !sortieState.objectiveComplete ||
     sortieState.status !== 'active'
   )
     return;
-  if (!bossState.defeated) return;
   const lim = WORLD_SIZE * 0.48;
   if (Math.abs(heli.x) > lim || Math.abs(heli.y) > lim) finishSortie('complete');
 }
@@ -1118,7 +1163,7 @@ function hunterClockRate() {
 //  SCREENS
 // ══════════════════════════════════════════════════════════════
 
-function drawTitleWordmark(ctx, cx, cy, titleSize) {
+function drawTitleWordmark(ctx, cx, cy, titleSize, maxW = 640) {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.font = `bold ${titleSize}px "Courier New", monospace`;
@@ -1129,19 +1174,41 @@ function drawTitleWordmark(ctx, cx, cy, titleSize) {
   ctx.fillStyle = P.ui.textBright;
   ctx.fillText('GUNSHIP', cx, cy);
 
-  const subY = cy + titleSize * 0.62;
-  ctx.font = `bold ${titleSize >= 48 ? 15 : 12}px "Courier New", monospace`;
-  const sub = 'FREEDOM PROTOCOL';
-  const subW = ctx.measureText(sub).width + 44;
+  const lines = ['FREEDOM', 'PROTOCOL'];
+  let protocolSize = Math.round(titleSize * 1.24);
+  ctx.font = `bold ${protocolSize}px "Courier New", monospace`;
+  const padX = 22;
+  const padY = 8;
+  const gap = 2;
+  const measure = () =>
+    Math.max(ctx.measureText(lines[0]).width, ctx.measureText(lines[1]).width);
+  while (measure() + padX * 2 > maxW && protocolSize > titleSize + 2) {
+    protocolSize -= 1;
+    ctx.font = `bold ${protocolSize}px "Courier New", monospace`;
+  }
+  const subW = Math.min(maxW, measure() + padX * 2);
+  const subH = protocolSize * 2 + padY * 2 + gap;
+  const subY = cy + titleSize * 0.82 + subH / 2;
   ctx.fillStyle = 'rgba(10,20,8,0.8)';
-  ctx.fillRect(cx - subW / 2, subY - 13, subW, 26);
+  ctx.fillRect(cx - subW / 2, subY - subH / 2, subW, subH);
   ctx.strokeStyle = P.ui.infamy;
   ctx.lineWidth = 1;
-  ctx.strokeRect(cx - subW / 2, subY - 13, subW, 26);
-  drawCornerBrackets(ctx, cx - subW / 2, subY - 13, subW, 26, 'rgba(204,136,51,0.6)', 7, 1.5);
+  ctx.strokeRect(cx - subW / 2, subY - subH / 2, subW, subH);
+  drawCornerBrackets(
+    ctx,
+    cx - subW / 2,
+    subY - subH / 2,
+    subW,
+    subH,
+    'rgba(204,136,51,0.6)',
+    7,
+    1.5
+  );
   ctx.fillStyle = P.ui.infamy;
-  ctx.fillText(sub, cx, subY);
-  return subY + 18;
+  ctx.font = `bold ${protocolSize}px "Courier New", monospace`;
+  ctx.fillText(lines[0], cx, subY - protocolSize * 0.52);
+  ctx.fillText(lines[1], cx, subY + protocolSize * 0.52);
+  return subY + subH / 2 + 10;
 }
 
 registerScreen('title', {
@@ -1155,20 +1222,21 @@ registerScreen('title', {
     paintBackdrop(ctx, w, h);
 
     const t = performance.now() / 1000;
-    const split = L.landscape && h < 600;
-    const brandCx = split ? L.content.x + L.content.w * 0.3 : w / 2;
+    const split = L.landscape && L.content.w >= 640;
+    const brandCx = split ? L.content.x + L.content.w * 0.28 : w / 2;
     const brandCy = split
-      ? h * 0.48
+      ? h * 0.46
       : L.content.y + Math.min(L.phone ? 56 : 72, L.content.h * 0.22);
-    const sweepR = Math.min(w, h) * (split ? 0.26 : 0.28);
+    const sweepR = Math.min(w, h) * (split ? 0.24 : 0.28);
     ctx.globalAlpha = 0.5;
     drawRadarSweep(ctx, brandCx, brandCy, sweepR, t);
     ctx.globalAlpha = 1;
 
     const titleSize = split
-      ? Math.min(48, Math.max(32, Math.floor(w / 15)))
-      : Math.min(58, Math.max(36, Math.floor(Math.min(w, h) / 10)));
-    const wordBottom = drawTitleWordmark(ctx, brandCx, brandCy, titleSize);
+      ? Math.min(56, Math.max(40, Math.floor(w / 14)))
+      : Math.min(74, Math.max(46, Math.floor(Math.min(w, h) / 8.4)));
+    const brandMaxW = split ? L.content.w * 0.5 : Math.min(L.content.w, w * 0.86);
+    const wordBottom = drawTitleWordmark(ctx, brandCx, brandCy, titleSize, brandMaxW);
 
     const entries = [
       { label: 'OPERATIONS', sub: 'SELECT CONTRACT', target: 'contracts' },
@@ -1180,6 +1248,7 @@ registerScreen('title', {
       },
       { label: 'HANGAR', sub: 'BUY CHOPPER PARTS', target: 'hangar' },
       { label: 'SKILLS', sub: 'LEVEL & TALENTS', target: 'pilot' },
+      { label: 'DOSSIERS', sub: 'KNOWN CONTACTS', target: 'dossiers' },
     ];
     const menuW = split ? Math.min(340, L.content.w * 0.44) : Math.min(400, L.content.w);
     const menuX = split ? L.content.x + L.content.w - menuW : (w - menuW) / 2;
@@ -1212,11 +1281,12 @@ registerScreen('title', {
       ctx.textBaseline = 'top';
       ctx.fillText(`${c.pilot.name}  ·  LV ${c.pilot.level}`, menuX + menuW / 2, my + 10);
       ctx.fillStyle = '#ffcc44';
-      ctx.fillText(`$ ${c.dollars}`, menuX + menuW / 2, my + 30);
+      ctx.fillText(`$${c.dollars}`, menuX + menuW / 2, my + 30);
     }
 
-    const menuBack = drawBackButton(ctx, w, h, '◂ MENU');
-    GameState.titleMenuBoxes.push({ ...menuBack, action: 'menu' });
+    drawFooterStrip(ctx, w, h);
+    const optionsRect = drawBackButton(ctx, w, h, 'OPTIONS');
+    GameState.titleMenuBoxes.push({ ...optionsRect, action: 'options' });
     ctx.restore();
   },
 });
@@ -1554,15 +1624,19 @@ function contractCardRect(index, w, h) {
   const cols = count === 1 ? 1 : L.landscape || w >= 700 ? 2 : 1;
   const rows = Math.ceil(count / cols);
   const gap = L.btnGap;
-  const cardW = Math.min(400, (L.content.w - gap * (cols - 1)) / cols);
-  const cardH = Math.min(176, (L.content.h - gap * (rows - 1)) / rows);
+  const frame = Math.max(gap, 18);
+  const cardW = Math.min(420, (L.content.w - gap * (cols - 1) - frame * 2) / cols);
+  const maxH = (L.content.h - gap * (rows - 1) - frame * 2) / rows;
+  const cardH = Math.min(188, maxH);
   const row = Math.floor(index / cols);
   const col = index % cols;
   const totalW = cardW * cols + gap * (cols - 1);
+  const totalH = cardH * rows + gap * (rows - 1);
   const left = L.content.x + (L.content.w - totalW) / 2;
+  const top = L.content.y + (L.content.h - totalH) / 2;
   return {
     x: left + col * (cardW + gap),
-    y: L.content.y + row * (cardH + gap),
+    y: top + row * (cardH + gap),
     w: cardW,
     h: cardH,
   };
@@ -1574,10 +1648,8 @@ function drawContractCard(ctx, card, rect, selected = false) {
   ctx.fillStyle = selected || hit.hover ? '#1e3a1e' : '#0d210f';
   ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
 
-  // Header strip
   ctx.fillStyle = 'rgba(0,0,0,0.25)';
-  ctx.fillRect(rect.x, rect.y, rect.w, 28);
-  // Risk-colored accent stripe
+  ctx.fillRect(rect.x, rect.y, rect.w, 26);
   const riskCol =
     card.difficultyRating >= 4 ? '#cc3333' : card.difficultyRating >= 3 ? '#ff8844' : '#88aa55';
   ctx.fillStyle = riskCol;
@@ -1604,49 +1676,56 @@ function drawContractCard(ctx, card, rect, selected = false) {
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
   ctx.fillStyle = P.ui.infamy;
-  ctx.font = 'bold 14px "Courier New", monospace';
-  ctx.fillText(card.name, rect.x + 16, rect.y + 8);
+  ctx.font = 'bold 15px "Courier New", monospace';
+  ctx.fillText(card.name, rect.x + 14, rect.y + 6);
   ctx.fillStyle = P.ui.textDim;
-  ctx.font = '9px "Courier New", monospace';
+  ctx.font = '10px "Courier New", monospace';
   ctx.textAlign = 'right';
-  ctx.fillText(`NO.${String(card.seed % 97).padStart(2, '0')}`, rect.x + rect.w - 14, rect.y + 10);
+  ctx.fillText(`NO.${String(card.seed % 97).padStart(2, '0')}`, rect.x + rect.w - 12, rect.y + 9);
   ctx.textAlign = 'left';
   ctx.fillStyle = P.ui.textBright;
-  ctx.font = 'bold 10px "Courier New", monospace';
-  ctx.fillText(card.objectiveLabel, rect.x + 16, rect.y + 34);
+  ctx.font = 'bold 16px "Courier New", monospace';
+  ctx.fillText(card.objectiveLabel, rect.x + 14, rect.y + 28);
+  const intelN = card.intelCount || 1;
+  ctx.fillStyle = '#44ddff';
+  ctx.font = 'bold 12px "Courier New", monospace';
+  ctx.fillText(`INTEL ${intelN}  →  TARGET  →  EXTRACT`, rect.x + 14, rect.y + 48);
   ctx.fillStyle = P.ui.text;
-  ctx.font = '10px "Courier New", monospace';
-  const lines = wrapText(card.description, Math.max(24, Math.floor((rect.w - 24) / 7.2)));
-  for (let i = 0; i < lines.length && i < 2; i++) {
-    ctx.fillText(lines[i], rect.x + 16, rect.y + 52 + i * 13);
-  }
-  // Footer stats with divider rule
+  ctx.font = '11px "Courier New", monospace';
+  const lines = wrapText(card.description, Math.max(22, Math.floor((rect.w - 26) / 6.6)));
+  ctx.fillText(lines[0] || '', rect.x + 14, rect.y + 64);
+  if (lines[1] && rect.h > 168) ctx.fillText(lines[1], rect.x + 14, rect.y + 78);
+
+  const payY = rect.y + rect.h - 16;
   ctx.strokeStyle = 'rgba(90,140,80,0.35)';
   ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.moveTo(rect.x + 16, rect.y + rect.h - 52);
-  ctx.lineTo(rect.x + rect.w - 14, rect.y + rect.h - 52);
+  ctx.moveTo(rect.x + 14, payY - 48);
+  ctx.lineTo(rect.x + rect.w - 12, payY - 48);
   ctx.stroke();
+  ctx.fillStyle = P.ui.textDim;
+  ctx.font = '11px "Courier New", monospace';
+  ctx.fillText(`TIME   ${formatClock(card.hour)} · ${periodLabel(card.hour)}`, rect.x + 14, payY - 42);
   ctx.fillStyle = P.ui.rocket;
-  ctx.fillText(`STYLE  ${card.styleName}`, rect.x + 16, rect.y + rect.h - 42);
+  ctx.fillText(`STYLE  ${card.styleName}`, rect.x + 14, payY - 28);
   ctx.fillStyle = riskCol;
   ctx.fillText(
     `RISK   ${'◆'.repeat(card.difficultyRating)}${'◇'.repeat(4 - card.difficultyRating)}  ${card.difficultyName}`,
-    rect.x + 16,
-    rect.y + rect.h - 28
+    rect.x + 14,
+    payY - 14
   );
   ctx.fillStyle = '#ffcc44';
   ctx.fillText(
     GameState.isPracticeSortie() ? 'PAY    NONE — PRACTICE' : `PAY    $${card.reward}`,
-    rect.x + 16,
-    rect.y + rect.h - 14
+    rect.x + 14,
+    payY
   );
   ctx.restore();
   ctx.restore();
 }
 
 function wrapText(text, maxChars) {
-  const words = text.split(' ');
+  const words = String(text || '').split(' ');
   const lines = [];
   let line = '';
   for (const word of words) {
@@ -1660,6 +1739,23 @@ function wrapText(text, maxChars) {
   }
   if (line) lines.push(line);
   return lines;
+}
+
+function wrapTextPx(ctx, text, maxW) {
+  const words = String(text || '').split(/\s+/);
+  const lines = [];
+  let line = '';
+  for (const word of words) {
+    const next = line ? `${line} ${word}` : word;
+    if (line && ctx.measureText(next).width > maxW) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = next;
+    }
+  }
+  if (line) lines.push(line);
+  return lines.length ? lines : [''];
 }
 
 registerScreen('contracts', {
@@ -1685,7 +1781,13 @@ registerScreen('contracts', {
     for (let i = 0; i < GameState.contractBoard.length; i++) {
       drawContractCard(ctx, GameState.contractBoard[i], contractCardRect(i, w, h));
     }
-    contractsBackBox = drawBackButton(ctx, w, h, '◂ CAMPAIGN');
+    const L = layoutOf(w, h);
+    const nav = footerNavRects(L, ['◂ CAMPAIGN', 'HANGAR', 'SKILLS']);
+    contractsNavBoxes = [];
+    for (const rect of nav) {
+      drawMenuButton(ctx, rect, { label: rect.label });
+      contractsNavBoxes.push(rect);
+    }
     ctx.restore();
   },
 });
@@ -1700,97 +1802,136 @@ registerScreen('briefing', {
     const scenario = getScenario(GameState.activeContract?.scenarioId);
     const style = getStyle(GameState.activeContract?.styleId);
     const difficulty = getDifficultyProfile(GameState.activeContract?.difficultyId);
+    const practice = GameState.isPracticeSortie();
     drawScreenBackground(
       ctx,
       cam,
       'SORTIE BRIEFING',
-      GameState.isPracticeSortie()
-        ? 'PRACTICE SORTIE · PILOT SAFE · NO REWARDS'
-        : GameState.activeContract
-          ? `CONTRACT SEED ${GameState.activeContract.seed}`
-          : 'NO CONTRACT'
+      practice ? 'PRACTICE SORTIE · PILOT SAFE · NO REWARDS' : 'ONE EQUIPMENT KIT · LIFT OFF WHEN READY'
     );
     ctx.save();
     ctx.scale(cam.dpr, cam.dpr);
     const L = layoutOf(w, h);
-    const split = L.landscape;
+    const split = L.landscape && L.content.w >= 620;
     const gap = L.btnGap;
-    const leftW = split ? L.content.w * 0.54 : L.content.w;
+    const leftW = split ? Math.floor(L.content.w * 0.58) : L.content.w;
     const rightW = split ? L.content.w - leftW - gap : L.content.w;
     const leftX = L.content.x;
     const rightX = split ? L.content.x + leftW + gap : L.content.x;
     const panelY = L.content.y;
     const panelH = L.content.h;
+    const colH = Math.min(panelH, split ? (L.compact ? 360 : 430) : Math.min(panelH * 0.56, panelH - 176));
+    const infoH = split ? colH : colH;
+    const pad = L.inner;
 
-    drawPanel(ctx, leftX, panelY, leftW, split ? panelH : Math.min(panelH, panelH * 0.52));
-    if (split) drawPanel(ctx, rightX, panelY, rightW, panelH);
-
-    const infoH = split ? panelH : Math.min(panelH, panelH * 0.52);
+    drawPanel(ctx, leftX, panelY, leftW, infoH);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(leftX + 1, panelY + 1, leftW - 2, infoH - 2);
+    ctx.clip();
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
+    const name = GameState.activeContract?.name || 'NO CONTRACT';
     ctx.fillStyle = P.ui.infamy;
     ctx.font = `bold ${L.compact ? 16 : 18}px "Courier New", monospace`;
-    const name = GameState.activeContract?.name || 'NO CONTRACT';
-    ctx.fillText(name, leftX + 20, panelY + 18);
+    ctx.fillText(name, leftX + pad, panelY + 16);
     ctx.strokeStyle = 'rgba(204,136,51,0.5)';
     ctx.beginPath();
-    ctx.moveTo(leftX + 20, panelY + 40);
-    ctx.lineTo(leftX + 20 + ctx.measureText(name).width, panelY + 40);
+    ctx.moveTo(leftX + pad, panelY + 38);
+    ctx.lineTo(leftX + pad + ctx.measureText(name).width, panelY + 38);
     ctx.stroke();
+
     ctx.fillStyle = P.ui.textBright;
-    ctx.font = `bold ${L.compact ? 11 : 13}px "Courier New", monospace`;
-    ctx.fillText(scenario.objectiveLabel, leftX + 20, panelY + 50);
+    ctx.font = `bold ${L.compact ? 14 : 16}px "Courier New", monospace`;
+    const objLines = wrapTextPx(ctx, scenario.objectiveLabel, leftW - pad * 2);
+    let y = panelY + 46;
+    for (const line of objLines.slice(0, 2)) {
+      ctx.fillText(line, leftX + pad, y);
+      y += L.compact ? 18 : 20;
+    }
+
+    const intelN = GameState.activeContract?.intelCount || 1;
+    const intelWord = intelN === 1 ? 'INTEL SITE' : 'INTEL SITES';
+    ctx.fillStyle = P.ui.textDim;
+    ctx.font = 'bold 11px "Courier New", monospace';
+    y += 6;
+    ctx.fillText('PLAN OF ACTION', leftX + pad, y);
+    y += 18;
+    const planSteps = [
+      `1.  Secure ${intelN} ${intelWord}`,
+      `2.  ${scenario.objectiveLabel}`,
+      '3.  Extract by crossing the border',
+    ];
+    ctx.font = `${L.compact ? 12 : 13}px "Courier New", monospace`;
+    for (const step of planSteps) {
+      ctx.fillStyle = '#44ddff';
+      const stepLines = wrapTextPx(ctx, step, leftW - pad * 2);
+      for (const line of stepLines) {
+        ctx.fillText(line, leftX + pad, y);
+        y += L.compact ? 16 : 18;
+      }
+      y += 2;
+    }
+
     ctx.fillStyle = P.ui.text;
     ctx.font = `${L.compact ? 10 : 11}px "Courier New", monospace`;
-    const descriptionLines = wrapText(
-      scenario.description,
-      Math.max(22, Math.floor((leftW - 40) / 7.2))
-    );
-    const maxDesc = L.compact ? 2 : 3;
-    for (let i = 0; i < descriptionLines.length && i < maxDesc; i++)
-      ctx.fillText(descriptionLines[i], leftX + 20, panelY + 72 + i * 16);
-    const detailY = panelY + 72 + Math.min(descriptionLines.length, maxDesc) * 16 + 14;
-    ctx.fillStyle = P.ui.rocket;
-    ctx.fillText(`STYLE       ${style.name}`, leftX + 20, detailY);
-    ctx.fillText(`DIFFICULTY  ${difficulty.name}`, leftX + 20, detailY + 20);
-    ctx.fillText(
-      `THREAT      ${(GameState.activeContract?.threatTags || []).join(' / ').toUpperCase()}`,
-      leftX + 20,
-      detailY + 40
-    );
-    ctx.fillStyle = '#ffcc44';
-    ctx.fillText(
-      GameState.isPracticeSortie()
-        ? 'BASE PAY    NONE — PRACTICE'
-        : `BASE PAY    $${GameState.activeContract?.reward || 0}`,
-      leftX + 20,
-      detailY + 60
-    );
-    ctx.fillStyle = P.ui.textDim;
-    ctx.fillText('Fear levels you up. Heat accelerates the Hunter.', leftX + 20, detailY + 86);
-    ctx.fillText(
-      'Complete the objective, defeat the commander, then return.',
-      leftX + 20,
-      detailY + 104
-    );
+    y += 6;
+    const blurb = wrapTextPx(ctx, scenario.description, leftW - pad * 2);
+    for (const line of blurb.slice(0, L.compact ? 2 : 3)) {
+      ctx.fillText(line, leftX + pad, y);
+      y += 15;
+    }
 
-    const eqKeys = Object.keys(EQUIPMENT);
+    const hour = GameState.activeContract?.hour;
+    const meta = [
+      ['LIFT-OFF', `${formatClock(hour)}  ·  ${periodLabel(hour)}`],
+      ['STYLE', style.name],
+      ['RISK', difficulty.name],
+      ['THREAT', (GameState.activeContract?.threatTags || []).join(' / ').toUpperCase() || '—'],
+      ['PAY', practice ? 'NONE — PRACTICE' : `$${GameState.activeContract?.reward || 0}`],
+    ];
+    y += 10;
+    for (const [label, value] of meta) {
+      ctx.fillStyle = P.ui.textDim;
+      ctx.font = '11px "Courier New", monospace';
+      ctx.fillText(label, leftX + pad, y);
+      ctx.fillStyle = label === 'PAY' ? '#ffcc44' : P.ui.text;
+      ctx.font = 'bold 11px "Courier New", monospace';
+      const valueLines = wrapTextPx(ctx, value, leftW - pad * 2 - 92);
+      ctx.fillText(valueLines[0], leftX + pad + 92, y);
+      y += 18;
+      for (let i = 1; i < valueLines.length; i++) {
+        ctx.fillText(valueLines[i], leftX + pad + 92, y);
+        y += 16;
+      }
+    }
+    ctx.restore();
+
     const eqPanelX = rightX;
     const eqPanelY = split ? panelY : panelY + infoH + gap;
     const eqPanelW = rightW;
-    const eqPanelH = split ? panelH : panelH - infoH - gap;
-    if (!split) drawPanel(ctx, eqPanelX, eqPanelY, eqPanelW, eqPanelH);
+    const eqPanelH = split ? colH : panelH - infoH - gap;
+    drawPanel(ctx, eqPanelX, eqPanelY, eqPanelW, eqPanelH);
     ctx.fillStyle = P.ui.textDim;
     ctx.font = 'bold 11px "Courier New", monospace';
-    ctx.fillText('FIELD EQUIPMENT', eqPanelX + 20, eqPanelY + 16);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText('FIELD EQUIPMENT', eqPanelX + pad, eqPanelY + 14);
+    ctx.fillStyle = P.ui.text;
+    ctx.font = '10px "Courier New", monospace';
+    ctx.fillText('One kit. Press E in the air.', eqPanelX + pad, eqPanelY + 30);
+
+    const eqKeys = Object.keys(EQUIPMENT);
     GameState.briefingEquipmentBoxes.length = 0;
-    const eqGap = 12;
-    const eqW = (eqPanelW - 40 - eqGap) / 2;
-    const eqH = Math.max(56, Math.min(72, (eqPanelH - 48 - eqGap) / 2));
+    const eqGap = 8;
+    const eqTop = eqPanelY + 50;
+    const eqAvail = eqPanelH - 62;
+    const eqH = Math.max(48, Math.min(78, (eqAvail - eqGap * (eqKeys.length - 1)) / eqKeys.length));
+    const eqW = eqPanelW - pad * 2;
     for (let i = 0; i < eqKeys.length; i++) {
       const key = eqKeys[i];
-      const bx = eqPanelX + 20 + (i % 2) * (eqW + eqGap);
-      const by = eqPanelY + 40 + Math.floor(i / 2) * (eqH + eqGap);
+      const bx = eqPanelX + pad;
+      const by = eqTop + i * (eqH + eqGap);
       const isSel = GameState.selectedEquipment === key;
       const eqRect = { x: bx, y: by, w: eqW, h: eqH };
       ctx.save();
@@ -1802,21 +1943,25 @@ registerScreen('briefing', {
       ctx.strokeRect(bx, by, eqW, eqH);
       if (isSel || eqHit.hover) drawCornerBrackets(ctx, bx, by, eqW, eqH, '#44cccc', 7, 1.5);
       paintMenuGlow(ctx, eqRect, eqHit, 'rgba(68,238,238,0.75)');
+      ctx.beginPath();
+      ctx.rect(bx + 8, by + 4, eqW - 16, eqH - 8);
+      ctx.clip();
       ctx.textAlign = 'left';
-      ctx.fillStyle = isSel ? '#88eeee' : P.ui.text;
-      ctx.font = 'bold 12px "Courier New", monospace';
-      ctx.fillText(EQUIPMENT[key].name, bx + 10, by + 10);
+      ctx.textBaseline = 'top';
+      ctx.fillStyle = isSel ? '#88eeee' : P.ui.textBright;
+      ctx.font = 'bold 13px "Courier New", monospace';
+      ctx.fillText(EQUIPMENT[key].name, bx + 12, by + Math.max(8, eqH * 0.18));
       ctx.fillStyle = P.ui.textDim;
-      ctx.font = '10px "Courier New", monospace';
-      ctx.fillText(EQUIPMENT[key].desc, bx + 10, by + 30);
+      ctx.font = '11px "Courier New", monospace';
+      ctx.fillText(EQUIPMENT[key].desc, bx + 12, by + Math.max(28, eqH * 0.52));
       ctx.restore();
       GameState.briefingEquipmentBoxes.push({ x: bx, y: by, w: eqW, h: eqH, key });
     }
 
-    const pair = footerPairRects(L, { backLabel: '◂ CONTRACTS', primaryMinW: 200 });
+    const pair = footerPairRects(L, { backLabel: '◂ OPERATIONS', primaryMinW: 200 });
     briefingBackBox = pair.back;
     briefingLaunchBox = pair.primary;
-    drawMenuButton(ctx, pair.back, { label: '◂ CONTRACTS' });
+    drawMenuButton(ctx, pair.back, { label: '◂ OPERATIONS' });
     const blink = Math.sin(performance.now() / 500) > -0.4;
     drawMenuButton(ctx, pair.primary, { label: 'LAUNCH', kind: 'primary', blink });
     ctx.restore();
@@ -1845,12 +1990,12 @@ registerScreen('sortie', {
     heli.targetMode = 'closest';
     heli.targetCycleIndex = 0;
     heli.fireCooldown = 0;
-    heli.fireRate = 0.15;
-    heli.bulletSpeed = 500;
-    heli.bulletDamage = 8;
+    heli.fireRate = HELI.fireRate;
+    heli.bulletSpeed = HELI.bulletSpeed;
+    heli.bulletDamage = HELI.bulletDamage;
     heli.weaponRange = 350;
-    heli.accel = 1400;
-    heli.maxSpeed = 400;
+    heli.accel = HELI.accel;
+    heli.maxSpeed = HELI.maxSpeed;
     heli.heatDecayMultiplier = 1;
     heli.targetAssist = 0;
     heli.target = null;
@@ -1936,7 +2081,9 @@ registerScreen('sortie', {
       h = cam.screenH;
     cam.begin(ctx);
 
+    if (world) setSun(world.hour);
     drawSmoothTerrain(ctx, cam);
+    if (world) drawSunWash(ctx, cam);
     drawWorldGround(ctx, cam);
     drawRoads(ctx, cam);
     drawDecorations(ctx, cam);
@@ -1951,7 +2098,7 @@ registerScreen('sortie', {
         sam: '#5a6a5a',
       };
       for (const convoy of world.convoys) {
-        if (!convoy.active) continue;
+        if (!convoy.active || convoy.objectiveHidden) continue;
         // Cull by column bounding box
         let colMinX = Infinity,
           colMinY = Infinity,
@@ -2174,21 +2321,15 @@ registerScreen('sortie', {
     const practice = GameState.isPracticeSortie();
     const nToggles = (input.autofire ? 1 : 0) + (input.clickToTarget ? 1 : 0);
     const equipReady = sortieState.status === 'active' && heli.equipmentType && !heli.equipmentUsed;
-    const objText =
-      world?.objective && !sortieState.objectiveComplete
-        ? objectiveHudText()
-        : sortieState.objectiveComplete
-          ? bossState.defeated
-            ? 'RTB — EXIT THE MAP'
-            : 'PRIMARY COMPLETE — DEFEAT THE COMMANDER'
-          : null;
+    const objText = world?.objective ? objectiveHudText() : null;
     const objWrap = objText
       ? wrapText(objText, Math.max(16, Math.floor((lpw - 32) / 6))).slice(0, 2)
       : [];
+    const intel = world?.objective ? _intelProgress(world) : null;
     const showProgress = !!(
       world?.objective &&
       !sortieState.objectiveComplete &&
-      world.objective.type === 'suppression'
+      (world.objective.type === 'suppression' || (intel && !intel.complete))
     );
     const sysH =
       46 +
@@ -2567,8 +2708,11 @@ registerScreen('sortie', {
       }
       if (showProgress) {
         ctx.fillStyle = P.ui.textDim;
+        const intel = _intelProgress(world);
         ctx.fillText(
-          `PROGRESS ${world.objective.progress}/${world.objective.requiredCount}`,
+          intel.complete
+            ? `PROGRESS ${world.objective.progress}/${world.objective.requiredCount}`
+            : `INTEL ${intel.secured}/${intel.required}`,
           px + 14,
           ty
         );
@@ -2697,8 +2841,20 @@ registerScreen('sortie', {
         ctx.fill();
       }
       ctx.globalAlpha = 1;
+      const holders = world.objective?.intel?.holders || [];
+      if (!_intelProgress(world).complete) {
+        for (const h of holders) {
+          if (h.destroyed || h.intelTaken) continue;
+          const pr = 3.2 + Math.sin(performance.now() / 180) * 1.1;
+          ctx.strokeStyle = '#44ddff';
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          ctx.arc(mx(h.x), my(h.y), pr, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+      }
       const objectiveTarget = world.objective?.target;
-      if (objectiveTarget) {
+      if (objectiveTarget && !objectiveTarget.objectiveHidden) {
         const pr = 4 + Math.sin(performance.now() / 180) * 1.5;
         ctx.strokeStyle = '#ffcc44';
         ctx.lineWidth = 1;
@@ -2902,8 +3058,21 @@ registerScreen('sortie', {
     // ── Objective + extraction direction markers (drawn above all plates) ──
     {
       const focus = getObjectiveFocus();
-      if (focus)
-        drawOffscreenMarker(ctx, camera, W, H, focus.x, focus.y, '#ff5544', '#ff9966', null, uiS);
+      if (focus) {
+        const intel = world ? _intelProgress(world) : { complete: true };
+        drawOffscreenMarker(
+          ctx,
+          camera,
+          W,
+          H,
+          focus.x,
+          focus.y,
+          intel.complete ? '#ff5544' : '#44ddff',
+          intel.complete ? '#ff9966' : '#88eeff',
+          intel.complete ? null : 'INTEL',
+          uiS
+        );
+      }
       if (world?.extraction?.active) {
         const ep = nearestExitPoint();
         drawOffscreenMarker(
@@ -2986,7 +3155,11 @@ function drawSettings(ctx, cam) {
   ctx.font = 'bold 16px "Courier New", monospace';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
-  ctx.fillText('PAUSE — SETTINGS', cx, cy - panelH / 2 + 14);
+  ctx.fillText(
+    currentScreen === screens.sortie ? 'PAUSE — SETTINGS' : 'SETTINGS',
+    cx,
+    cy - panelH / 2 + 14
+  );
 
   ctx.strokeStyle = '#3a5a2a';
   ctx.lineWidth = 1;
@@ -3116,58 +3289,30 @@ canvas.addEventListener('click', (e) => {
   if (currentScreen === screens.hangar) {
     const r = handleHangarClick(pos.x, pos.y, cam.dpr);
     if (r === 'back') switchScreen(metaReturnScreen);
+    if (r === 'skills') switchScreen('pilot');
     return;
   }
   if (currentScreen === screens.pilot) {
     const r = handlePilotClick(pos.x, pos.y, cam.dpr);
     if (r === 'back') switchScreen(metaReturnScreen);
+    if (r === 'hangar') switchScreen('hangar');
+    return;
+  }
+  if (currentScreen === screens.dossiers) {
+    const r = handleDossiersClick(pos.x, pos.y, cam.dpr);
+    if (r === 'back') switchScreen('title');
+    if (r === 'hangar') {
+      metaReturnScreen = 'dossiers';
+      switchScreen('hangar');
+    }
+    if (r === 'skills') {
+      metaReturnScreen = 'dossiers';
+      switchScreen('pilot');
+    }
     return;
   }
   if (currentScreen === screens.splash) {
-    switchScreen('menu');
-    return;
-  }
-  if (
-    currentScreen === screens.menu ||
-    currentScreen === screens.newPilot ||
-    currentScreen === screens.loadPilot
-  ) {
-    const box = hitFlowBox(pos, cam.dpr);
-    if (!box) return;
-    const ev = applyFlowBox(box);
-    if (!ev || ev.type === 'stay') return;
-    if (ev.type === 'settings') {
-      toggleSettings();
-      return;
-    }
-    if (ev.type === 'quit') {
-      switchScreen('splash');
-      return;
-    }
-    if (ev.type === 'menu') {
-      hideNameField();
-      switchScreen('menu');
-      return;
-    }
-    if (ev.type === 'newPilot') {
-      switchScreen('newPilot');
-      return;
-    }
-    if (ev.type === 'loadPilot') {
-      switchScreen('loadPilot');
-      return;
-    }
-    if (ev.type === 'continue') {
-      if (adoptCareer(continueCareer())) switchScreen('title');
-      return;
-    }
-    if (ev.type === 'confirm') {
-      if (adoptCareer(confirmNewPilot())) switchScreen('title');
-      return;
-    }
-    if (ev.type === 'load' && ev.id) {
-      if (adoptCareer(loadSlot(ev.id))) switchScreen('title');
-    }
+    switchScreen('title');
     return;
   }
   if (currentScreen === screens.title) {
@@ -3178,9 +3323,8 @@ canvas.addEventListener('click', (e) => {
         pos.y >= box.y * cam.dpr &&
         pos.y <= (box.y + box.h) * cam.dpr
       ) {
-        if (box.action === 'menu') {
-          hideNameField();
-          switchScreen('menu');
+        if (box.action === 'options') {
+          toggleSettings();
           return;
         }
         if (box.target === 'contracts') GameState.setSortieMode(box.sortieMode || 'campaign');
@@ -3191,7 +3335,18 @@ canvas.addEventListener('click', (e) => {
     }
     return;
   } else if (currentScreen === screens.contracts) {
-    if (posInBox(pos, contractsBackBox, cam.dpr)) {
+    for (const box of contractsNavBoxes) {
+      if (!posInBox(pos, box, cam.dpr)) continue;
+      if (box.label === 'HANGAR') {
+        metaReturnScreen = 'contracts';
+        switchScreen('hangar');
+        return;
+      }
+      if (box.label === 'SKILLS') {
+        metaReturnScreen = 'contracts';
+        switchScreen('pilot');
+        return;
+      }
       switchScreen('title');
       return;
     }
@@ -3236,17 +3391,11 @@ canvas.addEventListener('touchstart', (e) => {
   );
 });
 
-const existingCareer = loadCareer();
-if (existingCareer) {
-  GameState.setCareer(existingCareer);
-  metaState.career = existingCareer;
-}
+adoptCareer(bootCareer());
 registerScreen('splash', splashScreen);
-registerScreen('menu', menuScreen);
-registerScreen('newPilot', newPilotScreen);
-registerScreen('loadPilot', loadPilotScreen);
 registerScreen('hangar', hangarScreen);
 registerScreen('pilot', pilotScreen);
+registerScreen('dossiers', dossiersScreen);
 
 switchScreen('splash');
 console.log('[Gunship] starting loop');

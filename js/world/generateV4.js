@@ -5,9 +5,10 @@
  * Physical geometry is authoritative; places and encounters are derived.
  */
 import { WORLD_SIZE } from '../config.js';
-import { getDifficulty, getScenario, getStyle } from '../contracts.js';
+import { getDifficulty, getScenario, getStyle, intelCountForCampaign } from '../contracts.js';
 import { createTerrain } from '../terrain.js';
 import { mulberry32 } from '../rng.js';
+import { hourFromSeed, wrapHour } from '../sun.js';
 import {
   cumulativePolylineLengths,
   deriveSeed,
@@ -471,6 +472,105 @@ function applyContractPlan(world, contract) {
       });
     }
   }
+
+  placeIntelHolders(world, contract, rng);
+  if ((world.objective.intel?.required || 0) > 0) hideObjectiveTarget(world);
+  else world.objective.revealed = true;
+}
+
+function hideObjectiveTarget(world) {
+  const t = world.objective?.target;
+  if (t) {
+    t.objectiveHidden = true;
+    if (Array.isArray(t.route)) t.active = false;
+  }
+  if (world.objective?.type === 'suppression') {
+    for (const encounter of world.encounters) {
+      for (const entry of encounter.roster || []) {
+        if (entry.objectiveTarget) entry.objectiveHidden = true;
+      }
+    }
+  }
+}
+
+export function revealObjectiveTarget(world) {
+  const o = world.objective;
+  if (!o || o.revealed) return false;
+  o.revealed = true;
+  const t = o.target;
+  if (t) {
+    t.objectiveHidden = false;
+    if (Array.isArray(t.route)) t.active = true;
+  }
+  if (o.type === 'suppression') {
+    for (const encounter of world.encounters) {
+      for (const entry of encounter.roster || []) {
+        if (entry.objectiveTarget) entry.objectiveHidden = false;
+      }
+    }
+  }
+  return true;
+}
+
+function placeIntelHolders(world, contract, rng) {
+  const need = intelCountForCampaign(contract?.campaign || { act: 1 });
+  const excludePlace = world.objective?.targetPlaceId;
+  const excludeId = world.objective?.targetId;
+  const usedPlaces = new Set();
+  const holders = [];
+  const pool = (world.buildings || []).filter(
+    (b) =>
+      b.id !== excludeId &&
+      b.placeId !== excludePlace &&
+      !b.destroyed &&
+      b.placeId
+  );
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    const tmp = pool[i];
+    pool[i] = pool[j];
+    pool[j] = tmp;
+  }
+  for (const b of pool) {
+    if (holders.length >= need) break;
+    if (usedPlaces.has(b.placeId)) continue;
+    usedPlaces.add(b.placeId);
+    b.destructible = true;
+    b.intelHolder = true;
+    b.highPriority = true;
+    b.hp = Math.max(b.hp || 40, 48);
+    b.maxHp = b.hp;
+    holders.push(b);
+  }
+  while (holders.length < need) {
+    const place =
+      world.places.find((p) => p.id !== excludePlace && !usedPlaces.has(p.id) && p.category !== 'civilian') ||
+      world.places.find((p) => p.id !== excludePlace && !usedPlaces.has(p.id));
+    if (!place) break;
+    const parcel =
+      pick(rng, eligibleParcels(world, place, ['military'])) ||
+      world.parcels.find((item) => item.placeId === place.id);
+    const shack = makeBuilding(
+      world,
+      place,
+      parcel,
+      'command',
+      ['military', 'intel', 'missionEligible', 'highPriority'],
+      48
+    );
+    if (!shack) break;
+    usedPlaces.add(place.id);
+    shack.destructible = true;
+    shack.intelHolder = true;
+    shack.highPriority = true;
+    holders.push(shack);
+  }
+  world.objective.intel = { required: Math.max(1, need), secured: 0, holders };
+  world.objective.revealed = false;
+  if (!holders.length) {
+    world.objective.intel.required = 0;
+    world.objective.revealed = true;
+  }
 }
 
 export function generateWorldV4(input) {
@@ -516,6 +616,7 @@ export function generateWorldV4(input) {
     extraction: { active: false },
     responsePlan: null,
     contract,
+    hour: Number.isFinite(contract?.hour) ? wrapHour(contract.hour) : hourFromSeed(seed),
     debugWorldgen: false,
   };
 

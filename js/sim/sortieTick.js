@@ -2,7 +2,8 @@
  * Sortie simulation tick. Screens stay in app.js; this module owns the
  * active-operation loop: targeting, flight, contacts, Hunter, convoys.
  */
-import { CAMERA, TIMER, WORLD_SIZE } from '../config.js';
+import { CAMERA, TIMER, WORLD_SIZE, HELI } from '../config.js';
+import { recordDossierKill } from '../meta.js';
 import { clamp } from '../rng.js';
 import { updateEnemies } from './enemyAi.js';
 import * as GameState from './gameState.js';
@@ -162,7 +163,11 @@ export function tickSortie(dt, deps) {
   let diff = aimAngle - heli.angle;
   while (diff > Math.PI) diff -= Math.PI * 2;
   while (diff < -Math.PI) diff += Math.PI * 2;
-  heli.angle += diff * Math.min(1, 3.0 * (heli.turnMult || 1) * dt);
+  const turnStep = diff * Math.min(1, HELI.turnSpeed * (heli.turnMult || 1) * dt);
+  heli.yawRate = dt > 1e-8 ? turnStep / dt : 0;
+  heli.angle += turnStep;
+  const targetBank = Math.max(-0.22, Math.min(0.22, -heli.yawRate * 0.09));
+  heli.bank = (heli.bank || 0) + (targetBank - (heli.bank || 0)) * Math.min(1, 10 * dt);
 
   if (heli.adrenalineT > 0) heli.adrenalineT -= dt;
   if (heli.flareT > 0) heli.flareT -= dt;
@@ -449,8 +454,8 @@ export function tickSortie(dt, deps) {
         if (d < 380 && convoy.fireCooldown <= 0) {
           const fireAngle =
             Math.atan2(heli.y - convoy.y, heli.x - convoy.x) + (Math.random() - 0.5) * 0.12;
-          spawnProjectile(convoy.x, convoy.y, fireAngle, 200, 3, true, 1.2);
-          convoy.fireCooldown = 1.5;
+          spawnProjectile(convoy.x, convoy.y, fireAngle, 260, 12, true, 1.4);
+          convoy.fireCooldown = 1.1;
           addHeat(0.35, 'convoy escort engaging');
         }
       }
@@ -530,6 +535,7 @@ export function tickSortie(dt, deps) {
             ) {
               fearGain = 2;
             }
+            recordDossierKill(GameState.career, e.className);
             addFear(fearGain, e.className);
             addHeat(Math.max(0.4, fearGain * 0.65), `${e.className} kill reported`);
             spawnExplosion(e.x, e.y, 1.0);
@@ -545,7 +551,7 @@ export function tickSortie(dt, deps) {
         projectiles.splice(i, 1);
         continue;
       }
-      if (Math.hypot(heli.x - p.x, heli.y - p.y) < 20) {
+      if (Math.hypot(heli.x - p.x, heli.y - p.y) < 26) {
         heli.hp -= Math.max(1, Math.round(p.damage * (1 - (heli.dmgResist || 0))));
         hudAnim.hpFlash = 0.15;
         camera.shake(4, 0.15);
@@ -568,9 +574,6 @@ export function tickSortie(dt, deps) {
   }
 
   checkObjectiveProgress();
-  if (bossState.defeated && sortieState.objectiveComplete && sortieState.status === 'active') {
-    finishSortie('complete');
-  }
   updateExtraction(dt);
 
   for (let i = explosions.length - 1; i >= 0; i--) {

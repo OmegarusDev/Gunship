@@ -10,6 +10,7 @@ import { WORLD_SIZE } from '../config.js';
 import { clamp } from '../rng.js';
 import { getConvoyMembers } from '../sim/movement.js';
 import { isTargetAlive as _isTargetAlive } from '../sim/objectives.js';
+import { currentSun } from '../sun.js';
 
 let _world = null,
   _heli = null,
@@ -32,6 +33,7 @@ function tracePolygon(ctx, polygon) {
 }
 
 function drawBuilding(ctx, b) {
+  if (b.objectiveHidden) return;
   if (b.destroyed) {
     ctx.fillStyle = withAlpha('#3a2a1a', 0.7);
     if (tracePolygon(ctx, b.footprint)) ctx.fill();
@@ -47,14 +49,26 @@ function drawBuilding(ctx, b) {
   const cy = b.y;
 
   // Shadow
-  ctx.fillStyle = withAlpha('#000000', 0.2);
+  const sun = currentSun();
+  ctx.fillStyle = withAlpha('#000000', 0.12 + 0.14 * sun.strength);
   if (b.footprint?.length >= 3) {
-    const shadow = b.footprint.map((point) => ({ x: point.x + 4, y: point.y + 5 }));
+    const shadow = b.footprint.map((point) => ({
+      x: point.x + sun.shadowDx * 0.85,
+      y: point.y + sun.shadowDy * 0.85,
+    }));
     tracePolygon(ctx, shadow);
     ctx.fill();
   } else {
     ctx.beginPath();
-    ctx.ellipse(cx + 3, cy + 4, b.w * 0.6, b.d * 0.3, 0, 0, Math.PI * 2);
+    ctx.ellipse(
+      cx + sun.shadowDx * 0.7,
+      cy + sun.shadowDy * 0.7,
+      b.w * 0.6,
+      b.d * 0.3,
+      0,
+      0,
+      Math.PI * 2
+    );
     ctx.fill();
   }
 
@@ -455,7 +469,7 @@ function drawScenarioOverlays(ctx, cam) {
   }
 
   for (const crate of _world.supplyCrates || []) {
-    if (crate.collected || !cam.isVisible(crate.x, crate.y, 30)) continue;
+    if (crate.collected || crate.objectiveHidden || !cam.isVisible(crate.x, crate.y, 30)) continue;
     const pulse = 1 + Math.sin(performance.now() / 240 + crate.x) * 0.08;
     ctx.fillStyle = '#c09050';
     ctx.fillRect(crate.x - 7 * pulse, crate.y - 7 * pulse, 14 * pulse, 14 * pulse);
@@ -472,7 +486,12 @@ function drawScenarioOverlays(ctx, cam) {
   }
 
   const target = _world.objective?.target;
-  if (target && _isTargetAlive(_world, _boss, target) && target !== _boss) {
+  if (
+    target &&
+    !target.objectiveHidden &&
+    _isTargetAlive(_world, _boss, target) &&
+    target !== _boss
+  ) {
     ctx.strokeStyle = withAlpha('#ff4444', 0.75);
     ctx.lineWidth = 1.5;
     ctx.beginPath();

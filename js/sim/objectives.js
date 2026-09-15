@@ -25,13 +25,24 @@ export function isTargetAlive(world, boss, target, enemies = []) {
   return target.hp === undefined || target.hp > 0;
 }
 
+export function intelProgress(world) {
+  const intel = world?.objective?.intel;
+  if (!intel) return { required: 0, secured: 0, complete: true };
+  const holders = intel.holders || [];
+  const secured = holders.filter(
+    (h) => h.destroyed || h.collected || h.state === 'dead' || h.intelTaken
+  ).length;
+  const required = intel.required || 0;
+  return { required, secured, complete: required <= 0 || secured >= required };
+}
+
 export function objectiveComplete(world, enemies = []) {
   const o = world?.objective;
   if (!o) return false;
+  if (!intelProgress(world).complete || !o.revealed) return false;
   if (o.type === 'suppression') {
     let dead = 0;
     const pools = enemies.length ? enemies : [];
-    // Also check encounter rosters that may not have spawned yet.
     if (pools.length === 0 && world.encounters) {
       for (const encounter of world.encounters)
         for (const entry of encounter.roster || [])
@@ -55,8 +66,16 @@ export function canExtract(world, heli) {
 }
 
 export function getObjectiveFocus(world, boss, enemies, heli) {
+  const intel = intelProgress(world);
+  if (!intel.complete) {
+    const next = (world.objective?.intel?.holders || []).find(
+      (h) => !h.destroyed && !h.intelTaken && h.state !== 'dead'
+    );
+    if (next) return { x: next.x, y: next.y };
+  }
   const aim = resolveObjectiveAim(world, enemies, boss, heli);
   if (!aim || aim === boss) return null;
+  if (aim.objectiveHidden) return null;
   return { x: aim.x, y: aim.y };
 }
 
@@ -77,8 +96,13 @@ export function nearestExitPoint(heli) {
   return { x, y, card };
 }
 
-export function objectiveHudText(world) {
+export function objectiveHudText(world, { objectiveComplete: done } = {}) {
   if (!world?.objective) return 'STANDBY';
+  if (done) return 'RTB — CROSS THE BORDER TO EXTRACT';
+  const intel = intelProgress(world);
+  if (!intel.complete) {
+    return `SECURE INTEL  ${intel.secured}/${intel.required}`;
+  }
   if (world.objective.type === 'strike')
     return `DESTROY ${world.objective.targetPlaceName || 'COMMAND TARGET'}`;
   if (world.objective.type === 'sabotage')

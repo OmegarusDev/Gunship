@@ -29,6 +29,7 @@ import {
 import { GUNSHIP_DRAW_IDS } from '../js/render/gunships.js';
 import * as GameState from '../js/sim/gameState.js';
 import { CAMPAIGN_RULES, createContractBoard, getCampaignMission } from '../js/contracts.js';
+import { formatClock, periodLabel, sunFromHour, hourFromSeed } from '../js/sun.js';
 
 let pass = 0,
   fail = 0;
@@ -207,8 +208,20 @@ console.log('— campaign structure —');
     normal.every((c) => c.id.startsWith('act-3-sortie-2-')),
     'contract IDs carry the active campaign position'
   );
+  ok(
+    normal.every((c) => Number.isFinite(c.hour) && c.hour >= 0 && c.hour < 24),
+    'each contract has a clock hour'
+  );
+  ok(
+    createContractBoard(101, { act: 3, sortie: 2 })[0].hour === normal[0].hour,
+    'contract hour is deterministic'
+  );
   const stronghold = createContractBoard(202, { act: 4, sortie: 4 });
   ok(stronghold.length === 1 && stronghold[0].stronghold, 'stronghold sortie is unavoidable');
+  ok(
+    Number.isFinite(stronghold[0].hour) && stronghold[0].hour >= 0 && stronghold[0].hour < 24,
+    'stronghold has a clock hour'
+  );
   ok(stronghold[0].bossProfile.final, 'Act 4 stronghold carries the final boss profile');
   ok(
     getCampaignMission({ act: 2, sortie: CAMPAIGN_RULES.strongholdSortie }).stronghold,
@@ -344,6 +357,19 @@ console.log('— gunship roster / unlocks —');
     !selectGunship(fresh, 'apache').ok && fresh.gunship === 'cobra',
     'locked airframe cannot be selected'
   );
+}
+
+console.log('— sortie sun —');
+{
+  ok(formatClock(4) === '04:00' && formatClock(18.5) === '18:30', 'clock formatting');
+  ok(periodLabel(6.2) === 'DAWN' && periodLabel(23) === 'NIGHT', 'period labels');
+  ok(hourFromSeed(99) === hourFromSeed(99), 'hourFromSeed is deterministic');
+  const noon = sunFromHour(12);
+  const night = sunFromHour(2);
+  const dawn = sunFromHour(6.3);
+  ok(noon.strength > night.strength, 'noon glare stronger than 2am');
+  ok(noon.shadowLen < dawn.shadowLen, 'low sun casts a longer shadow');
+  ok(night.isMoon && !noon.isMoon, 'night uses moon fill-in');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

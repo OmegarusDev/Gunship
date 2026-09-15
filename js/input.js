@@ -29,6 +29,8 @@ export class Input {
     // Fire (held, not one-shot)
     this.fire = false;
     this.fireHeld = false;
+    this.fireHeldTouch = false;
+    this._fireTouchId = null;
 
     // Click-to-target
     this.clickTarget = false;
@@ -68,7 +70,10 @@ export class Input {
     // ── Keyboard ──
     window.addEventListener('keydown', (e) => {
       this.keys[e.code] = true;
-      if (e.code === 'Space') this.fire = true;
+      if (e.code === 'Space') {
+        this.fire = true;
+        this.fireHeld = true;
+      }
       if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') this.cycleTarget = true;
       if (e.code === 'KeyV') this.cycleMode = true;
       if (e.code === 'KeyF') this.autofire = !this.autofire;
@@ -79,6 +84,7 @@ export class Input {
     });
     window.addEventListener('keyup', (e) => {
       this.keys[e.code] = false;
+      if (e.code === 'Space' && !this.pointerDown && !this.fireHeldTouch) this.fireHeld = false;
     });
 
     // ── Mouse ──
@@ -105,8 +111,8 @@ export class Input {
       }
     });
     c.addEventListener('mouseup', () => {
-      this.fireHeld = false;
       this.pointerDown = false;
+      if (!this.keys['Space'] && !this.fireHeldTouch) this.fireHeld = false;
     });
     c.addEventListener('contextmenu', (e) => e.preventDefault());
 
@@ -153,7 +159,8 @@ export class Input {
         // Below it = target MODE cycle (next to the fire button)
         this.cycleMode = true;
       } else {
-        // Rest of right side = fire
+        this._fireTouchId = t.identifier;
+        this.fireHeldTouch = true;
         this.fire = true;
       }
     }
@@ -178,6 +185,10 @@ export class Input {
   _touchEnd(e) {
     e.preventDefault();
     for (const t of e.changedTouches) {
+      if (t.identifier === this._fireTouchId) {
+        this._fireTouchId = null;
+        this.fireHeldTouch = false;
+      }
       this.touches.delete(t.identifier);
     }
     if (this.touches.size === 0) {
@@ -186,13 +197,15 @@ export class Input {
       this.moveY = 0;
       this.pointerDown = false;
       this.mouseOnScreen = false;
+      this.fireHeldTouch = false;
+      this._fireTouchId = null;
     }
   }
 
   /** Poll gamepad, combine all input sources, compute aim. */
   tick() {
-    // ── Keep fire active while mouse/button held ──
-    if (this.fireHeld) this.fire = true;
+    // ── Keep fire active while mouse / Space / touch is held ──
+    if (this.fireHeld || this.fireHeldTouch || this.keys['Space']) this.fire = true;
     // ── Gamepad polling ──
     if (this.gamepadConnected) {
       const gp = navigator.getGamepads()[0];

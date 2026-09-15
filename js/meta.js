@@ -312,6 +312,7 @@ export function createPilot(seed = (Math.random() * 0xffffffff) >>> 0) {
     },
     sortiesFlown: 0,
     careerKills: 0,
+    dossierKills: {},
   };
 }
 
@@ -533,8 +534,8 @@ export const HANGAR_SLOTS = {
   engine: {
     name: 'ENGINE',
     levels: [
-      { cost: 100, desc: 'Turbine: +30 speed, +120 accel' },
-      { cost: 250, desc: 'Upgraded Turbine: +60 speed, +240 accel' },
+      { cost: 100, desc: 'Turbine: +6% speed, +8% accel' },
+      { cost: 250, desc: 'Upgraded Turbine: +12% speed, +16% accel' },
     ],
   },
   armor: {
@@ -757,6 +758,7 @@ export function createCareer(seed) {
     gunship: 'cobra',
     campaign: { act: 1, sortie: 1 },
     prestige: 0,
+    dossierKills: {},
   };
 }
 
@@ -801,6 +803,17 @@ export function clearCareer() {
   } catch {
     /* ignore */
   }
+}
+
+export function recordDossierKill(career, className) {
+  if (!career || !className) return;
+  if (!career.dossierKills || typeof career.dossierKills !== 'object') career.dossierKills = {};
+  career.dossierKills[className] = (career.dossierKills[className] || 0) + 1;
+  const pilot = career.pilot;
+  if (!pilot) return;
+  if (!pilot.dossierKills || typeof pilot.dossierKills !== 'object') pilot.dossierKills = {};
+  pilot.dossierKills[className] = (pilot.dossierKills[className] || 0) + 1;
+  pilot.careerKills = (pilot.careerKills || 0) + 1;
 }
 
 /**

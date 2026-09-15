@@ -22,6 +22,8 @@ import {
   aggregateModifiers,
 } from '../js/meta.js';
 import { WORLD_SIZE } from '../js/config.js';
+import { objectiveComplete as simObjectiveComplete, intelProgress } from '../js/sim/objectives.js';
+import { revealObjectiveTarget } from '../js/world/generateV4.js';
 
 let pass = 0,
   fail = 0;
@@ -35,25 +37,8 @@ function ok(cond, msg) {
 }
 
 // ── mirrors of the real in-tick guards ──────────────────────────────────────
-function isAlive(t) {
-  if (!t) return false;
-  if (t.destroyed !== undefined) return !t.destroyed;
-  if (t.state !== undefined) return t.state !== 'dead';
-  return true;
-}
 function objectiveComplete(world) {
-  const o = world.objective;
-  if (!o) return false;
-  if (o.type === 'suppression') {
-    let dead = 0;
-    for (const encounter of world.encounters)
-      for (const e of encounter.roster || []) {
-        if (e.objectiveTarget && e.state === 'dead') dead++;
-      }
-    return dead >= (o.requiredCount || 0);
-  }
-  if (o.type === 'recovery') return Boolean(o.target && o.target.collected);
-  return Boolean(o.target && !isAlive(o.target));
+  return simObjectiveComplete(world);
 }
 function canExtract(world, heli) {
   const lim = WORLD_SIZE * 0.48;
@@ -62,6 +47,27 @@ function canExtract(world, heli) {
     objectiveComplete(world) &&
     (Math.abs(heli.x) > lim || Math.abs(heli.y) > lim)
   );
+}
+function secureIntel(world) {
+  const intel = world.objective?.intel;
+  if (!intel || !intel.required) {
+    world.objective.revealed = true;
+    return;
+  }
+  ok(
+    intel.holders.length >= intel.required,
+    `intel holders (${intel.holders.length}) meet required ${intel.required}`
+  );
+  ok(world.objective.target?.objectiveHidden, 'primary target hidden until intel is secured');
+  ok(!objectiveComplete(world), 'objective stays incomplete before intel');
+  for (const h of intel.holders) {
+    h.destroyed = true;
+    h.intelTaken = true;
+  }
+  ok(intelProgress(world).complete, 'intel complete after holders destroyed');
+  revealObjectiveTarget(world);
+  ok(world.objective.revealed, 'target revealed after intel');
+  if (world.objective.target) world.objective.target.objectiveHidden = false;
 }
 function baseHeli() {
   return {
@@ -87,7 +93,13 @@ for (const scenarioId of Object.keys(SCENARIOS)) {
   scenarioCount++;
   // a few seeds to shake out placement-dependent soft-locks
   for (const seed of [1000, 2000, 3000]) {
-    const contract = { scenarioId, styleId: STYLE, difficultyId: DIFF, seed };
+    const contract = {
+      scenarioId,
+      styleId: STYLE,
+      difficultyId: DIFF,
+      seed,
+      campaign: { act: 1, sortie: 1 },
+    };
     const world = generateWorld({ seed, contract });
 
     ok(world.worldGenVersion === 4, `[${scenarioId}/${seed}] uses WORLD_GEN v4`);
@@ -135,11 +147,13 @@ for (const scenarioId of Object.keys(SCENARIOS)) {
       );
     }
 
-    // simulate the pilot completing the op, then assert the win path is reachable
+    // Intel first, then the primary, then extract by crossing the border.
+    secureIntel(world);
     if (scenarioId === 'strike' || scenarioId === 'sabotage') {
       world.objective.target.destroyed = true;
     } else if (scenarioId === 'intercept') {
       world.objective.target.destroyed = true;
+      world.objective.target.active = false;
     } else if (scenarioId === 'suppression') {
       for (const encounter of world.encounters)
         for (const e of encounter.roster || []) if (e.objectiveTarget) e.state = 'dead';

@@ -5,6 +5,7 @@
 import { P } from '../palette.js';
 import { withAlpha, shade } from '../drawUtil.js';
 import { VIEW25 } from '../view25.js';
+import { currentSun, setSun } from '../sun.js';
 
 function paintFrom(body, extras = {}) {
   return {
@@ -60,16 +61,68 @@ function hullScale(h) {
   return airScale(h) * FIT * ART;
 }
 
+const BANK_THIN = 0.18;
+const BANK_SHEAR = 0.15;
+const BANK_ROLL = 0.22;
+
+let _pose = { angle: 0, bank: 0 };
+
+function applyBankDeform(ctx, bank) {
+  if (!bank) return;
+  const thin = 1 - Math.abs(bank) * BANK_THIN;
+  ctx.rotate(bank * BANK_ROLL);
+  ctx.transform(1, 0, bank * BANK_SHEAR, thin, 0, 0);
+}
+
 function beginHull(ctx, h) {
   ctx.save();
   ctx.translate(h.x, h.y);
+  ctx.rotate(h.angle || 0);
+  applyBankDeform(ctx, h.bank || 0);
   ctx.scale(airScale(h) * FIT, airScale(h) * FIT);
-  ctx.rotate(h.angle);
   ctx.scale(ART, ART);
+  _pose.angle = h.angle || 0;
+  _pose.bank = h.bank || 0;
+}
+
+function worldSunLocal() {
+  const sun = currentSun();
+  const a = _pose.angle || 0;
+  const c = Math.cos(a);
+  const s = Math.sin(a);
+  const lx = sun.dirX * c + sun.dirY * s;
+  const ly = -sun.dirX * s + sun.dirY * c;
+  const mag = Math.hypot(lx, ly) || 1;
+  return { ux: lx / mag, uy: ly / mag, sun };
+}
+
+function metalSunOverlay(ctx, fill, x0, y0, x1, y1, kind = 'path') {
+  if (_halo || !isHex(fill) || luma(fill) <= 28) return;
+  const { ux, uy, sun } = worldSunLocal();
+  const cx = (x0 + x1) / 2;
+  const cy = (y0 + y1) / 2;
+  const reach = Math.hypot(x1 - x0, y1 - y0) * 0.55;
+  const amt = 0.1 * (0.35 + 0.65 * sun.strength);
+  const g = ctx.createLinearGradient(
+    cx - ux * reach,
+    cy - uy * reach,
+    cx + ux * reach,
+    cy + uy * reach
+  );
+  g.addColorStop(0, shade(fill, -amt));
+  g.addColorStop(0.42, fill);
+  g.addColorStop(1, shade(fill, amt * 1.15));
+  ctx.save();
+  ctx.globalAlpha = 0.38 + 0.22 * sun.strength;
+  ctx.fillStyle = g;
+  if (kind === 'rect') ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+  else ctx.fill();
+  ctx.restore();
 }
 
 const HALO = '#000000';
-const HALO_W = 3.6;
+/** Screen-pixel outline so hangar scale and in-world scale stay the same weight. */
+const HALO_PX = 2.35;
 const INNER = 0.5;
 let _halo = false;
 
@@ -85,9 +138,17 @@ function paintHaloThen(paint) {
 }
 
 function haloStroke(ctx) {
+  let scale = 1;
+  if (typeof ctx.getTransform === 'function') {
+    const m = ctx.getTransform();
+    const sx = Math.hypot(m.a, m.b) || 1;
+    const sy = Math.hypot(m.c, m.d) || 1;
+    // Min axis so bank-shear never fattens the rim, and hangar vs world stay equal.
+    scale = Math.min(sx, sy);
+  }
   ctx.fillStyle = HALO;
   ctx.strokeStyle = HALO;
-  ctx.lineWidth = HALO_W;
+  ctx.lineWidth = HALO_PX / scale;
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
 }
@@ -156,12 +217,10 @@ function fillPoly(ctx, pts, fill, stroke, lw = 1) {
     const [minX, minY, maxX, maxY] = bboxOf(pts);
     paintFill(ctx, fill, minX, minY, maxX, maxY);
     ctx.fill();
+    metalSunOverlay(ctx, fill, minX, minY, maxX, maxY);
   }
-  if (stroke) {
-    ctx.strokeStyle = stroke;
-    ctx.lineWidth = lw * INNER;
-    ctx.stroke();
-  }
+  void stroke;
+  void lw;
 }
 
 /** Fuselage as a tube: wrap across Y so the sheen isn't hidden under the glass. */
@@ -188,6 +247,7 @@ function fillHull(ctx, pts, fill) {
   g.addColorStop(1, shade(fill, -0.14));
   ctx.fillStyle = g;
   ctx.fill();
+  metalSunOverlay(ctx, fill, minX, minY, maxX, maxY);
 }
 
 function fillFlat(ctx, pts, fill) {
@@ -232,11 +292,8 @@ function fillGlass(ctx, pts, mid, hi, stroke, lw = 0.7) {
   ctx.beginPath();
   ctx.ellipse(cx - r * 0.04, cy - r * 0.18, r * 0.16, r * 0.08, -0.2, 0, Math.PI * 2);
   ctx.fill();
-  if (stroke) {
-    ctx.strokeStyle = stroke;
-    ctx.lineWidth = lw * INNER;
-    ctx.stroke();
-  }
+  void stroke;
+  void lw;
 }
 
 function fillBox(ctx, x, y, w, h, fill) {
@@ -248,6 +305,7 @@ function fillBox(ctx, x, y, w, h, fill) {
   }
   paintFill(ctx, fill, x, y, x + w, y + h);
   ctx.fillRect(x, y, w, h);
+  metalSunOverlay(ctx, fill, x, y, x + w, y + h, 'rect');
 }
 
 function fillOval(ctx, x, y, rx, ry, rot, fill) {
@@ -261,6 +319,7 @@ function fillOval(ctx, x, y, rx, ry, rot, fill) {
   }
   paintFill(ctx, fill, x - rx, y - ry, x + rx, y + ry);
   ctx.fill();
+  metalSunOverlay(ctx, fill, x - rx, y - ry, x + rx, y + ry);
 }
 
 function fillDot(ctx, x, y, r, fill) {
@@ -312,6 +371,16 @@ function capsule(ctx, x0, y0, x1, y1, r, fill) {
     ctx.fillStyle = fill;
   }
   ctx.fill();
+  if (isHex(fill)) {
+    metalSunOverlay(
+      ctx,
+      fill,
+      Math.min(x0, x1) - r,
+      Math.min(y0, y1) - r,
+      Math.max(x0, x1) + r,
+      Math.max(y0, y1) + r
+    );
+  }
 }
 
 function rocketPod(ctx, p, x, y, len = 9, fat = 1.7) {
@@ -802,6 +871,11 @@ function drawMainRotor(ctx, h, spec) {
   const alpha = spec.alpha ?? 0.42;
 
   ctx.save();
+  ctx.translate(h.x, h.y);
+  ctx.rotate(h.angle || 0);
+  applyBankDeform(ctx, h.bank || 0);
+  ctx.rotate(-(h.angle || 0));
+  ctx.translate(-h.x, -h.y);
   ctx.lineCap = spec.swept ? 'butt' : 'square';
   for (let i = 0; i < blades; i++) {
     const a = rot + (i * Math.PI * 2) / blades;
@@ -1489,13 +1563,27 @@ const DRAW = {
 
 export function drawHeliShadow(ctx, h) {
   const scale = (h.drawScale || 1) * (h.airframeScale || 1);
-  ctx.fillStyle = P.gunship.shadow;
+  const sun = currentSun();
+  const bank = h.bank || 0;
+  const px = -Math.sin(h.angle || 0);
+  const py = Math.cos(h.angle || 0);
+  const alpha = 0.18 + 0.2 * sun.strength;
+  ctx.fillStyle = `rgba(0,0,0,${alpha})`;
   ctx.beginPath();
-  ctx.ellipse(h.x + 3 * scale, h.y + 7 * scale, 26 * scale, 5.0 * scale, h.angle, 0, Math.PI * 2);
+  ctx.ellipse(
+    h.x + sun.shadowDx * scale * 0.55 + px * bank * 8 * scale,
+    h.y + sun.shadowDy * scale * 0.55 + py * bank * 8 * scale,
+    26 * scale,
+    5.0 * scale,
+    h.angle || 0,
+    0,
+    Math.PI * 2
+  );
   ctx.fill();
 }
 
 export function drawGunship(ctx, h) {
+  if (Number.isFinite(h.hour)) setSun(h.hour);
   const fn = DRAW[h.gunshipId] || DRAW.cobra;
   fn(ctx, h);
 }

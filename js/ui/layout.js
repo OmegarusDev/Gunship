@@ -116,6 +116,22 @@ export function footerPairRects(layout, { backLabel = '◂ BACK', primaryMinW = 
   return { back, primary };
 }
 
+/** Evenly spaced footer actions (BACK + shortcuts). */
+export function footerNavRects(layout, labels) {
+  const n = Math.max(1, labels.length);
+  const gap = 10;
+  const y = layout.h - layout.footerH + layout.pad * 0.35;
+  const h = layout.btnH;
+  const w = (layout.content.w - gap * (n - 1)) / n;
+  return labels.map((label, i) => ({
+    x: layout.content.x + i * (w + gap),
+    y,
+    w,
+    h,
+    label,
+  }));
+}
+
 const menuPointer = { x: -1, y: -1, down: false, inside: false };
 const menuPulses = new Map();
 let menuPressKey = null;
@@ -150,7 +166,7 @@ export function menuCursor() {
 }
 
 /** Hover / press / release-bounce for any menu hit target. */
-export function menuHit(rect, { disabled = false } = {}) {
+export function menuHit(rect, { disabled = false, quiet = false } = {}) {
   if (!rect || disabled) {
     return { hover: false, pressed: false, pulse: 0, scale: 1 };
   }
@@ -166,9 +182,11 @@ export function menuHit(rect, { disabled = false } = {}) {
   const pulse = rec && rec.until > now ? (rec.until - now) / rec.dur : 0;
   const pressed = hover && menuPointer.down;
   let scale = 1;
-  if (pressed) scale = 0.96;
-  else if (pulse > 0) scale = 0.96 + (1 - pulse) * 0.1;
-  else if (hover) scale = 1.03;
+  if (!quiet) {
+    if (pressed) scale = 0.96;
+    else if (pulse > 0) scale = 0.96 + (1 - pulse) * 0.1;
+    else if (hover) scale = 1.03;
+  }
   return { hover, pressed, pulse, scale };
 }
 
@@ -195,6 +213,95 @@ export function paintMenuGlow(ctx, rect, hit, color = 'rgba(170,255,136,0.7)') {
   ctx.restore();
 }
 
+export function menuPointerPos() {
+  return { x: menuPointer.x, y: menuPointer.y, inside: menuPointer.inside };
+}
+
+/** Wallet chip in the header, right-aligned to the content column. */
+export function drawHeaderDollars(ctx, layout, dollars) {
+  const label = `$${dollars}`;
+  ctx.font = 'bold 13px "Courier New", monospace';
+  const tw = ctx.measureText(label).width;
+  const chipW = tw + 18;
+  const chipH = 22;
+  const x = layout.content.x + layout.content.w - chipW;
+  const y = (layout.headerMetaY || 20) + 1;
+  ctx.fillStyle = 'rgba(10,18,8,0.88)';
+  ctx.fillRect(x, y, chipW, chipH);
+  ctx.strokeStyle = 'rgba(204,170,68,0.55)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x + 0.5, y + 0.5, chipW - 1, chipH - 1);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#ffcc44';
+  ctx.fillText(label, x + chipW / 2, y + chipH / 2 + 0.5);
+}
+
+/** Dedicated footer band so BACK never collides with content. */
+export function drawFooterStrip(ctx, w, h) {
+  const layout = layoutOf(w, h);
+  const y = h - layout.footerH;
+  ctx.fillStyle = 'rgba(8,14,8,0.94)';
+  ctx.fillRect(0, y, w, layout.footerH);
+  ctx.strokeStyle = 'rgba(90,140,80,0.4)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, y + 0.5);
+  ctx.lineTo(w, y + 0.5);
+  ctx.stroke();
+}
+
+/** Small cursor-following callout. `anchor` is the pointer or a card corner. */
+export function drawCursorTooltip(ctx, text, anchorX, anchorY, bounds) {
+  if (!text) return;
+  ctx.save();
+  ctx.font = '11px "Courier New", monospace';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  const padX = 10;
+  const padY = 7;
+  const lineH = 14;
+  const maxLine = Math.min(320, Math.max(160, (bounds?.w ?? 400) * 0.7));
+  const words = String(text).split(' ');
+  const lines = [];
+  let line = '';
+  for (const word of words) {
+    const next = line ? `${line} ${word}` : word;
+    if (ctx.measureText(next).width > maxLine && line) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = next;
+    }
+  }
+  if (line) lines.push(line);
+  let tw = 0;
+  for (const row of lines) tw = Math.max(tw, ctx.measureText(row).width);
+  const bw = tw + padX * 2;
+  const bh = lines.length * lineH + padY * 2;
+  let x = anchorX + 16;
+  let y = anchorY - bh - 12;
+  const minX = bounds?.x ?? 8;
+  const minY = bounds?.y ?? 8;
+  const maxX = (bounds?.x ?? 0) + (bounds?.w ?? 640);
+  const maxY = (bounds?.y ?? 0) + (bounds?.h ?? 400);
+  if (x + bw > maxX) x = maxX - bw;
+  if (x < minX) x = minX;
+  if (y < minY) y = anchorY + 18;
+  if (y + bh > maxY) y = maxY - bh;
+  ctx.fillStyle = 'rgba(8,16,10,0.96)';
+  ctx.fillRect(x, y, bw, bh);
+  ctx.strokeStyle = P.ui.borderHi;
+  ctx.lineWidth = 1.2;
+  ctx.strokeRect(x, y, bw, bh);
+  drawCornerBrackets(ctx, x, y, bw, bh, P.ui.borderHi, 6, 1.2);
+  ctx.fillStyle = P.ui.textBright;
+  for (let i = 0; i < lines.length; i++) {
+    ctx.fillText(lines[i], x + padX, y + padY + i * lineH);
+  }
+  ctx.restore();
+}
+
 export function drawPanel(ctx, x, y, w, h, { stroke = P.ui.border, fill = '#0d210f' } = {}) {
   ctx.fillStyle = fill;
   ctx.fillRect(x, y, w, h);
@@ -207,14 +314,15 @@ export function drawPanel(ctx, x, y, w, h, { stroke = P.ui.border, fill = '#0d21
 export function drawMenuButton(
   ctx,
   rect,
-  { label, sub, kind = 'menu', blink = false, disabled = false } = {}
+  { label, sub, kind = 'menu', blink = false, disabled = false, compact = false } = {}
 ) {
   const { x, y, w, h } = rect;
   const primary = kind === 'primary';
   const accent = kind === 'accent';
+  const small = compact || h < 42;
   ctx.save();
   if (disabled) ctx.globalAlpha *= 0.4;
-  const hit = applyMenuHitTransform(ctx, rect, { disabled });
+  const hit = applyMenuHitTransform(ctx, rect, { disabled, quiet: small });
   const glow = accent ? 'rgba(68,238,238,0.85)' : 'rgba(170,255,136,0.8)';
   ctx.fillStyle = hit.pressed
     ? primary
@@ -239,7 +347,7 @@ export function drawMenuButton(
     : accent
       ? '#44cccc'
       : P.ui.borderHi;
-  ctx.lineWidth = primary || blink || hit.hover ? 1.7 : 1.2;
+  ctx.lineWidth = !small && (primary || blink || hit.hover) ? 1.7 : 1.15;
   ctx.strokeRect(x, y, w, h);
   drawCornerBrackets(
     ctx,
@@ -254,10 +362,10 @@ export function drawMenuButton(
         : accent
           ? '#44cccc'
           : 'rgba(120,200,120,0.45)',
-    8,
-    1.5
+    small ? 5 : 8,
+    small ? 1.15 : 1.5
   );
-  paintMenuGlow(ctx, rect, hit, glow);
+  if (!small) paintMenuGlow(ctx, rect, hit, glow);
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   if (sub) {
@@ -269,7 +377,7 @@ export function drawMenuButton(
     ctx.fillText(sub, x + w / 2, y + h * 0.7);
   } else {
     ctx.fillStyle = accent ? '#88eeee' : P.ui.textBright;
-    ctx.font = `bold ${h >= 52 ? 15 : 13}px "Courier New", monospace`;
+    ctx.font = `bold ${small ? 12 : h >= 52 ? 15 : 13}px "Courier New", monospace`;
     ctx.fillText(label, x + w / 2, y + h / 2 + 0.5);
   }
   ctx.restore();
@@ -347,6 +455,7 @@ export function paintScreenBackdrop(ctx, w, h, title, subtitle = '') {
     ctx.fillText(subtitle, w / 2, titleY + titleSize + 12);
   }
   layout.headerMetaY = titleY;
+  drawFooterStrip(ctx, w, h);
   return layout;
 }
 

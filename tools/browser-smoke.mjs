@@ -77,20 +77,14 @@ try {
   await page.goto(`http://127.0.0.1:${port}/index.html`, { waitUntil: 'load' });
   await wait(2200);
 
-  const flowUrl = `http://127.0.0.1:${port}/js/screens_flow.js`;
   const stateUrl = `http://127.0.0.1:${port}/js/sim/gameState.js`;
-  const screenMetaUrl = `http://127.0.0.1:${port}/js/screens_meta.js`;
   const contractsUrl = `http://127.0.0.1:${port}/js/contracts.js`;
-  const flowBoxes = await page.evaluate(async (url) => (await import(url)).flowBoxes, flowUrl);
-  const continueBox = flowBoxes.find((box) => box.action === 'continue');
-  assert.ok(continueBox, 'startup menu exposes Continue for the active career');
-  await page.mouse.click(continueBox.x + continueBox.w / 2, continueBox.y + continueBox.h / 2);
-  await wait(150);
-
   const titleBoxes = await page.evaluate(
     async (url) => (await import(url)).titleMenuBoxes,
     stateUrl
   );
+  const optionsBox = titleBoxes.find((box) => box.action === 'options');
+  assert.ok(optionsBox, 'campaign hub exposes Options');
   const practiceBox = titleBoxes.find((box) => box.sortieMode === 'practice');
   assert.ok(practiceBox, 'campaign hub exposes Practice mode');
   assert.match(practiceBox.sub, /NO PILOT RISK/);
@@ -188,6 +182,8 @@ try {
         bossSpawned: state.boss.spawned,
         bodyguards: state.boss.bodyguards,
         defenses: state.enemies.filter((enemy) => enemy.strongholdDefense).length,
+        targetHidden: !!state.world?.objective?.target?.objectiveHidden,
+        intelRequired: state.world?.objective?.intel?.required || 0,
       };
     },
     { stateUrl, appUrl: `http://127.0.0.1:${port}/js/app.js`, contractsUrl }
@@ -197,11 +193,13 @@ try {
   assert.equal(strongholdRoute.timer, 300, 'stronghold starts its dedicated timer');
   assert.equal(strongholdRoute.bossSpawned, true, 'stronghold commander is present at launch');
   assert.ok(strongholdRoute.bodyguards > 0, 'stronghold commander receives bodyguards');
-  assert.ok(strongholdRoute.defenses > 0, 'stronghold has dedicated defense composition');
+  assert.equal(strongholdRoute.targetHidden, true, 'stronghold target stays hidden until intel');
+  assert.ok(strongholdRoute.intelRequired > 0, 'stronghold still requires intel before the reveal');
+  assert.equal(strongholdRoute.defenses, 0, 'stronghold defenses spawn only after the target is revealed');
 
   assert.deepEqual(errors, [], `browser reported errors: ${errors.join('; ')}`);
   console.log(
-    'Browser smoke: boot, Practice route, Practice safety, and campaign KIA policy passed'
+    'Browser smoke: splash→hub, Practice route, Practice safety, and campaign KIA policy passed'
   );
 } finally {
   if (browser) await browser.close();

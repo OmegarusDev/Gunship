@@ -115,6 +115,36 @@ export const ENEMY_CLASSES = {
   },
 };
 
+export const ENEMY_CLASS_ORDER = [
+  'rifleman',
+  'assault',
+  'mg',
+  'rpg',
+  'manpads',
+  'unarmed',
+  'lightAA',
+  'shilka',
+  'sam',
+  'technical',
+  'apc',
+  'tank',
+];
+
+export const ENEMY_CLASS_LABELS = {
+  unarmed: 'CIVILIAN',
+  rifleman: 'RIFLEMAN',
+  assault: 'ASSAULT',
+  mg: 'GUNNER',
+  rpg: 'RPG',
+  manpads: 'MANPADS',
+  lightAA: 'LIGHT AA',
+  shilka: 'SHILKA',
+  tank: 'TANK',
+  apc: 'APC',
+  sam: 'SAM',
+  technical: 'TECHNICAL',
+};
+
 export function classToEnemyType(className) {
   return ENEMY_CLASSES[className] ? className : 'rifleman';
 }

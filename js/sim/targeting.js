@@ -13,6 +13,7 @@ export function isRosterStub(target) {
 
 export function isLockable(target) {
   if (!target) return false;
+  if (target.objectiveHidden) return false;
   if (isRosterStub(target)) return false;
   if (!Number.isFinite(target.x) || !Number.isFinite(target.y)) return false;
   if (target.spawned !== undefined) return Boolean(target.spawned) && target.state !== 'dead';
@@ -119,8 +120,7 @@ export function collectAimables(world, enemies, boss, mode = 'closest') {
   }
   if (mode === 'infrastructure' || mode === 'closest' || mode === 'strongest') {
     for (const convoy of world?.convoys || []) {
-      if (convoy.destroyed) continue;
-      if (!convoy.active && mode !== 'closest') continue;
+      if (!isLockable(convoy) || convoy.destroyed || !convoy.active) continue;
       pushUnique(out, seen, convoy);
     }
   }

@@ -137,9 +137,13 @@ export function updateEnemies(dt, { addHeat, spawnProjectile, lastShotX, lastSho
         returnToPost(enemy, dt, sharedTerrain);
       }
       enemy.fireCooldown -= dt;
-      if (enemy.fireCooldown <= 0 && dist < enemy.range) {
-        const fireAngle = Math.atan2(heli.y - enemy.y, heli.x - enemy.x) + (Math.random() - 0.5) * 0.09;
-        spawnProjectile(enemy.x, enemy.y, fireAngle, 200, enemy.damage, true, enemy.bulletLife || 1.5);
+      if (enemy.fireCooldown <= 0 && dist < enemy.range && enemy.damage > 0) {
+        const speed = enemy.bulletSpeed || 260;
+        const eta = speed > 0 ? dist / speed : 0;
+        const tx = heli.x + (heli.vx || 0) * eta * 0.7;
+        const ty = heli.y + (heli.vy || 0) * eta * 0.7;
+        const fireAngle = Math.atan2(ty - enemy.y, tx - enemy.x) + (Math.random() - 0.5) * 0.07;
+        spawnProjectile(enemy.x, enemy.y, fireAngle, speed, enemy.damage, true, enemy.bulletLife || 1.5);
         enemy.fireCooldown = enemy.fireRate;
       }
     } else if (enemy.homeX !== undefined && homeDist > (HOLD_POSTS.has(enemy.post) ? 8 : COMBAT.returnHomeDist)) {
