@@ -87,7 +87,11 @@ try {
   assert.ok(optionsBox, 'campaign hub exposes Options');
   const practiceBox = titleBoxes.find((box) => box.sortieMode === 'practice');
   assert.ok(practiceBox, 'campaign hub exposes Practice mode');
-  assert.match(practiceBox.sub, /NO PILOT RISK/);
+  assert.match(practiceBox.sub, /SANDBOX/);
+  assert.ok(
+    titleBoxes.some((box) => box.target === 'achievements'),
+    'campaign hub exposes Achievements'
+  );
   await page.mouse.click(practiceBox.x + practiceBox.w / 2, practiceBox.y + practiceBox.h / 2);
   await wait(150);
 
@@ -95,12 +99,32 @@ try {
     const state = await import(url);
     return {
       mode: state.sortieContext.mode,
+      sandbox: Boolean(state.career?.sandbox),
+      pilot: state.career?.pilot?.name,
+      unlocked: (state.career?.unlocked || []).length,
       contractCount: state.contractBoard.length,
-      campaign: state.career.campaign,
     };
   }, stateUrl);
   assert.equal(practiceRoute.mode, 'practice');
-  assert.equal(practiceRoute.contractCount, 4, 'Practice uses the normal contract board');
+  assert.equal(practiceRoute.sandbox, true, 'Practice swaps in a sandbox career');
+  assert.equal(practiceRoute.pilot, 'RANGE PILOT');
+  assert.equal(practiceRoute.unlocked, 6, 'Practice hangar has every airframe');
+
+  await page.evaluate(
+    async ({ stateUrl: statePath, appUrl }) => {
+      const state = await import(statePath);
+      const app = await import(appUrl);
+      app.switchScreen('contracts');
+      return state.contractBoard.length;
+    },
+    { stateUrl, appUrl: `http://127.0.0.1:${port}/js/app.js` }
+  );
+  await wait(80);
+  const practiceBoard = await page.evaluate(async (url) => {
+    const state = await import(url);
+    return state.contractBoard.length;
+  }, stateUrl);
+  assert.equal(practiceBoard, 4, 'Practice operations still uses the normal contract board');
 
   await page.evaluate(
     async ({ stateUrl: statePath, appUrl }) => {
@@ -137,6 +161,21 @@ try {
   );
   assert.equal(practiceOutcome.committed, true, 'Practice debrief is idempotently marked complete');
   assert.deepEqual(practiceOutcome.rewards, [0, 0], 'Practice has no persistent rewards');
+
+  const restored = await page.evaluate(
+    async ({ stateUrl: statePath, appUrl }) => {
+      const app = await import(appUrl);
+      const state = await import(statePath);
+      app.switchScreen('title');
+      return {
+        sandbox: Boolean(state.career?.sandbox),
+        mode: state.sortieContext.mode,
+      };
+    },
+    { stateUrl, appUrl: `http://127.0.0.1:${port}/js/app.js` }
+  );
+  assert.equal(restored.sandbox, false, 'leaving Practice restores the campaign career');
+  assert.equal(restored.mode, 'campaign');
 
   const campaignOutcome = await page.evaluate(
     async ({ stateUrl: statePath, appUrl }) => {

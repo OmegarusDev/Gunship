@@ -4,7 +4,7 @@
   </a>
 </p>
 
-<p align="center"><strong>No install.</strong> Works in the browser (desktop & mobile).</p>
+<p align="center"><strong>Play in the browser</strong> — or install as an app from the live game page.</p>
 
 # Gunship — Freedom Protocol
 
@@ -18,6 +18,18 @@ four acts of three normal sorties plus a stronghold.
 
 Click the badge above, or open **[omegarusdev.github.io/Gunship](https://omegarusdev.github.io/Gunship/)**.
 It boots straight into the game — no setup.
+
+## Mobile / install (PWA)
+
+Install as a fullscreen app (standalone window, no URL bar) from the live game page — not from the GitHub README itself. On Android Chrome that install is a WebAPK.
+
+1. Open [omegarusdev.github.io/Gunship](https://omegarusdev.github.io/Gunship/) (the PLAY button).
+2. Install from that page:
+   - **Android Chrome:** address-bar install icon, **INSTALL APP** chip, or menu → Install app / Add to Home screen
+   - **iPhone/iPad (Safari):** Share → Add to Home Screen
+3. Later launches use the home-screen icon. Pushes to `main` deploy a new Pages build; the installed app picks it up (auto-refresh when you’re not mid-sortie, or an **UPDATE READY** tap if you are).
+
+Fullscreen is only the installed WebAPK / home-screen app. A desktop or browser tab never goes fullscreen on click. Portrait and landscape both work.
 
 ## Controls
 

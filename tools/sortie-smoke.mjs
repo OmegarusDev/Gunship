@@ -218,9 +218,10 @@ ok(
 
 // skill nodes actually modify the helicopter (meta -> sortie wiring)
 const c2 = createCareer(999);
-c2.pilot.allocated = ['marksman', 'turbo'];
+c2.pilot.skills.gunnery = 10;
 const m = aggregateModifiers(c2.pilot, c2.hangar);
-ok(m.dmgMult > 1 && m.maxSpeedMult > 1, 'skill nodes boost damage + speed modifiers');
+const mPlain = aggregateModifiers(createCareer(999).pilot, createCareer(999).hangar);
+ok(m.spreadMult < mPlain.spreadMult && m.dmgMult === mPlain.dmgMult, 'gunnery tightens spread without raising damage');
 
 const heliPlain = baseHeli();
 applyCareerToHeli(heliPlain, c2.pilot, c2.hangar);
@@ -230,11 +231,11 @@ ok(
 );
 
 const heliNoSkill = baseHeli();
-const c3 = createCareer(998);
+const c3 = createCareer(999);
 applyCareerToHeli(heliNoSkill, c3.pilot, c3.hangar);
 ok(
-  heliPlain.bulletDamage > heliNoSkill.bulletDamage,
-  'marksman raises bulletDamage vs unallocated pilot'
+  heliPlain.spreadMult < heliNoSkill.spreadMult,
+  'gunnery tightens spread vs an untrained pilot'
 );
 
 // ── 3. Report ───────────────────────────────────────────────────────────────

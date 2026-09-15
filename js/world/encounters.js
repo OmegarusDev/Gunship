@@ -6,6 +6,7 @@
  */
 import { mulberry32 } from '../rng.js';
 import { deriveSeed, pointAlongPolyline, cumulativePolylineLengths } from './geometry.js';
+import { classMinAct, isVehicleClass } from '../data/enemyClasses.js';
 
 function between(rng, min, max) {
   return min + (max - min) * rng();
@@ -35,63 +36,76 @@ function contactKind(place) {
   return 'local_cell';
 }
 
-function classWeights(kind) {
+function classWeights(kind, act = 1) {
+  let entries;
   if (kind === 'air_defense') {
-    return [
+    entries = [
       ['rifleman', 4],
       ['assault', 3],
       ['rpg', 2],
       ['manpads', 3],
+      ['hmg', 1.2],
       ['lightAA', 3],
+      ['twin23', 1.6],
+      ['aaTruck', 1.2],
       ['shilka', 1.5],
+      ['heavyAA', 0.8],
       ['sam', 1],
     ];
-  }
-  if (kind === 'garrison') {
-    return [
+  } else if (kind === 'garrison') {
+    entries = [
       ['rifleman', 5],
       ['assault', 4],
       ['mg', 2],
       ['rpg', 2],
+      ['hmg', 0.8],
       ['manpads', 1],
       ['technical', 1],
+      ['aaTruck', 0.5],
       ['apc', 0.7],
+      ['tank', 0.35],
     ];
-  }
-  if (kind === 'checkpoint') {
-    return [
+  } else if (kind === 'checkpoint') {
+    entries = [
       ['rifleman', 5],
       ['assault', 2],
       ['mg', 1],
       ['rpg', 1],
+      ['hmg', 0.6],
       ['technical', 1.5],
+      ['lightAA', 0.4],
     ];
-  }
-  if (kind === 'secured_logistics') {
-    return [
+  } else if (kind === 'secured_logistics') {
+    entries = [
       ['rifleman', 5],
       ['assault', 3],
       ['mg', 1],
       ['rpg', 1.5],
       ['technical', 1],
+      ['aaTruck', 0.4],
       ['unarmed', 0.8],
     ];
-  }
-  if (kind === 'road_patrol') {
-    return [
+  } else if (kind === 'road_patrol') {
+    entries = [
       ['technical', 4],
+      ['aaTruck', 0.8],
       ['apc', 1],
       ['rifleman', 3],
       ['rpg', 1],
+      ['shilka', 0.4],
+      ['tank', 0.25],
+    ];
+  } else {
+    entries = [
+      ['rifleman', 6],
+      ['assault', 2.5],
+      ['rpg', 1.4],
+      ['mg', 0.8],
+      ['unarmed', 1.2],
     ];
   }
-  return [
-    ['rifleman', 6],
-    ['assault', 2.5],
-    ['rpg', 1.4],
-    ['mg', 0.8],
-    ['unarmed', 1.2],
-  ];
+  const gated = entries.filter(([cls]) => classMinAct(cls) <= act);
+  return gated.length ? gated : [['rifleman', 1]];
 }
 
 function rosterCount(kind, place, rng) {
@@ -113,7 +127,7 @@ function placeBuildings(place, buildings, districtId) {
 }
 
 function pickPost(kind, className, owned, place, encounter, rng) {
-  const isVehicle = ['technical', 'apc', 'shilka', 'sam', 'lightAA'].includes(className);
+  const isVehicle = isVehicleClass(className);
   const access = place?.accessPoints?.[0] || null;
   const courts = owned.filter((building) => building.court && !building.tags?.includes('sacred'));
   const roofs = owned.filter((building) => !building.tags?.includes('sacred'));
@@ -193,15 +207,17 @@ function pickPost(kind, className, owned, place, encounter, rng) {
   };
 }
 
-function makeRoster(encounter, place, buildings, rng) {
+function makeRoster(encounter, place, buildings, rng, act = 1) {
   const count = rosterCount(encounter.kind, place, rng);
-  const weights = classWeights(encounter.kind);
+  const weights = classWeights(encounter.kind, act);
   const owned = place ? placeBuildings(place, buildings, encounter.districtId) : [];
   const roster = [];
   for (let index = 0; index < count; index++) {
     let className = weightedPick(rng, weights);
     if (index === 0 && className === 'unarmed') className = 'rifleman';
-    if (encounter.kind === 'air_defense' && index === 0) className = 'lightAA';
+    if (encounter.kind === 'air_defense' && index === 0) {
+      className = act >= 4 ? 'heavyAA' : act >= 3 ? 'shilka' : act >= 2 ? 'twin23' : 'lightAA';
+    }
     const post = pickPost(encounter.kind, className, owned, place, encounter, rng);
     roster.push({
       id: `${encounter.id}-unit-${String(index + 1).padStart(2, '0')}`,
@@ -267,7 +283,7 @@ function roadPatrolCandidate(roads, index, rng) {
   return { road, point };
 }
 
-export function generateEncounters(seed, places, districts, buildings, roads) {
+export function generateEncounters(seed, places, districts, buildings, roads, act = 1) {
   const rng = mulberry32(deriveSeed(seed, 'encounters'));
   const targetCount = integer(rng, 10, 14);
   const encounters = [];
@@ -344,7 +360,7 @@ export function generateEncounters(seed, places, districts, buildings, roads) {
         ...(kind === 'garrison' ? ['military', 'command'] : []),
       ],
     };
-    encounter.roster = makeRoster(encounter, place, buildings, rng);
+    encounter.roster = makeRoster(encounter, place, buildings, rng, act);
     encounters.push(encounter);
   }
 
@@ -380,7 +396,7 @@ export function generateEncounters(seed, places, districts, buildings, roads) {
       roster: [],
       tags: ['hostile-contact', 'road_patrol', 'mobile', 'convoyRoute'],
     };
-    encounter.roster = makeRoster(encounter, null, buildings, rng);
+    encounter.roster = makeRoster(encounter, null, buildings, rng, act);
     encounters.push(encounter);
   }
 
@@ -418,7 +434,7 @@ export function generateEncounters(seed, places, districts, buildings, roads) {
       roster: [],
       tags: ['hostile-contact', 'road_patrol', 'mobile', 'convoyRoute'],
     };
-    encounter.roster = makeRoster(encounter, null, buildings, rng);
+    encounter.roster = makeRoster(encounter, null, buildings, rng, act);
     encounters.push(encounter);
   }
 

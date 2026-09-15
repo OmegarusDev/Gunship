@@ -49,9 +49,9 @@ export function layoutOf(w, h) {
   const tablet = shortSide >= 520 && shortSide < 900;
   const desktop = !phone && !tablet;
   const pad = phone ? 20 : tablet ? 28 : 40;
-  const btnH = phone ? 52 : 56;
+  const btnH = phone ? 56 : 60;
   const btnGap = phone ? 12 : 16;
-  const headerH = (portrait ? 86 : 74) + inset.t;
+  const headerH = (portrait ? 96 : 82) + inset.t;
   const footerH = btnH + Math.max(pad, 24) + inset.b;
   const rawW = Math.max(160, w - pad * 2 - inset.l - inset.r);
   const maxContent = desktop ? 880 : tablet ? 740 : rawW;
@@ -74,7 +74,7 @@ export function layoutOf(w, h) {
     pad,
     btnH,
     btnGap,
-    btnFont: phone ? 14 : 15,
+    btnFont: phone ? 16 : 17,
     headerH,
     footerH,
     content,
@@ -220,16 +220,16 @@ export function menuPointerPos() {
 /** Wallet chip in the header, right-aligned to the content column. */
 export function drawHeaderDollars(ctx, layout, dollars) {
   const label = `$${dollars}`;
-  ctx.font = 'bold 13px "Courier New", monospace';
+  ctx.font = 'bold 20px "Courier New", monospace';
   const tw = ctx.measureText(label).width;
-  const chipW = tw + 18;
-  const chipH = 22;
+  const chipW = tw + 24;
+  const chipH = 32;
   const x = layout.content.x + layout.content.w - chipW;
-  const y = (layout.headerMetaY || 20) + 1;
-  ctx.fillStyle = 'rgba(10,18,8,0.88)';
+  const y = (layout.headerMetaY || 18) - 2;
+  ctx.fillStyle = 'rgba(10,18,8,0.92)';
   ctx.fillRect(x, y, chipW, chipH);
-  ctx.strokeStyle = 'rgba(204,170,68,0.55)';
-  ctx.lineWidth = 1;
+  ctx.strokeStyle = 'rgba(204,170,68,0.7)';
+  ctx.lineWidth = 1.2;
   ctx.strokeRect(x + 0.5, y + 0.5, chipW - 1, chipH - 1);
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -255,12 +255,12 @@ export function drawFooterStrip(ctx, w, h) {
 export function drawCursorTooltip(ctx, text, anchorX, anchorY, bounds) {
   if (!text) return;
   ctx.save();
-  ctx.font = '11px "Courier New", monospace';
+  ctx.font = '13px "Courier New", monospace';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
-  const padX = 10;
-  const padY = 7;
-  const lineH = 14;
+  const padX = 12;
+  const padY = 8;
+  const lineH = 17;
   const maxLine = Math.min(320, Math.max(160, (bounds?.w ?? 400) * 0.7));
   const words = String(text).split(' ');
   const lines = [];
@@ -370,14 +370,14 @@ export function drawMenuButton(
   ctx.textBaseline = 'middle';
   if (sub) {
     ctx.fillStyle = primary || kind === 'menu' ? P.ui.textBright : '#88eeee';
-    ctx.font = `bold ${h >= 54 ? 15 : 13}px "Courier New", monospace`;
+    ctx.font = `bold ${h >= 54 ? 16 : 14}px "Courier New", monospace`;
     ctx.fillText(label, x + w / 2, y + h * 0.38);
     ctx.fillStyle = P.ui.textDim;
-    ctx.font = `${h >= 54 ? 11 : 10}px "Courier New", monospace`;
+    ctx.font = `${h >= 54 ? 12 : 11}px "Courier New", monospace`;
     ctx.fillText(sub, x + w / 2, y + h * 0.7);
   } else {
     ctx.fillStyle = accent ? '#88eeee' : P.ui.textBright;
-    ctx.font = `bold ${small ? 12 : h >= 52 ? 15 : 13}px "Courier New", monospace`;
+    ctx.font = `bold ${small ? 14 : h >= 52 ? 16 : 15}px "Courier New", monospace`;
     ctx.fillText(label, x + w / 2, y + h / 2 + 0.5);
   }
   ctx.restore();
@@ -433,7 +433,7 @@ export function paintBackdrop(ctx, w, h) {
 export function paintScreenBackdrop(ctx, w, h, title, subtitle = '') {
   const layout = layoutOf(w, h);
   paintBackdrop(ctx, w, h);
-  const titleSize = layout.compact ? 17 : 20;
+  const titleSize = layout.compact ? 20 : 24;
   const titleBlock = subtitle ? titleSize + 26 : titleSize + 8;
   const titleY =
     layout.inset.t + Math.max(12, (layout.headerH - layout.inset.t - titleBlock) * 0.45);
@@ -451,7 +451,7 @@ export function paintScreenBackdrop(ctx, w, h, title, subtitle = '') {
   ctx.stroke();
   if (subtitle) {
     ctx.fillStyle = P.ui.textDim;
-    ctx.font = `${layout.compact ? 10 : 11}px "Courier New", monospace`;
+    ctx.font = `${layout.compact ? 12 : 13}px "Courier New", monospace`;
     ctx.fillText(subtitle, w / 2, titleY + titleSize + 12);
   }
   layout.headerMetaY = titleY;

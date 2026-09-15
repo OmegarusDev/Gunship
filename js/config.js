@@ -16,17 +16,14 @@ export const HELI = {
   maxSpeed: 220,
   turnSpeed: 1.55,
   brakeDrag: 0.8,
-  // Cooldown seconds. 2 rds/sec at the start; skills/Fear cards shrink this.
+  // Cooldown seconds. 2 rds/sec at the start. Hangar mounts and Fear cards change the gun; skills do not.
   fireRate: 0.5,
   bulletSpeed: 400,
   bulletDamage: 5,
 };
 
-/** Dossiers show every class with live kill counts (including 0). Also `?dev=1`. */
-export const DEV_UNLOCK_DOSSIERS = true;
-
+/** `?dev=1` shows unkilled dossier classes. Normal play hides them. */
 export function isDevUnlock() {
-  if (DEV_UNLOCK_DOSSIERS) return true;
   if (typeof window === 'undefined') return false;
   try {
     return new URLSearchParams(window.location.search).has('dev');

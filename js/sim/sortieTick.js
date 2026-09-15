@@ -196,6 +196,11 @@ export function tickSortie(dt, deps) {
 
   heli.vx *= drag;
   heli.vy *= drag;
+  if (!(mx || my || input.hasAim) && (heli.brakeMult || 1) > 1) {
+    const extra = 1 - 0.035 * ((heli.brakeMult || 1) - 1) / 0.12;
+    heli.vx *= extra;
+    heli.vy *= extra;
+  }
   const spd = Math.hypot(heli.vx, heli.vy);
   if (spd > maxSpeed) {
     heli.vx = (heli.vx / spd) * maxSpeed;
@@ -223,7 +228,13 @@ export function tickSortie(dt, deps) {
       if (heli.markedDmg) dmg *= 1 + heli.markedDmg;
     }
     if (Math.random() < (heli.critChance || 0)) dmg *= 2;
-    aimA += (Math.random() - 0.5) * 0.035 * (heli.spreadMult || 1);
+    let spread = 0.035 * (heli.spreadMult || 1);
+    if (heli.hoverSpread && heli.adrenalineT > 0) spread *= 0.55;
+    if (heli.slowSpread && heli.target) {
+      const tspd = Math.hypot(heli.target.vx || 0, heli.target.vy || 0);
+      if (tspd < 45) spread *= 0.55;
+    }
+    aimA += (Math.random() - 0.5) * spread;
     spawnProjectile(
       heli.x + Math.cos(aimA) * 20,
       heli.y + Math.sin(aimA) * 20,
@@ -245,6 +256,27 @@ export function tickSortie(dt, deps) {
     heli.fireCooldown = fireRate;
   }
 
+  if (heli.hasMissiles && heli.target) {
+    heli.missileCooldown = (heli.missileCooldown || 0) - dt;
+    if (heli.missileCooldown <= 0) {
+      const aim = heli.target
+        ? Math.atan2(heli.target.y - heli.y, heli.target.x - heli.x)
+        : heli.angle;
+      spawnProjectile(
+        heli.x + Math.cos(aim) * 24,
+        heli.y + Math.sin(aim) * 24,
+        aim,
+        280,
+        heli.missileDamage || 18,
+        false,
+        2.6,
+        'missile'
+      );
+      heli.missileCooldown = heli.missileRate || 10;
+      addHeat(0.12, 'missile launch');
+    }
+  }
+
   if (
     input.equipment &&
     heli.equipmentType &&
@@ -263,7 +295,7 @@ export function tickSortie(dt, deps) {
       heli.salvoTimer = 0;
       spawnFloatingText(heli.x, heli.y - 34, 'ROCKETS AWAY', '#ff8844');
     } else if (heli.equipmentType === 'flares') {
-      heli.flareT = 3;
+      heli.flareT = 3 * (heli.flareDurMult || 1);
       spawnFloatingText(heli.x, heli.y - 34, 'FLARES DEPLOYED', '#ffdd66');
     }
   }
@@ -502,6 +534,7 @@ export function tickSortie(dt, deps) {
               sortieState.rewards.hunter += 300;
               GameState.addSortieDollars(250);
             }
+            recordDossierKill(GameState.career, boss.type || boss.className);
             heli.score += 500;
             addFear(12, 'Hunter destroyed');
             reduceHeat(18, 'Hunter destroyed');
@@ -546,7 +579,7 @@ export function tickSortie(dt, deps) {
         }
       }
     } else {
-      if (heli.flareT > 0 && Math.hypot(p.x - heli.x, p.y - heli.y) < 170) {
+      if (heli.flareT > 0 && Math.hypot(p.x - heli.x, p.y - heli.y) < (heli.flareRadius || 170)) {
         spawnExplosion(p.x, p.y, 0.15);
         projectiles.splice(i, 1);
         continue;
@@ -554,7 +587,7 @@ export function tickSortie(dt, deps) {
       if (Math.hypot(heli.x - p.x, heli.y - p.y) < 26) {
         heli.hp -= Math.max(1, Math.round(p.damage * (1 - (heli.dmgResist || 0))));
         hudAnim.hpFlash = 0.15;
-        camera.shake(4, 0.15);
+        camera.shake(4 * (1 - Math.min(0.7, heli.shakeResist || 0)), 0.15);
         spawnExplosion(p.x, p.y, 0.2);
         projectiles.splice(i, 1);
         if (heli.hp <= 0) {

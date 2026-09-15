@@ -9,10 +9,10 @@ import {
   randomNameParts,
   gainXp,
   xpToNext,
-  canAllocate,
-  gridNeighbors,
-  SKILL_GRID,
-  allocateSkill,
+  PILOT_SKILLS,
+  SKILL_MAX,
+  skillRank,
+  levelSkill,
   respecSkills,
   buyHangarLevel,
   HANGAR_SLOTS,
@@ -21,15 +21,27 @@ import {
   applyCareerToHeli,
   aggregateModifiers,
   loadCareer,
+  saveCareer,
   GUNSHIPS,
   GUNSHIP_ORDER,
   syncGunshipUnlocks,
   selectGunship,
+  createSandboxCareer,
+  isSandboxCareer,
+  evaluateAchievements,
+  ACHIEVEMENTS,
 } from '../js/meta.js';
 import { GUNSHIP_DRAW_IDS } from '../js/render/gunships.js';
 import * as GameState from '../js/sim/gameState.js';
 import { CAMPAIGN_RULES, createContractBoard, getCampaignMission } from '../js/contracts.js';
 import { formatClock, periodLabel, sunFromHour, hourFromSeed } from '../js/sun.js';
+import {
+  ENEMY_CLASSES,
+  ENEMY_CLASS_ORDER,
+  classesForAct,
+  classMinAct,
+} from '../js/data/enemyClasses.js';
+import { BOSS_DOSSIERS, BOSS_DOSSIER_ORDER } from '../js/data/bosses.js';
 
 let pass = 0,
   fail = 0;
@@ -47,6 +59,10 @@ console.log('— pilot generation —');
   const p = createPilot(1234);
   ok(p.level === 1 && p.xp === 0 && p.skillPoints === 0, 'fresh pilot starts L1/0xp/0sp');
   ok(p.allocated.length === 0, 'no nodes allocated');
+  ok(
+    PILOT_SKILLS.every((skill) => p.skills[skill.id] === 0),
+    'fresh talents start at 0'
+  );
   for (const k of ['accuracy', 'control', 'awareness', 'speed', 'grit']) {
     ok(p.stats[k] >= 1 && p.stats[k] <= 4, `stat ${k} in [1,4]`);
   }
@@ -83,60 +99,91 @@ console.log('— xp / leveling —');
   const gained = gainXp(p, 250);
   ok(p.level === 3, '250xp → L3 (100+150 thresholds)');
   ok(gained === 2, 'two levels gained');
-  ok(p.skillPoints === 2, '2 skill points granted');
+  ok(p.skillPoints === 4, '2 skill points granted per level');
   ok(gainXp(p, 999999) > 0, 'bulk xp levels up');
   ok(p.level === 10, 'level caps at 10');
   ok(gainXp(p, 500) === 0, 'no gains past cap');
 }
 
-console.log('— skill grid adjacency —');
+console.log('— pilot talents —');
 {
-  // Branch entry nodes (col 0) always allocatable
-  ok(canAllocate([], 'stabilizer'), 'branch entry allocatable on empty set');
-  ok(canAllocate([], 'rapidfire'), 'second-row entry allocatable');
-  // Tier-1 requires an adjacent owned node
-  ok(!canAllocate([], 'marksman'), 'mid node locked on empty set');
-  ok(canAllocate(['stabilizer'], 'marksman'), 'adjacent to owned = allocatable');
-  ok(!canAllocate(['rapidfire'], 'marksman'), 'non-adjacent owned does not unlock');
-  // Cross-links (0↔3)
-  ok(
-    canAllocate(['stabilizer'], 'hardened') === canAllocate([], 'hardened'),
-    'cross-branch independence'
-  );
-  // Grid integrity: every node has ≥1 neighbour, all ids unique
-  const ids = new Set(SKILL_GRID.map((n) => n.id));
-  ok(ids.size === 30, '30 unique nodes');
-  for (const n of SKILL_GRID) ok(gridNeighbors(n.id).length >= 2, `${n.id} has neighbours`);
-}
-
-console.log('— allocate + respec (career) —');
-{
+  ok(PILOT_SKILLS.length === 6, 'six human talents');
+  ok(SKILL_MAX === 10, 'each talent has ten ranks');
   const c = createCareer(9);
   c.pilot.skillPoints = 3;
-  ok(allocateSkill(c, 'marksman').ok === false, 'cannot allocate locked node');
-  ok(allocateSkill(c, 'stabilizer').ok === true, 'entry node allocates');
-  ok(allocateSkill(c, 'stabilizer').ok === false, 'cannot double-allocate');
-  ok(allocateSkill(c, 'marksman').ok === true, 'chain allocation works');
-  ok(c.pilot.skillPoints === 1, 'SP deducted');
+  ok(levelSkill(c, 'gunnery').ok === true, 'level-up spends a point');
+  ok(skillRank(c.pilot, 'gunnery') === 1, 'gunnery rose to 1');
+  ok(c.pilot.skillPoints === 2, 'SP deducted');
+  ok(levelSkill(c, 'nope').ok === false, 'unknown talent rejected');
+  const gunnery = createCareer(11);
+  const flying = createCareer(11);
+  gunnery.pilot.skills.gunnery = SKILL_MAX;
+  flying.pilot.skills.flying = SKILL_MAX;
+  const mg = aggregateModifiers(gunnery.pilot, gunnery.hangar, 'cobra');
+  const mf = aggregateModifiers(flying.pilot, flying.hangar, 'cobra');
+  const base = aggregateModifiers(createCareer(11).pilot, createCareer(11).hangar, 'cobra');
+  ok(mg.spreadMult < base.spreadMult, 'gunnery tightens spread');
+  ok(mg.dmgMult === base.dmgMult, 'gunnery does not raise damage');
+  ok(mf.turnMult > base.turnMult && mf.accelMult > base.accelMult, 'flying turns and spools faster');
+  ok(mf.maxSpeedMult === base.maxSpeedMult, 'flying does not raise top speed');
+  c.pilot.skillPoints = 20;
+  for (let i = 0; i < SKILL_MAX; i++) levelSkill(c, 'nerve');
+  ok(levelSkill(c, 'nerve').ok === false, 'talent caps at max rank');
+  ok(aggregateModifiers(c.pilot, c.hangar, 'cobra').lastStand === true, 'nerve 10 is last stand');
   respecSkills(c);
-  ok(c.pilot.allocated.length === 0 && c.pilot.skillPoints === 3, 'respec refunds all SP');
+  ok(skillRank(c.pilot, 'gunnery') === 0 && skillRank(c.pilot, 'nerve') === 0, 'respec clears ranks');
+  ok(c.pilot.skillPoints >= 3, 'respec refunds spent points');
 }
 
 console.log('— hangar purchases —');
 {
   const c = createCareer(2);
   c.dollars = 500;
-  ok(buyHangarLevel(c, 'engine').ok === true, 'buy engine L1 (100)');
+  ok(buyHangarLevel(c, 'engine').ok === true, 'buy engine L1');
   ok(c.dollars === 400, 'dollars deducted');
-  ok(buyHangarLevel(c, 'armor').ok === true, 'buy armor L1 (150)');
-  ok(buyHangarLevel(c, 'armor').ok === false, 'L2 unaffordable with 250');
-  c.dollars = 1000;
-  ok(buyHangarLevel(c, 'armor').ok === true, 'buy armor L2');
+  ok(buyHangarLevel(c, 'armor').ok === true, 'buy armor L1');
+  ok(buyHangarLevel(c, 'ordnance').ok === false, 'Cobra cannot fit missile racks');
+  c.dollars = 20000;
+  let steps = 0;
+  while (buyHangarLevel(c, 'armor').ok) steps += 1;
+  ok(steps === 9, 'armor has ten ranks');
   ok(
-    buyHangarLevel(c, 'armor').ok === false && buyHangarLevel(c, 'armor').reason === 'MAX LEVEL',
-    'L2 is cap'
+    buyHangarLevel(c, 'armor').reason === 'MAX LEVEL',
+    'L10 is cap'
   );
-  ok(Object.keys(HANGAR_SLOTS).length === 5, '5 hangar slots (no fuel)');
+  ok(Object.keys(HANGAR_SLOTS).length === 6, '6 hangar systems');
+  c.gunship = 'supercobra';
+  c.unlocked.push('supercobra');
+  c.hangar.supercobra = { engine: 0, armor: 0, rotor: 0, range: 0, ordnance: 0, countermeasures: 0 };
+  ok(buyHangarLevel(c, 'ordnance').ok === true, 'SuperCobra can buy ordnance');
+  const sc = {
+    bulletDamage: 10,
+    fireRate: 0.15,
+    accel: 1400,
+    maxSpeed: 400,
+    maxHp: 100,
+    hp: 100,
+    weaponRange: 350,
+  };
+  applyCareerToHeli(sc, c.pilot, c.hangar, 'supercobra');
+  ok(sc.hasMissiles === true, 'ordnance L1 fits slow autofire missiles');
+  ok(Math.abs(sc.missileRate - 10) < 0.01, 'base missile rate is 1 every 10s');
+  const stock = {
+    bulletDamage: 10,
+    fireRate: 0.15,
+    accel: 1400,
+    maxSpeed: 400,
+    maxHp: 100,
+    hp: 100,
+    weaponRange: 350,
+  };
+  applyCareerToHeli(
+    stock,
+    c.pilot,
+    { supercobra: { engine: 0, armor: 0, rotor: 0, range: 0, ordnance: 0, countermeasures: 0 } },
+    'supercobra'
+  );
+  ok(stock.hasMissiles === false, 'SuperCobra needs racks bought before missiles fire');
 }
 
 console.log('— sortie outcome commit —');
@@ -150,7 +197,6 @@ console.log('— sortie outcome commit —');
   ok(c.pilot.level === 2, 'pilot levelled');
   // Death resets pilot, keeps dollars/hangar
   c.hangar.cobra.engine = 2;
-  c.pilot.allocated = ['stabilizer'];
   const oldName = c.pilot.name;
   c.gunship = 'apache';
   c.unlocked.push('apache');
@@ -255,11 +301,11 @@ console.log('— campaign structure —');
 console.log('— applyCareerToHeli —');
 {
   const c = createCareer(4);
-  c.pilot.allocated = ['marksman', 'unbreakable', 'hardened'];
+  c.pilot.skills.gunnery = 2;
   c.pilot.stats.accuracy = 4;
   c.pilot.stats.grit = 4;
   c.hangar.cobra.armor = 2;
-  c.hangar.cobra.weaponMount = 2;
+  c.hangar.cobra.range = 2;
   const heli = {
     bulletDamage: 10,
     fireRate: 0.15,
@@ -275,16 +321,16 @@ console.log('— applyCareerToHeli —');
   ok(heli.maxHp === 100 + m.bonusHp, 'hull includes bonus HP');
   ok(heli.weaponRange === 350 + m.rangeBonus, 'range includes mount bonus');
   ok(m.dmgResist > 0 && m.dmgResist <= 0.6, 'damage resist capped at 0.6');
-  ok(heli.lastStand === false, 'no last stand without node');
-  // Last stand node flips the flag
-  c.pilot.allocated.push('laststand');
+  ok(heli.lastStand === false, 'no last stand below nerve 10');
+  c.pilot.skills.nerve = 10;
   applyCareerToHeli(heli, c.pilot, c.hangar, 'cobra');
-  ok(heli.lastStand === true, 'last stand wired');
+  ok(heli.lastStand === true, 'nerve 10 wires last stand');
   ok(heli.gunshipId === 'cobra', 'gunship id stamped');
   ok(heli.rotorBlades === 2, 'stock AH-1G is 2-blade');
-  c.hangar.cobra.rotor = 2;
+  c.hangar.cobra.rotor = 5;
   applyCareerToHeli(heli, c.pilot, c.hangar, 'cobra');
-  ok(heli.rotorBlades === 4, 'rotor 2 is 4-blade retrofit');
+  ok(heli.rotorBlades === 4, 'rotor 5 is 4-blade retrofit');
+  ok(heli.hasMissiles === false, 'Cobra has no missile racks');
 }
 
 console.log('— save/load roundtrip (memory shim) —');
@@ -308,6 +354,36 @@ console.log('— save/load roundtrip (memory shim) —');
   const loaded = loadCareer();
   ok(loaded && loaded.dollars === 321, 'career persists to localStorage');
   ok(loaded.pilot.name === c.pilot.name, 'pilot survives roundtrip');
+}
+
+console.log('— practice sandbox —');
+{
+  const campaign = createCareer(42);
+  campaign.dollars = 77;
+  campaign.pilot.name = 'KEEP ME';
+  saveCareer(campaign);
+  const sand = createSandboxCareer(campaign);
+  ok(isSandboxCareer(sand), 'sandbox flag is set');
+  ok(sand.unlocked.length === GUNSHIP_ORDER.length, 'all airframes unlocked');
+  ok(
+    PILOT_SKILLS.every((skill) => sand.pilot.skills[skill.id] === SKILL_MAX),
+    'range pilot is fully rated'
+  );
+  ok(levelSkill(sand, 'gunnery').ok === false, 'sandbox cannot spend talent points');
+  sand.dollars = 1;
+  saveCareer(sand);
+  const still = loadCareer();
+  ok(still && still.dollars === 77 && still.pilot.name === 'KEEP ME', 'sandbox save does not overwrite campaign');
+}
+
+console.log('— achievements —');
+{
+  const c = createCareer(5);
+  ok(evaluateAchievements(c).length === 0, 'fresh career has no medals');
+  c.pilot.careerKills = 1;
+  ok(evaluateAchievements(c).includes('first_blood'), 'first kill unlocks FIRST BLOOD');
+  ok(c.achievements.first_blood, 'medal is stamped');
+  ok(ACHIEVEMENTS.length >= 6, 'hub has a medal list');
 }
 
 console.log('— gunship roster / unlocks —');
@@ -357,6 +433,29 @@ console.log('— gunship roster / unlocks —');
     !selectGunship(fresh, 'apache').ok && fresh.gunship === 'cobra',
     'locked airframe cannot be selected'
   );
+}
+
+console.log('— enemy roster / hunters —');
+{
+  ok(ENEMY_CLASS_ORDER.length === 16, '16 field classes from Appendix B');
+  ok(
+    ENEMY_CLASS_ORDER.every((id) => ENEMY_CLASSES[id]),
+    'every ordered class has a definition'
+  );
+  ok(classMinAct('rifleman') === 1 && classMinAct('lightAA') === 1, 'act 1 opens with rifles and light AA');
+  ok(classMinAct('manpads') === 2 && classMinAct('twin23') === 2 && classMinAct('apc') === 2, 'act 2 opens MANPADS / twin 23 / APC');
+  ok(classMinAct('shilka') === 3 && classMinAct('tank') === 3 && classMinAct('sam') === 3, 'act 3 opens Shilka / tank / SAM');
+  ok(classMinAct('heavyAA') === 4, '57mm AA waits until act 4');
+  ok(!classesForAct(1).includes('tank') && !classesForAct(1).includes('shilka'), 'act 1 roster excludes armor and Shilkas');
+  ok(classesForAct(4).length === ENEMY_CLASS_ORDER.length, 'act 4 unlocks the full field roster');
+  ok(BOSS_DOSSIER_ORDER.length === 16, '16 hunter dossier slots');
+  ok(new Set(BOSS_DOSSIER_ORDER).size === 16, 'hunter types are unique');
+  ok(
+    BOSS_DOSSIER_ORDER.every((id) => BOSS_DOSSIERS[id]?.hp > 0),
+    'every hunter has hull'
+  );
+  ok(BOSS_DOSSIERS.light_tank?.hp === 110, 'act 1 hunter hull matches the 5 dmg / 2 rds gun');
+  ok(BOSS_DOSSIERS.supergunship?.hp === 620 && BOSS_DOSSIERS.supergunship.final, 'Guardian hull is a one-sortie magdump, not a 2000hp wall');
 }
 
 console.log('— sortie sun —');

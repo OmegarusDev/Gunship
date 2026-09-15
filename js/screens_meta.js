@@ -16,34 +16,47 @@ import {
   footerNavRects,
 } from './appBridge.js';
 import { drawGunship } from './render/gunships.js';
-import { drawEnemy } from './render/entities.js';
+import { drawEnemy, drawBossSilhouette } from './render/entities.js';
 import { HANGAR_HOUR } from './sun.js';
-import { ENEMY_CLASSES } from './data/enemyClasses.js';
+import {
+  ENEMY_CLASSES,
+  ENEMY_CLASS_ORDER,
+  ENEMY_CLASS_LABELS,
+} from './data/enemyClasses.js';
+import { BOSS_DOSSIERS, BOSS_DOSSIER_ORDER } from './data/bosses.js';
 import {
   metaState,
   GUNSHIPS,
   GUNSHIP_ORDER,
   HANGAR_SLOTS,
+  HANGAR_MAX,
+  HANGAR_SLOT_ORDER,
+  gunshipHasMissiles,
   gunshipDef,
   selectGunship,
   syncGunshipUnlocks,
-  SKILL_GRID,
-  gridNeighbors,
-  canAllocate,
-  buyHangarLevel,
-  allocateSkill,
+  PILOT_SKILLS,
+  SKILL_MAX,
+  SKILL_PERK_RANKS,
+  skillRank,
+  spentSkillPoints,
+  levelSkill,
   respecSkills,
+  buyHangarLevel,
   saveCareer,
   xpToNext,
   clamp,
+  isSandboxCareer,
+  ACHIEVEMENTS,
+  achievementCount,
 } from './meta.js';
+import { isDevUnlock } from './config.js';
 
 // Click zones published each draw; app.js consults these in its handler.
 export let hangarBuyBoxes = [];
 export let pilotNodeBoxes = [];
 export let pilotRespecBox = null;
 
-const BRANCH_NAMES = ['MARKSMAN', 'PILOT', 'RECON', 'THRUST', 'FORTITUDE'];
 const AIRFRAME_LABELS = {
   cobra: 'COBRA',
   supercobra: 'SUPERCOBRA',
@@ -61,36 +74,6 @@ const AIRFRAME_UNLOCK_LABELS = {
   prestige: 'PRESTIGE',
 };
 
-const ENEMY_CLASS_ORDER = [
-  'rifleman',
-  'assault',
-  'mg',
-  'rpg',
-  'manpads',
-  'unarmed',
-  'lightAA',
-  'shilka',
-  'sam',
-  'technical',
-  'apc',
-  'tank',
-];
-
-const ENEMY_CLASS_LABELS = {
-  unarmed: 'CIVILIAN',
-  rifleman: 'RIFLEMAN',
-  assault: 'ASSAULT',
-  mg: 'GUNNER',
-  rpg: 'RPG',
-  manpads: 'MANPADS',
-  lightAA: 'LIGHT AA',
-  shilka: 'SHILKA',
-  tank: 'TANK',
-  apc: 'APC',
-  sam: 'SAM',
-  technical: 'TECHNICAL',
-};
-
 function careerOrEmpty() {
   if (metaState.career) return syncGunshipUnlocks(metaState.career);
   return {
@@ -99,6 +82,7 @@ function careerOrEmpty() {
       level: 1,
       xp: 0,
       skillPoints: 0,
+      skills: { gunnery: 0, flying: 0, vision: 0, nerve: 0, tracking: 0, luck: 0 },
       allocated: [],
       stats: { accuracy: 1, control: 1, awareness: 1, speed: 1, grit: 1 },
     },
@@ -133,14 +117,14 @@ function strokeHangarFrame(ctx, r) {
   drawCornerBrackets(ctx, r.x, r.y, r.w, r.h, P.ui.borderHi, 14, 1.6);
 }
 
-function drawSectionCaption(ctx, x, y, w, text) {
+function drawSectionCaption(ctx, x, y, w, text, color = P.ui.textDim) {
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
-  ctx.font = 'bold 10px "Courier New", monospace';
-  ctx.fillStyle = P.ui.textDim;
+  ctx.font = 'bold 13px "Courier New", monospace';
+  ctx.fillStyle = color;
   ctx.fillText(text, x, y);
   const tw = ctx.measureText(text).width;
-  ctx.strokeStyle = 'rgba(90,140,80,0.35)';
+  ctx.strokeStyle = color === '#cc6666' ? 'rgba(200,70,70,0.4)' : 'rgba(90,140,80,0.35)';
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(x + tw + 10, y + 6);
@@ -152,20 +136,26 @@ function drawHangarBay(ctx, bay, career) {
   fillHangarFrame(ctx, bay);
   const plateH = 40;
   const def = gunshipDef(career.gunship);
+  const tree = career.hangar?.[career.gunship] || {};
+  const blades = def.rotorBlades === 5 ? 5 : (tree.rotor || 0) >= 5 ? 4 : def.rotorBlades;
+  const innerW = Math.max(40, bay.w - 12);
+  const innerH = Math.max(40, bay.h - plateH - 8);
+  const rotorR = 36 * 0.58 * 2 * (def.size || 1);
+  const fit = Math.min(innerW, innerH) / (rotorR * 1.52);
   ctx.save();
   ctx.beginPath();
   ctx.rect(bay.x + 2, bay.y + 2, bay.w - 4, bay.h - plateH - 1);
   ctx.clip();
   drawGunship(ctx, {
-    x: bay.x + bay.w * 0.5 + 38,
-    y: bay.y + (bay.h - plateH) * 0.5 - 10,
+    x: bay.x + bay.w * 0.5,
+    y: bay.y + (bay.h - plateH) * 0.52,
     angle: 0,
     bank: 0,
     bladeAngle: hangarTime * 9,
     gunshipId: career.gunship,
-    rotorBlades: def.rotorBlades,
+    rotorBlades: blades,
     airframeScale: def.size,
-    drawScale: Math.min(4.2, Math.max(2.1, Math.min(bay.w, bay.h) / 52)),
+    drawScale: Math.max(1.6, Math.min(6.4, fit)),
     hideRotor: false,
     hour: HANGAR_HOUR,
   });
@@ -182,10 +172,10 @@ function drawHangarBay(ctx, bay, career) {
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
   ctx.fillStyle = P.ui.textDim;
-  ctx.font = 'bold 10px "Courier New", monospace';
+  ctx.font = 'bold 13px "Courier New", monospace';
   ctx.fillText('BAY  ·  STAND-IN PROFILE', bay.x + 14, bay.y + bay.h - plateH + 8);
   ctx.fillStyle = P.ui.textBright;
-  ctx.font = 'bold 13px "Courier New", monospace';
+  ctx.font = 'bold 15px "Courier New", monospace';
   ctx.fillText(def.name.toUpperCase(), bay.x + 14, bay.y + bay.h - 20);
 
   strokeHangarFrame(ctx, bay);
@@ -240,22 +230,24 @@ function drawHangarSelector(ctx, area, career, gap) {
     ctx.rect(rect.x + 1, rect.y + 1, rect.w - 2, Math.max(8, rect.h - labelH - 1));
     ctx.clip();
     if (unlocked) {
+      const bodyH = Math.max(10, rect.h - labelH - 4);
+      const fit = Math.min(rect.w - 4, bodyH) / 42;
       drawGunship(ctx, {
         x: rect.x + rect.w / 2,
-        y: rect.y + (rect.h - labelH) * 0.52,
+        y: rect.y + bodyH * 0.52,
         angle: 0,
         bank: 0,
         bladeAngle: 0.45,
         gunshipId: id,
         rotorBlades: def.rotorBlades,
         airframeScale: def.size,
-        drawScale: Math.min(1.25, Math.max(0.8, cardW / 68)),
-        hideRotor: true,
+        drawScale: Math.max(0.7, Math.min(2.15, fit)),
+        hideRotor: false,
         hour: HANGAR_HOUR,
       });
     } else {
       ctx.fillStyle = 'rgba(120,140,110,0.48)';
-      ctx.font = 'bold 11px "Courier New", monospace';
+      ctx.font = 'bold 13px "Courier New", monospace';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText('LOCKED', rect.x + rect.w / 2, rect.y + (rect.h - labelH) * 0.5);
@@ -267,9 +259,9 @@ function drawHangarSelector(ctx, area, career, gap) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
     ctx.fillStyle = selected ? P.ui.textBright : unlocked ? P.ui.text : P.ui.textDim;
-    ctx.font = 'bold 10px "Courier New", monospace';
+    ctx.font = 'bold 13px "Courier New", monospace';
     ctx.fillText(AIRFRAME_LABELS[id], rect.x + rect.w / 2, rect.y + rect.h - labelH + 4);
-    ctx.font = '9px "Courier New", monospace';
+    ctx.font = '12px "Courier New", monospace';
     ctx.fillStyle = selected ? '#ffcc44' : unlocked ? P.ui.textDim : 'rgba(120,140,110,0.55)';
     ctx.fillText(
       selected
@@ -299,17 +291,19 @@ function pointerInRect(pointer, rect) {
 function drawHangarUpgrades(ctx, area, career, gap) {
   fillHangarFrame(ctx, area);
   const pad = 12;
-  drawSectionCaption(ctx, area.x + pad, area.y + 8, area.w - pad * 2, 'UPGRADES');
-  const gridY = area.y + 24;
-  const gridH = Math.max(80, area.h - 24 - pad);
-  const slotIds = Object.keys(HANGAR_SLOTS);
-  const cols = 2;
+  drawSectionCaption(ctx, area.x + pad, area.y + 8, area.w - pad * 2, 'PARTS');
+  const gridY = area.y + 28;
+  const gridH = Math.max(80, area.h - 28 - pad);
+  const slotIds = HANGAR_SLOT_ORDER.filter((id) => HANGAR_SLOTS[id]);
+  const cols = area.w >= 600 ? 3 : 2;
   const rows = Math.ceil(slotIds.length / cols);
-  const rowH = Math.min(64, Math.max(56, (gridH - gap * (rows - 1)) / rows));
+  const rowH = Math.min(100, (gridH - gap * (rows - 1)) / Math.max(1, rows));
   const colW = (area.w - pad * 2 - gap * (cols - 1)) / cols;
   let hoverTip = null;
   const pointer = menuPointerPos();
   const hoverOk = finePointerHover();
+  const gunId = career.gunship;
+  const noRacks = !gunshipHasMissiles(gunId);
 
   ctx.save();
   ctx.beginPath();
@@ -319,59 +313,81 @@ function drawHangarUpgrades(ctx, area, career, gap) {
   for (let i = 0; i < slotIds.length; i++) {
     const slot = slotIds[i];
     const def = HANGAR_SLOTS[slot];
-    const lvl = career.hangar[career.gunship]?.[slot] || 0;
+    const lvl = career.hangar[gunId]?.[slot] || 0;
     const col = i % cols;
     const row = Math.floor(i / cols);
     const bx = area.x + pad + col * (colW + gap);
     const by = gridY + row * (rowH + gap);
     const bw = colW;
-    const maxed = lvl >= 2;
-    const cost = maxed ? 0 : def.levels[lvl].cost;
-    const affordable = !maxed && career.dollars >= cost;
-    const desc = maxed ? def.levels[1].desc : def.levels[lvl].desc;
+    const blocked = slot === 'ordnance' && noRacks;
+    const maxed = !blocked && lvl >= HANGAR_MAX;
+    const cost = blocked || maxed ? 0 : def.levels[lvl].cost;
+    const affordable = !blocked && !maxed && career.dollars >= cost;
+    const desc = blocked
+      ? 'AH-1G has no missile racks. SuperCobra onward mounts slow autofire missiles.'
+      : maxed
+        ? def.levels[HANGAR_MAX - 1].desc
+        : def.levels[lvl].desc;
     const card = { x: bx, y: by, w: bw, h: rowH };
 
-    let buyRect = null;
-    if (!maxed) {
-      const bwid = Math.min(102, Math.max(84, bw * 0.32));
-      const bh = Math.min(32, rowH - 20);
-      buyRect = { x: bx + bw - bwid - 10, y: by + (rowH - bh) / 2, w: bwid, h: bh };
-    }
+    const stacked = bw < 240;
+    const bh = stacked
+      ? Math.min(40, Math.max(34, rowH * 0.34))
+      : Math.min(46, Math.max(36, rowH - 30));
+    const bwid = stacked ? bw - 16 : Math.min(108, Math.max(78, bw * 0.3));
+    const buyRect =
+      blocked || maxed
+        ? null
+        : stacked
+          ? { x: bx + 8, y: by + rowH - bh - 7, w: bwid, h: bh }
+          : { x: bx + bw - bwid - 8, y: by + 8, w: bwid, h: bh };
     const inspectRect = {
       x: bx,
       y: by,
-      w: buyRect ? Math.max(48, buyRect.x - bx) : bw,
-      h: rowH,
+      w: stacked || !buyRect ? bw : Math.max(64, buyRect.x - bx),
+      h: stacked && buyRect ? Math.max(28, buyRect.y - by) : rowH,
     };
 
     const overCard = pointerInRect(pointer, card);
     ctx.fillStyle = overCard ? 'rgba(20,48,18,0.94)' : 'rgba(13,33,15,0.9)';
     ctx.fillRect(bx, by, bw, rowH);
-    ctx.strokeStyle = maxed ? 'rgba(90,140,80,0.7)' : affordable ? P.ui.borderHi : P.ui.border;
+    ctx.strokeStyle = blocked
+      ? 'rgba(70,90,70,0.35)'
+      : maxed
+        ? 'rgba(90,140,80,0.7)'
+        : affordable
+          ? P.ui.borderHi
+          : P.ui.border;
     ctx.lineWidth = overCard ? 1.4 : 1;
     ctx.strokeRect(bx + 0.5, by + 0.5, bw - 1, rowH - 1);
 
     ctx.save();
     ctx.beginPath();
-    ctx.rect(bx + 8, by + 4, inspectRect.w - 10, rowH - 8);
+    ctx.rect(bx + 6, by + 4, bw - 12, rowH - 8);
     ctx.clip();
     ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.font = 'bold 12px "Courier New", monospace';
-    ctx.fillStyle = P.ui.textBright;
-    ctx.fillText(def.name, bx + 12, by + rowH * 0.38);
-    for (let p = 0; p < 2; p++) {
-      ctx.fillStyle = p < lvl ? '#aaff88' : 'rgba(90,140,80,0.35)';
-      ctx.fillRect(bx + 12 + p * 14, by + rowH * 0.62, 11, 6);
+    ctx.textBaseline = 'top';
+    ctx.font =
+      def.name.length > 9 ? 'bold 13px "Courier New", monospace' : 'bold 14px "Courier New", monospace';
+    ctx.fillStyle = blocked ? P.ui.textDim : P.ui.textBright;
+    ctx.fillText(def.name, bx + 12, by + 8);
+    const pipAreaW = (stacked || !buyRect ? bw : inspectRect.w) - 24;
+    const pipW = Math.min(10, (pipAreaW - 9 * 3) / 10);
+    const pipY = by + 30;
+    for (let p = 0; p < HANGAR_MAX; p++) {
+      const perk = p + 1 === 5 || p + 1 === 10;
+      ctx.fillStyle = p < lvl ? '#aaff88' : 'rgba(90,140,80,0.28)';
+      ctx.fillRect(bx + 12 + p * (pipW + 3), pipY, pipW, perk ? 8 : 6);
     }
-    ctx.font = '9px "Courier New", monospace';
+    ctx.font = '12px "Courier New", monospace';
     ctx.fillStyle = P.ui.textDim;
-    ctx.fillText(`${lvl}/2`, bx + 46, by + rowH * 0.62 + 3);
+    const statusY = stacked && buyRect ? buyRect.y - 16 : by + rowH - 18;
+    ctx.fillText(blocked ? 'NO RACKS' : `${lvl}/${HANGAR_MAX}`, bx + 12, statusY);
     ctx.restore();
 
     if (buyRect) {
       drawMenuButton(ctx, buyRect, {
-        label: affordable ? `BUY  $${cost}` : `$${cost}`,
+        label: stacked ? `$${cost}` : affordable ? `BUY  $${cost}` : `$${cost}`,
         kind: affordable ? 'accent' : 'menu',
         disabled: !affordable,
         compact: true,
@@ -379,10 +395,10 @@ function drawHangarUpgrades(ctx, area, career, gap) {
       hangarBuyBoxes.push({ ...buyRect, kind: 'buy', slot });
     } else {
       ctx.textAlign = 'right';
-      ctx.textBaseline = 'middle';
-      ctx.fillStyle = '#3f7f3f';
-      ctx.font = 'bold 10px "Courier New", monospace';
-      ctx.fillText('MAXED', bx + bw - 12, by + rowH / 2);
+      ctx.textBaseline = 'top';
+      ctx.fillStyle = blocked ? P.ui.textDim : '#3f7f3f';
+      ctx.font = 'bold 13px "Courier New", monospace';
+      ctx.fillText(blocked ? 'COBRA' : 'MAXED', bx + bw - 12, by + 8);
     }
 
     hangarBuyBoxes.push({ ...inspectRect, kind: 'inspect', inspect: slot, tip: desc });
@@ -411,8 +427,10 @@ export const hangarScreen = {
       ctx,
       w,
       h,
-      'HANGAR',
-      `${gunshipDef(career.gunship).name.toUpperCase()} — PERMANENT UPGRADES`
+      isSandboxCareer(career) ? 'SANDBOX BAY' : 'HANGAR',
+      isSandboxCareer(career)
+        ? `${gunshipDef(career.gunship).name.toUpperCase()} — ALL AIRFRAMES UNLOCKED`
+        : `${gunshipDef(career.gunship).name.toUpperCase()} — PERMANENT UPGRADES`
     );
 
     drawHeaderDollars(ctx, L, career.dollars);
@@ -420,35 +438,36 @@ export const hangarScreen = {
     hangarBuyBoxes = [];
     const gap = L.btnGap;
     const split = L.landscape && L.content.w >= 640;
-    const upgradePanelH = 24 + 12 + 3 * 64 + 2 * gap + 12;
     let bay;
     let selector;
     let upgrades;
     if (split) {
-      const bayW = L.content.w * 0.42;
+      const bayW = L.content.w * 0.48;
       bay = { x: L.content.x, y: L.content.y, w: bayW, h: L.content.h };
       const rightX = L.content.x + bayW + gap;
       const rightW = L.content.w - bayW - gap;
-      const selH = Math.min(220, Math.max(168, L.content.h * 0.34));
+      const selH = Math.min(248, Math.max(176, L.content.h * 0.36));
       selector = { x: rightX, y: L.content.y, w: rightW, h: selH };
       upgrades = {
         x: rightX,
         y: L.content.y + selH + gap,
         w: rightW,
-        h: Math.min(L.content.h - selH - gap, upgradePanelH),
+        h: L.content.h - selH - gap,
       };
     } else {
-      const bayH = L.content.h * 0.38;
+      const selH = Math.min(248, Math.max(176, L.content.h * 0.32));
+      const minUpgrades = 168;
+      const bayH = Math.max(
+        140,
+        Math.min(L.content.h * 0.42, L.content.h - selH - minUpgrades - gap * 2)
+      );
       bay = { x: L.content.x, y: L.content.y, w: L.content.w, h: bayH };
-      const remain = L.content.h - bayH - gap;
-      const selH = Math.min(176, Math.max(132, remain * 0.44));
-      selector = { x: L.content.x, y: L.content.y + bayH + gap, w: L.content.w, h: selH };
-      const leftover = L.content.y + L.content.h - (selector.y + selH + gap);
+      selector = { x: L.content.x, y: bay.y + bay.h + gap, w: L.content.w, h: selH };
       upgrades = {
         x: L.content.x,
         y: selector.y + selH + gap,
         w: L.content.w,
-        h: Math.max(80, Math.min(leftover, upgradePanelH)),
+        h: Math.max(80, L.content.y + L.content.h - (selector.y + selH + gap)),
       };
     }
 
@@ -456,11 +475,18 @@ export const hangarScreen = {
     drawHangarSelector(ctx, selector, career, gap);
     const hoverTip = drawHangarUpgrades(ctx, upgrades, career, gap);
 
-    const nav = footerNavRects(L, ['◂ BACK', 'SKILLS']);
+    const nav = isSandboxCareer(career)
+      ? footerNavRects(L, ['◂ CAMPAIGN', 'OPERATIONS', 'SKILLS'])
+      : footerNavRects(L, ['◂ BACK', 'SKILLS']);
     hangarBuyBoxes.push({ ...nav[0], kind: 'back', slot: '__back' });
-    hangarBuyBoxes.push({ ...nav[1], kind: 'skills' });
-    drawMenuButton(ctx, nav[0], { label: nav[0].label });
-    drawMenuButton(ctx, nav[1], { label: nav[1].label });
+    for (let i = 1; i < nav.length; i++) {
+      const label = nav[i].label;
+      hangarBuyBoxes.push({
+        ...nav[i],
+        kind: label === 'OPERATIONS' ? 'ops' : 'skills',
+      });
+    }
+    for (const rect of nav) drawMenuButton(ctx, rect, { label: rect.label });
 
     const pointer = menuPointerPos();
     const tip = hoverTip || hangarPinnedTip;
@@ -478,198 +504,6 @@ export const hangarScreen = {
   },
 };
 
-// ═════════════════════════════════════════════════════════════
-//  PILOT RECORD
-// ═════════════════════════════════════════════════════════════
-
-let pilotInfoSelection = null; // last-touched node for the info bar
-
-export const pilotScreen = {
-  draw(ctx, cam) {
-    const w = cam.screenW,
-      h = cam.screenH;
-    const career = careerOrEmpty();
-    const pilot = career.pilot;
-    ctx.save();
-    ctx.scale(cam.dpr, cam.dpr);
-    const L = paintScreenBackdrop(ctx, w, h, 'SKILLS', pilot.name);
-    drawHeaderDollars(ctx, L, career.dollars);
-
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
-    ctx.font = 'bold 13px "Courier New", monospace';
-    ctx.fillStyle = P.ui.textBright;
-    ctx.fillText(`LEVEL ${pilot.level}`, L.content.x, L.content.y + 4);
-    ctx.fillStyle = '#44cccc';
-    ctx.fillText(`SKILL POINTS: ${pilot.skillPoints}`, L.content.x + 128, L.content.y + 4);
-    ctx.textAlign = 'left';
-
-    const need = xpToNext(pilot.level + 1);
-    const frac = need === Infinity ? 1 : clamp(pilot.xp / need, 0, 1);
-    ctx.fillStyle = 'rgba(10,16,10,0.9)';
-    ctx.fillRect(L.content.x, L.content.y + 22, L.content.w, 10);
-    ctx.fillStyle = '#cc8833';
-    ctx.fillRect(L.content.x, L.content.y + 22, L.content.w * frac, 10);
-    ctx.strokeStyle = 'rgba(90,140,80,0.7)';
-    ctx.strokeRect(L.content.x - 0.5, L.content.y + 21.5, L.content.w + 1, 11);
-    ctx.font = '10px "Courier New", monospace';
-    ctx.fillStyle = P.ui.textDim;
-    ctx.fillText(
-      need === Infinity ? 'MAX LEVEL' : `XP ${pilot.xp} / ${need} TO LV ${pilot.level + 1}`,
-      L.content.x,
-      L.content.y + 36
-    );
-
-    const infoH = 56;
-    const gridTop = L.content.y + 64;
-    const gridBottom = L.content.y + L.content.h - infoH - 8;
-    pilotNodeBoxes = [];
-    const colW = Math.min(150, L.content.w / 5);
-    const gridW = colW * 5;
-    const gridX = L.content.x + (L.content.w - gridW) / 2;
-    const nodeR = Math.max(14, Math.min(18, colW * 0.16));
-    const gridH = Math.min(gridBottom - gridTop, 380);
-    const rowH = Math.min(36, Math.max(24, gridH / 12));
-
-    // Column titles
-    for (let b = 0; b < 5; b++) {
-      ctx.font = 'bold 10px "Courier New", monospace';
-      ctx.fillStyle = P.ui.textDim;
-      ctx.textAlign = 'center';
-      ctx.fillText(BRANCH_NAMES[b], gridX + colW * b + colW / 2, gridTop - 10);
-    }
-
-    for (const node of SKILL_GRID) {
-      const cx = gridX + colW * node.branch + colW / 2;
-      const cy = gridTop + node.tier * rowH * 2 + rowH; // 2-row ladder per branch
-      const owned = pilot.allocated.includes(node.id);
-      const available = !owned && canAllocate(pilot.allocated, node.id);
-      const nodeBox = {
-        x: cx - nodeR - 6,
-        y: cy - nodeR - 6,
-        w: nodeR * 2 + 12,
-        h: nodeR * 2 + 12,
-      };
-      const nodeHit = menuHit(nodeBox);
-      ctx.save();
-      ctx.translate(cx, cy);
-      if (nodeHit.scale !== 1) ctx.scale(nodeHit.scale, nodeHit.scale);
-      ctx.beginPath();
-      ctx.arc(0, 0, nodeR, 0, Math.PI * 2);
-      ctx.fillStyle = owned
-        ? 'rgba(170,255,136,0.9)'
-        : available
-          ? 'rgba(20,50,20,0.9)'
-          : 'rgba(10,14,10,0.9)';
-      ctx.fill();
-      ctx.strokeStyle = nodeHit.hover
-        ? '#d8ffb0'
-        : owned
-          ? '#aaff88'
-          : available
-            ? '#66aa66'
-            : 'rgba(70,90,70,0.4)';
-      ctx.lineWidth = owned || nodeHit.hover ? 2 : 1;
-      ctx.stroke();
-      if (available && !owned) {
-        ctx.strokeStyle = 'rgba(170,255,136,0.35)';
-        ctx.beginPath();
-        ctx.arc(0, 0, nodeR - 4, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-      ctx.restore();
-      // Ladder links within branch
-      if (node.tier % 3 !== 2) {
-        const nextTierSameRow = node.tier % 3 < 2;
-        const nb = gridNeighbors(node.id);
-        for (const n of nb) {
-          const other = SKILL_GRID.find((x) => x.id === n);
-          if (!other || other.branch !== node.branch) continue;
-          const linkDown =
-            other.tier === node.tier + 3 ||
-            (other.tier % 3 === node.tier % 3 && other.tier > node.tier);
-          if (!linkDown && !(other.tier % 3 === node.tier % 3)) continue;
-          if (other.tier < node.tier) continue;
-          const ox = gridX + colW * other.branch + colW / 2;
-          const oy = gridTop + other.tier * rowH * 2 + rowH;
-          const linked = pilot.allocated.includes(node.id) && pilot.allocated.includes(other.id);
-          ctx.strokeStyle = linked ? 'rgba(170,255,136,0.8)' : 'rgba(70,90,70,0.35)';
-          ctx.lineWidth = 1.5;
-          ctx.beginPath();
-          ctx.moveTo(cx, cy);
-          ctx.lineTo(ox, oy);
-          ctx.stroke();
-          break; // one forward link is enough per node
-        }
-        void nextTierSameRow;
-      }
-      pilotNodeBoxes.push({
-        x: cx - nodeR - 4,
-        y: cy - nodeR - 4,
-        w: nodeR * 2 + 8,
-        h: nodeR * 2 + 8,
-        id: node.id,
-        cx,
-        cy,
-        r: nodeR,
-      });
-    }
-
-    const hit = Math.max(44, nodeR * 2 + 12);
-    for (const box of pilotNodeBoxes) {
-      box.x = box.cx - hit / 2;
-      box.y = box.cy - hit / 2;
-      box.w = hit;
-      box.h = hit;
-    }
-
-    const info = pilotInfoSelection ? SKILL_GRID.find((n) => n.id === pilotInfoSelection) : null;
-    const infoY = gridBottom;
-    ctx.fillStyle = 'rgba(6,12,6,0.75)';
-    ctx.fillRect(L.content.x, infoY, L.content.w, infoH);
-    ctx.strokeStyle = 'rgba(90,140,80,0.5)';
-    ctx.strokeRect(L.content.x + 0.5, infoY + 0.5, L.content.w - 1, infoH - 1);
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
-    ctx.font = 'bold 12px "Courier New", monospace';
-    ctx.fillStyle = P.ui.textBright;
-    if (info) {
-      const owned = pilot.allocated.includes(info.id);
-      ctx.fillText(`${info.name}${owned ? ' — OWNED' : ''}`, L.content.x + 12, infoY + 8);
-      ctx.font = '11px "Courier New", monospace';
-      ctx.fillStyle = P.ui.text;
-      ctx.fillText(info.desc, L.content.x + 12, infoY + 28);
-    } else {
-      ctx.fillStyle = P.ui.textDim;
-      ctx.fillText(
-        'TAP A NODE: filled = owned · bright ring = available',
-        L.content.x + 12,
-        infoY + 16
-      );
-    }
-
-    const navLabels =
-      pilot.allocated.length > 0 ? ['◂ BACK', 'HANGAR', 'FREE RESPEC'] : ['◂ BACK', 'HANGAR'];
-    const nav = footerNavRects(L, navLabels);
-    drawMenuButton(ctx, nav[0], { label: nav[0].label });
-    drawMenuButton(ctx, nav[1], { label: nav[1].label });
-    pilotBackBox = nav[0];
-    pilotHangarBox = nav[1];
-    if (nav[2]) {
-      drawMenuButton(ctx, nav[2], { label: nav[2].label, kind: 'accent' });
-      pilotRespecBox = nav[2];
-    } else {
-      pilotRespecBox = null;
-    }
-    ctx.restore();
-  },
-};
-
-export let pilotBackBox = null;
-export let pilotHangarBox = null;
-
-// ── Click resolution (called by app.js) ───────────────────────────────────
-// Returns true if the click was consumed by a meta screen.
 export function handleHangarClick(px, py, dpr) {
   const career = metaState.career;
   if (!career) return false;
@@ -690,8 +524,9 @@ export function handleHangarClick(px, py, dpr) {
     return false;
   }
   if (hit.kind === 'back' || hit.slot === '__back') return 'back';
+  if (hit.kind === 'ops') return 'ops';
   if (hit.kind === 'skills') return 'skills';
-  if (hit.airframe) {
+  if (hit.kind === 'airframe' || hit.airframe) {
     hangarPinnedTip = null;
     selectGunship(career, hit.airframe);
     return true;
@@ -718,9 +553,288 @@ export function handleHangarClick(px, py, dpr) {
   return false;
 }
 
+// ═════════════════════════════════════════════════════════════
+//  PILOT SKILLS — 6 talent panels, hangar-dark cards
+// ═════════════════════════════════════════════════════════════
+
+let skillHintId = null;
+let skillFlash = null;
+let skillToast = '';
+let skillToastUntil = 0;
+
+function skillPanelRects(L, count) {
+  const gap = L.btnGap;
+  const top = L.content.y + 58;
+  const availH = L.content.h - 66;
+  const cols = L.content.w >= 620 ? 3 : 2;
+  const rows = Math.ceil(count / cols);
+  const w = (L.content.w - gap * (cols - 1)) / cols;
+  const h = Math.min(L.landscape ? 188 : 156, (availH - gap * (rows - 1)) / rows);
+  const totalH = h * rows + gap * (rows - 1);
+  const y0 = top + Math.max(0, (availH - totalH) / 2);
+  return Array.from({ length: count }, (_, i) => {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const rowCount = row === rows - 1 && count % cols ? count % cols : cols;
+    const rowWidth = rowCount * w + (rowCount - 1) * gap;
+    const x0 = L.content.x + (L.content.w - rowWidth) / 2;
+    return { x: x0 + col * (w + gap), y: y0 + row * (h + gap), w, h };
+  });
+}
+
+function wrapHint(ctx, text, maxW) {
+  const words = String(text).split(/\s+/);
+  const lines = [];
+  let line = '';
+  for (const word of words) {
+    const next = line ? `${line} ${word}` : word;
+    if (line && ctx.measureText(next).width > maxW) {
+      lines.push(line);
+      line = word;
+    } else line = next;
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+export const pilotScreen = {
+  draw(ctx, cam) {
+    const w = cam.screenW,
+      h = cam.screenH;
+    const career = careerOrEmpty();
+    const pilot = career.pilot;
+    const sandbox = isSandboxCareer(career);
+    ctx.save();
+    ctx.scale(cam.dpr, cam.dpr);
+    const L = paintScreenBackdrop(
+      ctx,
+      w,
+      h,
+      'SKILLS',
+      sandbox ? 'RANGE PILOT — FULLY RATED' : pilot.name
+    );
+    drawHeaderDollars(ctx, L, career.dollars);
+
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.font = `bold ${L.compact ? 14 : 15}px "Courier New", monospace`;
+    ctx.fillStyle = P.ui.textBright;
+    ctx.fillText(`LEVEL ${pilot.level}`, L.content.x, L.content.y + 4);
+    ctx.fillStyle = sandbox ? P.ui.textDim : '#44cccc';
+    ctx.fillText(
+      sandbox ? 'ALL TALENTS MAXED' : `SKILL POINTS: ${pilot.skillPoints}`,
+      L.content.x + 130,
+      L.content.y + 4
+    );
+
+    const need = xpToNext(pilot.level + 1);
+    const frac = sandbox || need === Infinity ? 1 : clamp(pilot.xp / need, 0, 1);
+    ctx.fillStyle = 'rgba(10,16,10,0.9)';
+    ctx.fillRect(L.content.x, L.content.y + 24, L.content.w, 12);
+    ctx.fillStyle = '#cc8833';
+    ctx.fillRect(L.content.x, L.content.y + 24, L.content.w * frac, 12);
+    ctx.strokeStyle = 'rgba(90,140,80,0.7)';
+    ctx.strokeRect(L.content.x - 0.5, L.content.y + 23.5, L.content.w + 1, 13);
+    ctx.font = '12px "Courier New", monospace';
+    ctx.fillStyle = P.ui.textDim;
+    ctx.fillText(
+      sandbox
+        ? 'SANDBOX — SPENDING DISABLED'
+        : need === Infinity
+          ? 'MAX LEVEL'
+          : `XP ${pilot.xp} / ${need} TO LV ${pilot.level + 1}`,
+      L.content.x,
+      L.content.y + 40
+    );
+
+    pilotNodeBoxes = [];
+    const panels = skillPanelRects(L, PILOT_SKILLS.length);
+    const now = performance.now();
+    for (let i = 0; i < PILOT_SKILLS.length; i++) {
+      const skill = PILOT_SKILLS[i];
+      const rect = panels[i];
+      const rank = skillRank(pilot, skill.id);
+      const canUp = !sandbox && pilot.skillPoints > 0 && rank < SKILL_MAX;
+      const flashing = skillFlash && skillFlash.id === skill.id && skillFlash.until > now;
+      fillHangarFrame(ctx, rect);
+      const hit = applyMenuHitTransform(ctx, rect, { quiet: true });
+      ctx.fillStyle = flashing
+        ? 'rgba(70,110,48,0.55)'
+        : hit.hover
+          ? 'rgba(20,48,18,0.35)'
+          : 'rgba(0,0,0,0)';
+      ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+      strokeHangarFrame(ctx, rect);
+
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillStyle = P.ui.textBright;
+      ctx.font = 'bold 16px "Courier New", monospace';
+      ctx.fillText(skill.name, rect.x + 14, rect.y + 12);
+      const nameW = ctx.measureText(skill.name).width;
+      const hint = {
+        x: Math.min(rect.x + 20 + nameW, rect.x + rect.w - 44),
+        y: rect.y + 8,
+        w: 32,
+        h: 32,
+        id: skill.id,
+        kind: 'hint',
+      };
+      const hintHit = menuHit(hint);
+      ctx.fillStyle = hintHit.hover ? 'rgba(68,204,204,0.28)' : 'rgba(68,204,204,0.12)';
+      ctx.fillRect(hint.x, hint.y, hint.w, hint.h);
+      ctx.strokeStyle = hintHit.hover ? '#88eeee' : '#44cccc';
+      ctx.strokeRect(hint.x + 0.5, hint.y + 0.5, hint.w - 1, hint.h - 1);
+      ctx.fillStyle = '#88eeee';
+      ctx.font = 'bold 16px "Courier New", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('?', hint.x + hint.w / 2, hint.y + hint.h / 2 + 1);
+
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillStyle = P.ui.textDim;
+      ctx.font = '13px "Courier New", monospace';
+      const perk = skill.perks && rank >= 3
+        ? SKILL_PERK_RANKS.filter((n) => rank >= n).map((n) => skill.perks[n]?.name).filter(Boolean).pop()
+        : null;
+      ctx.fillText(perk ? `LV ${rank} / ${SKILL_MAX}  ·  ${perk}` : `LV ${rank} / ${SKILL_MAX}`, rect.x + 14, rect.y + 42);
+
+      const btnH = Math.min(48, Math.max(44, rect.h * 0.26));
+      const btn = {
+        x: rect.x + 12,
+        y: rect.y + rect.h - btnH - 10,
+        w: rect.w - 24,
+        h: btnH,
+        id: skill.id,
+        kind: 'up',
+      };
+      const pipY = Math.max(rect.y + 62, btn.y - 18);
+      const pipGap = 4;
+      const pipW = Math.min(12, (rect.w - 28 - pipGap * (SKILL_MAX - 1)) / SKILL_MAX);
+      for (let p = 0; p < SKILL_MAX; p++) {
+        const isPerk = SKILL_PERK_RANKS.includes(p + 1);
+        ctx.fillStyle = p < rank ? '#aaff88' : 'rgba(40,60,40,0.9)';
+        ctx.fillRect(rect.x + 14 + p * (pipW + pipGap), pipY, pipW, isPerk ? 10 : 7);
+        if (isPerk) {
+          ctx.strokeStyle = p < rank ? '#ffcc66' : 'rgba(204,170,68,0.45)';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(rect.x + 14 + p * (pipW + pipGap) + 0.5, pipY + 0.5, pipW - 1, (isPerk ? 10 : 7) - 1);
+        }
+      }
+
+      const label = sandbox
+        ? 'RATED'
+        : rank >= SKILL_MAX
+          ? 'MAXED'
+          : canUp
+            ? 'LEVEL UP'
+            : 'NEED SP';
+      drawMenuButton(ctx, btn, {
+        label,
+        kind: canUp ? 'primary' : 'menu',
+        disabled: !canUp,
+        compact: false,
+        blink: canUp,
+      });
+      pilotNodeBoxes.push(hint, btn);
+    }
+
+    if (skillToast && now < skillToastUntil) {
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      ctx.font = 'bold 13px "Courier New", monospace';
+      ctx.fillStyle = '#aaff88';
+      ctx.fillText(skillToast, w / 2, h - L.footerH - 8);
+    }
+
+    const spent = spentSkillPoints(pilot);
+    const navLabels = sandbox
+      ? ['◂ BACK', 'HANGAR']
+      : spent > 0
+        ? ['◂ BACK', 'HANGAR', 'FREE RESPEC']
+        : ['◂ BACK', 'HANGAR'];
+    const nav = footerNavRects(L, navLabels);
+    drawMenuButton(ctx, nav[0], { label: nav[0].label });
+    drawMenuButton(ctx, nav[1], { label: nav[1].label });
+    pilotBackBox = nav[0];
+    pilotHangarBox = nav[1];
+    if (nav[2]) {
+      drawMenuButton(ctx, nav[2], { label: nav[2].label, kind: 'accent' });
+      pilotRespecBox = nav[2];
+    } else {
+      pilotRespecBox = null;
+    }
+
+    if (skillHintId) {
+      const def = PILOT_SKILLS.find((s) => s.id === skillHintId);
+      ctx.fillStyle = 'rgba(0,0,0,0.62)';
+      ctx.fillRect(0, 0, w, h);
+      const pw = Math.min(500, L.content.w);
+      const ph = Math.min(320, L.content.h);
+      const px = (w - pw) / 2;
+      const py = (h - L.footerH - ph) / 2;
+      ctx.fillStyle = '#0c1610';
+      ctx.fillRect(px, py, pw, ph);
+      ctx.strokeStyle = '#88aa66';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(px + 0.5, py + 0.5, pw - 1, ph - 1);
+      drawCornerBrackets(ctx, px, py, pw, ph, 'rgba(204,136,51,0.7)', 14, 1.6);
+      const close = { x: px + pw - 44, y: py + 10, w: 34, h: 32, kind: 'hint-close' };
+      const closeHit = menuHit(close);
+      ctx.fillStyle = closeHit.hover ? '#5a2020' : '#2a1212';
+      ctx.fillRect(close.x, close.y, close.w, close.h);
+      ctx.strokeStyle = closeHit.hover ? '#ff8888' : '#cc6666';
+      ctx.strokeRect(close.x + 0.5, close.y + 0.5, close.w - 1, close.h - 1);
+      ctx.fillStyle = '#ffdddd';
+      ctx.font = 'bold 18px "Courier New", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('X', close.x + close.w / 2, close.y + close.h / 2 + 1);
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillStyle = P.ui.textBright;
+      ctx.font = 'bold 20px "Courier New", monospace';
+      ctx.fillText(def?.name || 'SKILL', px + 22, py + 16);
+      ctx.fillStyle = P.ui.text;
+      ctx.font = '14px "Courier New", monospace';
+      const lines = wrapHint(ctx, def?.hint || '', pw - 44);
+      let ly = py + 50;
+      for (const line of lines) {
+        ctx.fillText(line, px + 22, ly);
+        ly += 20;
+      }
+      ly += 8;
+      ctx.font = 'bold 13px "Courier New", monospace';
+      ctx.fillStyle = '#ffcc66';
+      ctx.fillText('PERKS', px + 22, ly);
+      ly += 20;
+      ctx.font = '13px "Courier New", monospace';
+      for (const n of SKILL_PERK_RANKS) {
+        const perk = def?.perks?.[n];
+        if (!perk) continue;
+        ctx.fillStyle = P.ui.textBright;
+        ctx.fillText(`LV ${n}  ${perk.name}`, px + 22, ly);
+        ly += 18;
+        ctx.fillStyle = P.ui.textDim;
+        ctx.fillText(perk.desc, px + 22, ly);
+        ly += 20;
+      }
+    }
+    ctx.restore();
+  },
+};
+
+export let pilotBackBox = null;
+export let pilotHangarBox = null;
+
 export function handlePilotClick(px, py, dpr) {
   const career = metaState.career;
   if (!career) return false;
+  if (skillHintId) {
+    skillHintId = null;
+    return true;
+  }
   if (
     pilotRespecBox &&
     px >= pilotRespecBox.x * dpr &&
@@ -729,6 +843,8 @@ export function handlePilotClick(px, py, dpr) {
     py <= (pilotRespecBox.y + pilotRespecBox.h) * dpr
   ) {
     respecSkills(career);
+    skillToast = 'TALENTS RESET';
+    skillToastUntil = performance.now() + 1200;
     return true;
   }
   if (
@@ -756,9 +872,23 @@ export function handlePilotClick(px, py, dpr) {
       py >= box.y * dpr &&
       py <= (box.y + box.h) * dpr
     ) {
-      pilotInfoSelection = box.id;
-      allocateSkill(career, box.id);
-      return true;
+      if (box.kind === 'hint') {
+        skillHintId = box.id;
+        return true;
+      }
+      if (box.kind === 'up') {
+        const result = levelSkill(career, box.id);
+        if (result.ok) {
+          const def = PILOT_SKILLS.find((s) => s.id === box.id);
+          skillFlash = { id: box.id, until: performance.now() + 280 };
+          skillToast = `${def?.name || 'SKILL'} → ${result.rank}`;
+          skillToastUntil = performance.now() + 1400;
+        } else {
+          skillToast = result.reason || 'CANNOT LEVEL';
+          skillToastUntil = performance.now() + 1100;
+        }
+        return true;
+      }
     }
   }
   return false;
@@ -780,22 +910,41 @@ function dossierKillCount(career, className) {
   return Math.max(fromCareer, fromPilot);
 }
 
-function isDevUnlock() {
-  if (typeof window !== 'undefined') {
-    try {
-      if (new URLSearchParams(window.location.search).has('dev')) return true;
-    } catch {
-      /* ignore */
-    }
-  }
-  return true;
+function dossierVisible(career, className) {
+  return dossierKillCount(career, className) > 0 || isDevUnlock();
 }
 
-function dossierVisible(career, className) {
-  return isDevUnlock() || dossierKillCount(career, className) > 0;
+function fitDossierLabel(ctx, text, maxW) {
+  const raw = String(text || '');
+  if (ctx.measureText(raw).width <= maxW) return raw;
+  let t = raw;
+  while (t.length > 1 && ctx.measureText(`${t}…`).width > maxW) t = t.slice(0, -1);
+  return `${t}…`;
+}
+
+function wrapDossierLines(ctx, text, maxW) {
+  const words = String(text || '').split(/\s+/).filter(Boolean);
+  const lines = [];
+  let cur = '';
+  for (const word of words) {
+    const next = cur ? `${cur} ${word}` : word;
+    if (cur && ctx.measureText(next).width > maxW) {
+      lines.push(cur);
+      cur = word;
+    } else {
+      cur = next;
+    }
+  }
+  if (cur) lines.push(cur);
+  return lines;
 }
 
 function drawDossierPreview(ctx, className, cx, cy, scale) {
+  const boss = BOSS_DOSSIERS[className];
+  if (boss) {
+    drawBossSilhouette(ctx, boss.silhouette, cx, cy, Math.max(1.35, scale * 0.55), '#c05050');
+    return;
+  }
   const def = ENEMY_CLASSES[className];
   if (!def) return;
   ctx.save();
@@ -816,6 +965,54 @@ function drawDossierPreview(ctx, className, cx, cy, scale) {
   ctx.restore();
 }
 
+function paintDossierTile(ctx, rect, { id, label, kills, unlocked, boss }) {
+  const hit = unlocked ? menuHit(rect) : menuHit(rect, { quiet: true });
+  ctx.save();
+  if (hit.scale !== 1) {
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(hit.scale, hit.scale);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+  }
+  ctx.beginPath();
+  ctx.rect(rect.x, rect.y, rect.w, rect.h);
+  ctx.clip();
+  if (boss) {
+    ctx.fillStyle = unlocked ? (hit.hover ? '#4a1818' : '#2a1010') : 'rgba(42, 12, 12, 0.78)';
+    ctx.strokeStyle = unlocked
+      ? hit.hover
+        ? '#ff8888'
+        : 'rgba(200, 70, 70, 0.85)'
+      : 'rgba(120, 40, 40, 0.5)';
+  } else {
+    ctx.fillStyle = hit.hover ? '#1a3320' : '#102018';
+    ctx.strokeStyle = hit.hover ? '#aaff88' : 'rgba(90,140,80,0.7)';
+  }
+  ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+  ctx.lineWidth = hit.hover && unlocked ? 2 : 1;
+  ctx.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.w - 1, rect.h - 1);
+  if (unlocked) {
+    drawDossierPreview(ctx, id, rect.x + rect.w / 2, rect.y + rect.h * 0.38, boss ? 1.65 : 1.9);
+    ctx.fillStyle = boss ? '#ffcccc' : P.ui.textBright;
+    ctx.font = 'bold 11px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillText(fitDossierLabel(ctx, label, rect.w - 8), rect.x + rect.w / 2, rect.y + rect.h - 28);
+    ctx.fillStyle = '#ffcc44';
+    ctx.font = '11px "Courier New", monospace';
+    ctx.fillText(`${kills} KILL${kills === 1 ? '' : 'S'}`, rect.x + rect.w / 2, rect.y + rect.h - 14);
+  } else {
+    ctx.fillStyle = 'rgba(180, 80, 80, 0.55)';
+    ctx.font = 'bold 16px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('????', rect.x + rect.w / 2, rect.y + rect.h * 0.42);
+    ctx.font = '10px "Courier New", monospace';
+    ctx.textBaseline = 'top';
+    ctx.fillText('LOCKED', rect.x + rect.w / 2, rect.y + rect.h - 18);
+  }
+  ctx.restore();
+}
+
 export const dossiersScreen = {
   draw(ctx, cam) {
     const w = cam.screenW;
@@ -823,77 +1020,88 @@ export const dossiersScreen = {
     const career = careerOrEmpty();
     ctx.save();
     ctx.scale(cam.dpr, cam.dpr);
-    const L = paintScreenBackdrop(
-      ctx,
-      w,
-      h,
-      'DOSSIERS',
-      isDevUnlock() ? 'ALL CONTACTS — LIVE KILL COUNTS' : 'KNOWN CONTACTS — KILL TO UNLOCK'
-    );
+    const L = paintScreenBackdrop(ctx, w, h, 'DOSSIERS', 'HUNTERS AND CONTACTS');
+    drawHeaderDollars(ctx, L, career.dollars);
     dossierTileBoxes = [];
-    const cols = L.landscape ? 6 : L.phone ? 3 : 4;
-    const ids = ENEMY_CLASS_ORDER.filter((id) => ENEMY_CLASSES[id]);
-    const rows = Math.ceil(ids.length / cols);
-    const gap = 10;
-    const gridW = L.content.w;
-    const gridH = L.content.h - 8;
-    const tileW = (gridW - gap * (cols - 1)) / cols;
-    const tileH = Math.min(118, (gridH - gap * (rows - 1)) / rows);
-    const totalH = tileH * rows + gap * (rows - 1);
-    const gridY = L.content.y + Math.max(0, (L.content.h - totalH) / 2);
+    const gap = 8;
+    const bossCols = L.landscape || L.content.w >= 720 ? 8 : 4;
+    const fieldCols = L.landscape || L.content.w >= 720 ? 8 : 4;
+    const fieldIds = ENEMY_CLASS_ORDER.filter(
+      (id) => ENEMY_CLASSES[id] && dossierVisible(career, id)
+    );
+    const captionH = 20;
+    const bossRows = Math.ceil(BOSS_DOSSIER_ORDER.length / bossCols);
+    const fieldRows = Math.max(1, Math.ceil(Math.max(fieldIds.length, 1) / fieldCols));
+    const avail = L.content.h - captionH * 2 - gap * 3;
+    const bossBand = Math.min(avail * 0.44, Math.max(108, 56 * bossRows + gap * (bossRows - 1)));
+    const fieldBand = Math.max(80, avail - bossBand);
+    const bossTileH = Math.max(48, (bossBand - gap * (bossRows - 1)) / bossRows);
+    const bossTileW = (L.content.w - gap * (bossCols - 1)) / bossCols;
+    const fieldTileH = Math.min(
+      108,
+      Math.max(52, (fieldBand - gap * (fieldRows - 1)) / fieldRows)
+    );
+    const fieldTileW = (L.content.w - gap * (fieldCols - 1)) / fieldCols;
 
-    for (let i = 0; i < ids.length; i++) {
-      const id = ids[i];
-      const col = i % cols;
-      const row = Math.floor(i / cols);
+    drawSectionCaption(ctx, L.content.x, L.content.y, L.content.w, 'HUNTERS', '#cc6666');
+    const bossY = L.content.y + captionH;
+    for (let i = 0; i < BOSS_DOSSIER_ORDER.length; i++) {
+      const id = BOSS_DOSSIER_ORDER[i];
+      const col = i % bossCols;
+      const row = Math.floor(i / bossCols);
+      const unlocked = dossierVisible(career, id);
       const rect = {
-        x: L.content.x + col * (tileW + gap),
-        y: gridY + row * (tileH + gap),
-        w: tileW,
-        h: tileH,
+        x: L.content.x + col * (bossTileW + gap),
+        y: bossY + row * (bossTileH + gap),
+        w: bossTileW,
+        h: bossTileH,
         className: id,
       };
-      const kills = dossierKillCount(career, id);
-      const unlocked = dossierVisible(career, id);
-      const hit = menuHit(rect);
-      ctx.save();
-      if (hit.scale !== 1) {
-        ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
-        ctx.scale(hit.scale, hit.scale);
-        ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+      const def = BOSS_DOSSIERS[id];
+      paintDossierTile(ctx, rect, {
+        id,
+        label: def?.short || def?.name || id,
+        kills: dossierKillCount(career, id),
+        unlocked,
+        boss: true,
+      });
+      if (unlocked) dossierTileBoxes.push(rect);
+    }
+
+    const fieldTop = bossY + bossBand + gap;
+    drawSectionCaption(ctx, L.content.x, fieldTop, L.content.w, 'CONTACTS');
+    const fieldY = fieldTop + captionH;
+    if (fieldIds.length === 0) {
+      ctx.fillStyle = P.ui.textDim;
+      ctx.font = '13px "Courier New", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(
+        'NO FIELD CONTACTS CONFIRMED',
+        L.content.x + L.content.w / 2,
+        fieldY + Math.min(fieldBand, 90) * 0.45
+      );
+    } else {
+      for (let i = 0; i < fieldIds.length; i++) {
+        const id = fieldIds[i];
+        const col = i % fieldCols;
+        const row = Math.floor(i / fieldCols);
+        const rect = {
+          x: L.content.x + col * (fieldTileW + gap),
+          y: fieldY + row * (fieldTileH + gap),
+          w: fieldTileW,
+          h: fieldTileH,
+          className: id,
+        };
+        paintDossierTile(ctx, rect, {
+          id,
+          label: ENEMY_CLASS_LABELS[id] || id.toUpperCase(),
+          kills: dossierKillCount(career, id),
+          unlocked: true,
+          boss: false,
+        });
+        dossierTileBoxes.push(rect);
       }
-      ctx.fillStyle = unlocked ? (hit.hover ? '#1a3320' : '#102018') : '#0a100a';
-      ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
-      ctx.strokeStyle = unlocked
-        ? hit.hover
-          ? '#aaff88'
-          : 'rgba(90,140,80,0.7)'
-        : 'rgba(50,70,50,0.35)';
-      ctx.lineWidth = hit.hover && unlocked ? 2 : 1;
-      ctx.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.w - 1, rect.h - 1);
-      if (unlocked) {
-        drawDossierPreview(ctx, id, rect.x + rect.w / 2, rect.y + rect.h * 0.42, 2.2);
-        ctx.fillStyle = P.ui.textBright;
-        ctx.font = 'bold 11px "Courier New", monospace';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'top';
-        ctx.fillText(ENEMY_CLASS_LABELS[id] || id.toUpperCase(), rect.x + rect.w / 2, rect.y + rect.h - 28);
-        ctx.fillStyle = kills > 0 ? '#ffcc44' : P.ui.textDim;
-        ctx.font = '10px "Courier New", monospace';
-        ctx.fillText(`${kills} KILL${kills === 1 ? '' : 'S'}`, rect.x + rect.w / 2, rect.y + rect.h - 14);
-      } else {
-        ctx.fillStyle = 'rgba(90,110,90,0.35)';
-        ctx.font = 'bold 22px "Courier New", monospace';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('✕', rect.x + rect.w / 2, rect.y + rect.h * 0.42);
-        ctx.fillStyle = P.ui.textDim;
-        ctx.font = 'bold 10px "Courier New", monospace';
-        ctx.textBaseline = 'top';
-        ctx.fillText('UNKNOWN', rect.x + rect.w / 2, rect.y + rect.h - 22);
-      }
-      ctx.restore();
-      dossierTileBoxes.push(rect);
     }
 
     const nav = footerNavRects(L, ['◂ CAMPAIGN', 'HANGAR', 'SKILLS']);
@@ -901,19 +1109,30 @@ export const dossiersScreen = {
     for (const rect of nav) drawMenuButton(ctx, rect, { label: rect.label });
 
     if (dossierPopup) {
+      const boss = BOSS_DOSSIERS[dossierPopup];
+      const def = ENEMY_CLASSES[dossierPopup];
       ctx.fillStyle = 'rgba(0,0,0,0.62)';
       ctx.fillRect(0, 0, w, h);
       const pw = Math.min(520, L.content.w);
-      const ph = Math.min(340, L.content.h + 20);
+      const ph = Math.min(360, L.content.h + 20);
       const px = (w - pw) / 2;
       const py = (h - L.footerH - ph) / 2 + 10;
       dossierPanelRect = { x: px, y: py, w: pw, h: ph };
-      ctx.fillStyle = '#0c1610';
+      ctx.fillStyle = boss ? '#160c0c' : '#0c1610';
       ctx.fillRect(px, py, pw, ph);
-      ctx.strokeStyle = '#88aa66';
+      ctx.strokeStyle = boss ? '#cc6666' : '#88aa66';
       ctx.lineWidth = 1.5;
       ctx.strokeRect(px + 0.5, py + 0.5, pw - 1, ph - 1);
-      drawCornerBrackets(ctx, px, py, pw, ph, 'rgba(204,136,51,0.7)', 14, 1.6);
+      drawCornerBrackets(
+        ctx,
+        px,
+        py,
+        pw,
+        ph,
+        boss ? 'rgba(204,80,80,0.75)' : 'rgba(204,136,51,0.7)',
+        14,
+        1.6
+      );
 
       const close = { x: px + pw - 42, y: py + 10, w: 32, h: 28 };
       dossierCloseBox = close;
@@ -928,33 +1147,52 @@ export const dossiersScreen = {
       ctx.textBaseline = 'middle';
       ctx.fillText('X', close.x + close.w / 2, close.y + close.h / 2 + 1);
 
-      const def = ENEMY_CLASSES[dossierPopup];
       const kills = dossierKillCount(career, dossierPopup);
+      const title = boss
+        ? boss.name
+        : ENEMY_CLASS_LABELS[dossierPopup] || dossierPopup.toUpperCase();
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
-      ctx.fillStyle = P.ui.textBright;
-      ctx.font = 'bold 20px "Courier New", monospace';
-      ctx.fillText(ENEMY_CLASS_LABELS[dossierPopup] || dossierPopup.toUpperCase(), px + 22, py + 16);
+      ctx.fillStyle = boss ? '#ffcccc' : P.ui.textBright;
+      ctx.font = 'bold 18px "Courier New", monospace';
+      ctx.fillText(fitDossierLabel(ctx, title, pw - 80), px + 22, py + 16);
       ctx.fillStyle = '#ffcc44';
       ctx.font = 'bold 13px "Courier New", monospace';
-      ctx.fillText(`CONFIRMED KILLS  ${kills}`, px + 22, py + 44);
+      ctx.fillText(`CONFIRMED KILLS  ${kills}`, px + 22, py + 42);
 
-      drawDossierPreview(ctx, dossierPopup, px + pw * 0.28, py + ph * 0.58, 5.2);
+      drawDossierPreview(ctx, dossierPopup, px + pw * 0.26, py + ph * 0.58, boss ? 4.2 : 5.0);
 
-      const lines = [
-        `CLASS     ${(def.category || 'unknown').toUpperCase()}`,
-        `BEHAVIOR  ${(def.behavior || '—').toUpperCase()}`,
-        `HULL      ${def.hp}`,
-        `SPEED     ${def.speed}`,
-        `VALUE     ${def.points} PTS`,
-      ];
       ctx.font = '13px "Courier New", monospace';
       ctx.fillStyle = P.ui.text;
-      const statsX = px + pw * 0.52;
-      let sy = py + 88;
+      const statsX = px + pw * 0.5;
+      let sy = py + 78;
+      const lines = boss
+        ? [
+            `HUNTER    ACT ${boss.act}${boss.final ? '  FINAL' : ''}`,
+            `HULL      ${boss.hp}`,
+            `ESCORTS   ${boss.bodyguards}`,
+          ]
+        : [
+            `CLASS     ${(def?.category || 'unknown').toUpperCase()}`,
+            `BEHAVIOR  ${(def?.behavior || '—').toUpperCase()}`,
+            `HULL      ${def?.hp ?? '—'}`,
+            `SPEED     ${def?.speed ?? '—'}`,
+            `VALUE     ${def?.points ?? 0} PTS`,
+            `ARRIVES   ACT ${def?.minAct ?? 1}`,
+          ];
       for (const line of lines) {
         ctx.fillText(line, statsX, sy);
-        sy += 28;
+        sy += 22;
+      }
+      const blurb = boss?.blurb || def?.blurb;
+      if (blurb) {
+        ctx.fillStyle = P.ui.textDim;
+        ctx.font = '12px "Courier New", monospace';
+        sy += 8;
+        for (const line of wrapDossierLines(ctx, blurb, pw * 0.46)) {
+          ctx.fillText(line, statsX, sy);
+          sy += 16;
+        }
       }
     } else {
       dossierCloseBox = null;
@@ -1009,6 +1247,75 @@ export function handleDossiersClick(px, py, dpr) {
       const career = metaState.career;
       if (dossierVisible(career, box.className)) dossierPopup = box.className;
       return true;
+    }
+  }
+  return false;
+}
+
+let achievementNavBoxes = [];
+
+export const achievementsScreen = {
+  draw(ctx, cam) {
+    const w = cam.screenW;
+    const h = cam.screenH;
+    const career = careerOrEmpty();
+    ctx.save();
+    ctx.scale(cam.dpr, cam.dpr);
+    const unlocked = career.achievements || {};
+    const got = achievementCount(career);
+    const L = paintScreenBackdrop(
+      ctx,
+      w,
+      h,
+      'ACHIEVEMENTS',
+      `${got} / ${ACHIEVEMENTS.length} UNLOCKED`
+    );
+    drawHeaderDollars(ctx, L, career.dollars);
+    const gap = 10;
+    const cols = L.landscape && L.content.w >= 560 ? 2 : 1;
+    const rows = Math.ceil(ACHIEVEMENTS.length / cols);
+    const cardW = (L.content.w - gap * (cols - 1)) / cols;
+    const cardH = Math.min(72, (L.content.h - gap * (rows - 1)) / rows);
+    for (let i = 0; i < ACHIEVEMENTS.length; i++) {
+      const row = ACHIEVEMENTS[i];
+      const col = i % cols;
+      const r = Math.floor(i / cols);
+      const rect = {
+        x: L.content.x + col * (cardW + gap),
+        y: L.content.y + r * (cardH + gap),
+        w: cardW,
+        h: cardH,
+      };
+      const on = Boolean(unlocked[row.id]);
+      ctx.fillStyle = on ? 'rgba(28,52,22,0.92)' : 'rgba(8,12,8,0.72)';
+      ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+      ctx.strokeStyle = on ? 'rgba(170,255,136,0.7)' : 'rgba(70,90,70,0.35)';
+      ctx.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.w - 1, rect.h - 1);
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.font = 'bold 14px "Courier New", monospace';
+      ctx.fillStyle = on ? P.ui.textBright : P.ui.textDim;
+      ctx.fillText(on ? row.name : '????', rect.x + 14, rect.y + 12);
+      ctx.font = '12px "Courier New", monospace';
+      ctx.fillStyle = on ? P.ui.text : 'rgba(90,110,90,0.7)';
+      ctx.fillText(on ? row.desc : 'LOCKED', rect.x + 14, rect.y + 34);
+    }
+    const nav = footerNavRects(L, ['◂ CAMPAIGN']);
+    achievementNavBoxes = nav;
+    drawMenuButton(ctx, nav[0], { label: nav[0].label });
+    ctx.restore();
+  },
+};
+
+export function handleAchievementsClick(px, py, dpr) {
+  for (const box of achievementNavBoxes) {
+    if (
+      px >= box.x * dpr &&
+      px <= (box.x + box.w) * dpr &&
+      py >= box.y * dpr &&
+      py <= (box.y + box.h) * dpr
+    ) {
+      return 'back';
     }
   }
   return false;

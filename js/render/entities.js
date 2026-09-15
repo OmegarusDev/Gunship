@@ -119,6 +119,19 @@ function drawEnemy(ctx, e) {
       ctx.beginPath();
       ctx.arc(s * 0.1, -s * 0.5, s * 0.2, 0, Math.PI, true);
       ctx.fill();
+    } else if (e.className === 'aaTruck') {
+      ctx.fillStyle = isFlashing ? '#ffffff' : '#3a3a2a';
+      ctx.fillRect(-s * 0.85, -s * 0.62, s * 1.7, s * 0.18);
+      ctx.fillRect(-s * 0.85, s * 0.44, s * 1.7, s * 0.18);
+      ctx.fillStyle = bodyColor;
+      ctx.fillRect(-s * 0.7, -s * 0.42, s * 1.5, s * 0.84);
+      ctx.fillStyle = isFlashing ? '#ffffff' : P.enemy.vehicleHi || '#8a7050';
+      ctx.fillRect(s * 0.35, -s * 0.28, s * 0.45, s * 0.56);
+      ctx.fillStyle = isFlashing ? '#ffffff' : P.enemy.vehicleDark || '#5a4020';
+      ctx.fillRect(-s * 0.15, -s * 0.28, s * 0.45, s * 0.56);
+      ctx.fillStyle = isFlashing ? '#ffffff' : '#4a4a3a';
+      ctx.fillRect(s * 0.2, -s * 0.16, s * 0.7, s * 0.1);
+      ctx.fillRect(s * 0.2, s * 0.06, s * 0.7, s * 0.1);
     } else if (e.className === 'sam') {
       // SA-6/SA-8 style mobile SAM
       // Tracks
@@ -152,22 +165,30 @@ function drawEnemy(ctx, e) {
     ctx.lineWidth = 1.2;
     ctx.strokeRect(-s * 0.8, -s * 0.6, s * 1.8, s * 1.2);
   } else if (e.category === 'emplacement') {
-    // ── FIXED EMPLACEMENTS ──
-    // Sandbag base
-    ctx.fillStyle = isFlashing ? '#ffffff' : '#b0a070';
+    const twin = e.className === 'twin23';
+    const heavy = e.className === 'heavyAA';
+    const hmg = e.className === 'hmg';
+    ctx.fillStyle = isFlashing ? '#ffffff' : heavy ? '#8a8060' : '#b0a070';
     ctx.beginPath();
-    ctx.arc(0, 0, s * 0.9, 0, Math.PI * 2);
+    ctx.arc(0, 0, s * (heavy ? 1.05 : 0.9), 0, Math.PI * 2);
     ctx.fill();
     ctx.strokeStyle = P.enemy.outline;
     ctx.lineWidth = 1;
     ctx.stroke();
-    // Gun
     ctx.fillStyle = isFlashing ? '#ffffff' : '#4a4a3a';
-    ctx.fillRect(s * 0.2, -s * 0.08, s * 0.8, s * 0.16);
-    // Mount
+    if (twin) {
+      ctx.fillRect(s * 0.15, -s * 0.18, s * 0.95, s * 0.12);
+      ctx.fillRect(s * 0.15, s * 0.06, s * 0.95, s * 0.12);
+    } else if (heavy) {
+      ctx.fillRect(s * 0.15, -s * 0.1, s * 1.25, s * 0.2);
+    } else if (hmg) {
+      ctx.fillRect(s * 0.2, -s * 0.07, s * 1.05, s * 0.14);
+    } else {
+      ctx.fillRect(s * 0.2, -s * 0.08, s * 0.8, s * 0.16);
+    }
     ctx.fillStyle = isFlashing ? '#ffffff' : '#5a5a4a';
     ctx.beginPath();
-    ctx.arc(0, 0, s * 0.3, 0, Math.PI * 2);
+    ctx.arc(0, 0, s * (heavy ? 0.38 : 0.3), 0, Math.PI * 2);
     ctx.fill();
   } else {
     // ── INFANTRY — simple diamond ──
@@ -415,6 +436,44 @@ function drawGroundBoss(ctx) {
 
 function drawHunter(ctx) {
   drawBoss(ctx);
+}
+
+/** Compact silhouette for dossier tiles. `kind` is tank/aa/sam/heli/fighter. */
+export function drawBossSilhouette(ctx, kind, x, y, scale = 1, color = '#8a3030') {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(scale, scale);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillStyle = color;
+  ctx.strokeStyle = '#2a0808';
+  ctx.lineWidth = 0.8;
+  if (kind === 'heli' || kind === 'fighter') {
+    ctx.beginPath();
+    ctx.ellipse(0, 0, kind === 'fighter' ? 9 : 11, 4.2, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 14, 14 * 0.38, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillRect(8, -1.2, kind === 'fighter' ? 8 : 6, 2.4);
+  } else if (kind === 'sam') {
+    ctx.fillRect(-8, -5, 16, 10);
+    ctx.strokeRect(-8, -5, 16, 10);
+    ctx.fillRect(2, -3, 9, 2);
+    ctx.fillRect(2, 1, 9, 2);
+  } else if (kind === 'aa') {
+    ctx.beginPath();
+    ctx.arc(0, 0, 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillRect(2, -2.4, 10, 1.8);
+    ctx.fillRect(2, 0.6, 10, 1.8);
+  } else {
+    ctx.fillRect(-9, -6, 18, 12);
+    ctx.strokeRect(-9, -6, 18, 12);
+    ctx.fillRect(4, -1.2, 10, 2.4);
+  }
+  ctx.restore();
 }
 
 export { drawHeliShadow, drawGunship, drawEnemy, drawBoss, drawHunter };

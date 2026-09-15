@@ -20,6 +20,7 @@ import { generateRegion } from './region.js';
 import { generateTransport } from './transport.js';
 import { generatePlaces } from './places.js';
 import { generateEncounters } from './encounters.js';
+import { AA_CLASSES, classMinAct } from '../data/enemyClasses.js';
 
 function between(rng, min, max) {
   return min + (max - min) * rng();
@@ -154,7 +155,7 @@ function makeConvoy(id, route, rng, extras = {}) {
     totalLength: route.totalLength,
     s: route.totalLength * 0.18,
     direction: 1,
-    composition: extras.composition || ['technical', 'apc', 'technical', 'rifleman', 'rifleman'],
+    composition: extras.composition || convoyComposition(1, 0),
     speed: extras.speed || 38,
     hp: extras.hp || 100,
     maxHp: extras.hp || 100,
@@ -171,7 +172,34 @@ function makeConvoy(id, route, rng, extras = {}) {
   };
 }
 
-function generateConvoys(seed, roads, encounters) {
+function rosterAct(context, contract) {
+  if (context?.practice || context?.sandbox) return 4;
+  const act = contract?.campaign?.act || context?.act || 1;
+  return Math.max(1, Math.min(4, Math.floor(act)));
+}
+
+function convoyComposition(act, index) {
+  if (act <= 1) {
+    return index === 0
+      ? ['technical', 'technical', 'rifleman']
+      : ['technical', 'rifleman', 'rifleman', 'rpg'];
+  }
+  if (act === 2) {
+    return index === 0
+      ? ['technical', 'apc', 'aaTruck']
+      : ['technical', 'rifleman', 'rifleman', 'rpg'];
+  }
+  if (act === 3) {
+    return index === 0
+      ? ['technical', 'apc', 'shilka']
+      : ['technical', 'apc', 'rifleman', 'rpg'];
+  }
+  return index === 0
+    ? ['technical', 'apc', 'shilka', 'sam']
+    : ['aaTruck', 'rifleman', 'rpg', 'manpads'];
+}
+
+function generateConvoys(seed, roads, encounters, act = 1) {
   const rng = mulberry32(deriveSeed(seed, 'convoys'));
   const convoys = [];
   const count = 1 + (rng() < 0.55 ? 1 : 0) + (rng() < 0.25 ? 1 : 0);
@@ -182,10 +210,7 @@ function generateConvoys(seed, roads, encounters) {
     convoys.push(
       makeConvoy(`convoy-${String(i + 1).padStart(2, '0')}`, route, rng, {
         encounterId: mobile?.id || null,
-        composition:
-          i === 0
-            ? ['technical', 'apc', 'technical']
-            : ['technical', 'rifleman', 'rifleman', 'rpg'],
+        composition: convoyComposition(act, i),
       })
     );
   }
@@ -255,7 +280,8 @@ function seedSupplyAndFuel(world, rng) {
   const cratePlaces = world.places.filter(
     (place) => place.kind === 'industrial_depot' || place.kind === 'fuel_depot' || place.kind === 'camp'
   );
-  for (const place of cratePlaces.slice(0, 3)) {
+  const extra = (world.luck || 0) >= 10 ? 2 : (world.luck || 0) >= 5 ? 1 : 0;
+  for (const place of cratePlaces.slice(0, 3 + extra)) {
     const access = place.accessPoints[0] || place;
     world.supplyCrates.push({
       id: `crate-${place.id}`,
@@ -351,7 +377,10 @@ function applyContractPlan(world, contract) {
     if (!convoy) {
       const route = convoyRouteFromRoads(world.roads, rng);
       if (route) {
-        convoy = makeConvoy('convoy-objective', route, rng, { objectiveTarget: true });
+        convoy = makeConvoy('convoy-objective', route, rng, {
+          objectiveTarget: true,
+          composition: convoyComposition(world.act || 1, 0),
+        });
         world.convoys.push(convoy);
       }
     }
@@ -373,7 +402,7 @@ function applyContractPlan(world, contract) {
     const marked = [];
     for (const encounter of pool) {
       for (const entry of encounter.roster) {
-        if (['lightAA', 'manpads', 'shilka', 'sam'].includes(entry.className)) {
+        if (AA_CLASSES.includes(entry.className) && classMinAct(entry.className) <= (world.act || 1)) {
           entry.objectiveTarget = true;
           marked.push(entry);
         }
@@ -393,7 +422,18 @@ function applyContractPlan(world, contract) {
         placeId: encounter.placeId,
         districtId: encounter.districtId,
         parcelId: null,
-        className: marked.length === 0 ? 'lightAA' : marked.length === 1 ? 'manpads' : 'shilka',
+        className:
+          marked.length === 0
+            ? 'lightAA'
+            : marked.length === 1
+              ? (world.act || 1) >= 2
+                ? 'manpads'
+                : 'mg'
+              : (world.act || 1) >= 3
+                ? 'shilka'
+                : (world.act || 1) >= 2
+                  ? 'twin23'
+                  : 'lightAA',
         x: offset.x,
         y: offset.y,
         isIndoor: false,
@@ -579,6 +619,7 @@ export function generateWorldV4(input) {
   const worldSize = context.worldSize || WORLD_SIZE;
   const terrain = context.terrain || createTerrain(seed, worldSize);
   const contract = context.contract || null;
+  const act = rosterAct(context, contract);
 
   const { region, landUse: regionalLandUse } = generateRegion(seed, worldSize, terrain);
   const transport = generateTransport(seed, worldSize, terrain, region);
@@ -588,9 +629,10 @@ export function generateWorldV4(input) {
     placesResult.places,
     placesResult.districts,
     placesResult.buildings,
-    placesResult.roads
+    placesResult.roads,
+    act
   );
-  const convoys = generateConvoys(seed, placesResult.roads, encounters);
+  const convoys = generateConvoys(seed, placesResult.roads, encounters, act);
   const decorations = generateDecorations(seed, terrain, placesResult.landUse, placesResult.places);
 
   const world = {
@@ -616,6 +658,8 @@ export function generateWorldV4(input) {
     extraction: { active: false },
     responsePlan: null,
     contract,
+    luck: context.luck || 0,
+    act,
     hour: Number.isFinite(contract?.hour) ? wrapHour(contract.hour) : hourFromSeed(seed),
     debugWorldgen: false,
   };

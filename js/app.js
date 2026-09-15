@@ -30,6 +30,7 @@ import {
   menuCursor,
   applyMenuHitTransform,
   paintMenuGlow,
+  drawHeaderDollars,
   drawFooterStrip,
 } from './appBridge.js';
 import {
@@ -42,16 +43,24 @@ import {
   saveCareer,
   syncGunshipUnlocks,
   recordDossierKill,
+  createSandboxCareer,
+  isSandboxCareer,
+  ACHIEVEMENTS,
+  achievementCount,
+  skillRank,
 } from './meta.js';
 import {
   hangarScreen,
   pilotScreen,
   dossiersScreen,
+  achievementsScreen,
   handleHangarClick,
   handlePilotClick,
   handleDossiersClick,
+  handleAchievementsClick,
 } from './screens_meta.js';
 import { splashScreen, bootCareer } from './screens_flow.js';
+import { initPwa } from './pwa.js';
 import { createEnemyFromRoster } from './data/enemies.js';
 import {
   createContractBoard,
@@ -125,6 +134,7 @@ export function registerScreen(name, screen) {
 }
 
 export function switchScreen(name, data) {
+  if (name === 'title') exitSandbox();
   if (currentScreen && currentScreen.exit) currentScreen.exit();
   currentScreen = screens[name];
   if (currentScreen && currentScreen.enter) currentScreen.enter(data);
@@ -135,6 +145,24 @@ function adoptCareer(career) {
   GameState.setCareer(career);
   metaState.career = career;
   return true;
+}
+
+let campaignCareerHold = null;
+
+function enterSandbox() {
+  const current = GameState.career;
+  if (isSandboxCareer(current)) return;
+  campaignCareerHold = current;
+  adoptCareer(createSandboxCareer(current));
+  GameState.setSortieMode('practice');
+}
+
+function exitSandbox() {
+  if (!isSandboxCareer(GameState.career)) return;
+  if (campaignCareerHold) adoptCareer(campaignCareerHold);
+  else adoptCareer(bootCareer());
+  campaignCareerHold = null;
+  GameState.setSortieMode('campaign');
 }
 
 let accumulator = 0;
@@ -287,7 +315,14 @@ function initWorld(contract = null) {
     ? worldgenSeedOverride
     : (contract?.seed ?? 42);
   sharedTerrain = createTerrain(seed, WORLD_SIZE);
-  world = generateWorld({ seed, contract, terrain: sharedTerrain });
+  world = generateWorld({
+    seed,
+    contract,
+    terrain: sharedTerrain,
+    luck: skillRank(GameState.career?.pilot, 'luck'),
+    act: GameState.isPracticeSortie() ? 4 : contract?.campaign?.act || GameState.career?.campaign?.act || 1,
+    practice: GameState.isPracticeSortie(),
+  });
   world.debugWorldgen = debugWorldgen;
   _roadSegsCache = null;
   _miniRoadsCache = null;
@@ -327,10 +362,10 @@ function spawnStrongholdDefenses() {
   if (!contract?.stronghold || !target || target.objectiveHidden) return;
   const act = contract.campaign?.act || 1;
   const classesByAct = {
-    1: ['lightAA', 'rifleman', 'rifleman'],
-    2: ['lightAA', 'sam', 'rifleman', 'rifleman'],
-    3: ['sam', 'shilka', 'lightAA', 'rifleman', 'rifleman'],
-    4: ['sam', 'sam', 'shilka', 'tank', 'lightAA', 'rifleman'],
+    1: ['lightAA', 'rifleman', 'rifleman', 'technical'],
+    2: ['twin23', 'manpads', 'lightAA', 'apc', 'rifleman'],
+    3: ['shilka', 'sam', 'lightAA', 'tank', 'rifleman'],
+    4: ['heavyAA', 'sam', 'shilka', 'tank', 'aaTruck', 'manpads'],
   };
   const classes = classesByAct[act] || classesByAct[4];
   const radius = 90 + act * 12;
@@ -420,7 +455,7 @@ function drawGunship(ctx, h) {
 const projectiles = GameState.projectiles; // shared
 const explosions = GameState.explosions; // shared
 
-function spawnProjectile(x, y, angle, speed, damage, isEnemy = false, life = 2.0) {
+function spawnProjectile(x, y, angle, speed, damage, isEnemy = false, life = 2.0, kind = 'bullet') {
   projectiles.push({
     x,
     y,
@@ -429,6 +464,7 @@ function spawnProjectile(x, y, angle, speed, damage, isEnemy = false, life = 2.0
     damage,
     isEnemy,
     life,
+    kind,
     trail: [],
   });
 }
@@ -603,6 +639,7 @@ function spawnBoss() {
   boss.size = profile?.final ? 30 : groundBoss ? 24 : 22;
   boss.name = profile?.name || 'HIND PURSUIT GUNSHIP';
   boss.type = profile?.type || 'pursuit_gunship';
+  boss.className = boss.type;
   boss.bodyguards = profile?.bodyguards || 0;
   boss.bodyguardsSpawned = false;
   boss.turretAngle = angle + Math.PI;
@@ -1053,20 +1090,25 @@ function objectiveHudText() {
 function collectSupplyCrates() {
   if (!world?.supplyCrates) return;
   for (const crate of world.supplyCrates) {
-    if (crate.collected || crate.objectiveHidden || Math.hypot(crate.x - heli.x, crate.y - heli.y) > 24)
+    if (crate.collected || crate.objectiveHidden || Math.hypot(crate.x - heli.x, crate.y - heli.y) > (heli.lootRadius || 24))
       continue;
     crate.collected = true;
     sortieState.stats.crates++;
-    if (!GameState.isPracticeSortie()) sortieState.rewards.supplies += 60;
-    GameState.addSortieDollars(60);
+    const pay = Math.round(60 * (heli.lootMult || 1) * (heli.lootJackpot && Math.random() < 0.22 ? 2 : 1));
+    if (!GameState.isPracticeSortie()) sortieState.rewards.supplies += pay;
+    GameState.addSortieDollars(pay);
     addHeat(1.5, 'supply recovery reported');
-    if (crate.rewardType === 'repair') {
+    let reward = crate.rewardType;
+    if (heli.lootQuality && reward === 'repair' && Math.random() < 0.45) {
+      reward = Math.random() < 0.5 ? 'damage' : 'speed';
+    }
+    if (reward === 'repair') {
       heli.hp = Math.min(heli.maxHp, heli.hp + 25);
       spawnFloatingText(crate.x, crate.y - 12, 'FIELD REPAIR +25', '#44ff44');
-    } else if (crate.rewardType === 'damage') {
+    } else if (reward === 'damage') {
       heli.bulletDamage *= 1.2;
       spawnFloatingText(crate.x, crate.y - 12, 'AMMO UPGRADE', '#ffcc44');
-    } else if (crate.rewardType === 'speed') {
+    } else if (reward === 'speed') {
       heli.maxSpeed *= 1.12;
       heli.accel *= 1.12;
       spawnFloatingText(crate.x, crate.y - 12, 'TURBINE BOOST', '#44ddff');
@@ -1238,30 +1280,48 @@ registerScreen('title', {
     const brandMaxW = split ? L.content.w * 0.5 : Math.min(L.content.w, w * 0.86);
     const wordBottom = drawTitleWordmark(ctx, brandCx, brandCy, titleSize, brandMaxW);
 
+    const c = GameState.career || metaState.career;
+    const unlocked = achievementCount(c);
     const entries = [
       { label: 'OPERATIONS', sub: 'SELECT CONTRACT', target: 'contracts' },
       {
         label: 'PRACTICE',
-        sub: 'NO PILOT RISK · NO REWARDS',
-        target: 'contracts',
+        sub: 'SANDBOX BAY · ALL AIRFRAMES',
+        target: 'hangar',
         sortieMode: 'practice',
       },
       { label: 'HANGAR', sub: 'BUY CHOPPER PARTS', target: 'hangar' },
-      { label: 'SKILLS', sub: 'LEVEL & TALENTS', target: 'pilot' },
+      { label: 'SKILLS', sub: 'PILOT TALENTS', target: 'pilot' },
       { label: 'DOSSIERS', sub: 'KNOWN CONTACTS', target: 'dossiers' },
+      {
+        label: 'ACHIEVEMENTS',
+        sub: `${unlocked} / ${ACHIEVEMENTS.length} UNLOCKED`,
+        target: 'achievements',
+      },
     ];
     const menuW = split ? Math.min(340, L.content.w * 0.44) : Math.min(400, L.content.w);
     const menuX = split ? L.content.x + L.content.w - menuW : (w - menuW) / 2;
-    const btnH = L.btnH;
-    const stackH = entries.length * btnH + (entries.length - 1) * L.btnGap;
-    let my = split
-      ? Math.max(L.content.y + 8, (h - L.footerH - stackH) / 2 - 8)
-      : wordBottom + (L.phone ? 22 : 32);
+    const menuBottom = h - L.footerH - (c ? 52 : 10);
+    let my = split ? L.content.y + 8 : wordBottom + (L.phone ? 16 : 24);
+    const gap0 = L.btnGap;
+    let btnH = L.btnH;
+    let gap = gap0;
+    const fit = (height, g) => entries.length * height + (entries.length - 1) * g;
+    const avail = Math.max(180, menuBottom - my);
+    if (fit(btnH, gap) > avail) {
+      gap = Math.min(gap, 8);
+      btnH = Math.max(38, Math.floor((avail - (entries.length - 1) * gap) / entries.length));
+    }
+    const stackH = fit(btnH, gap);
+    if (split) my = Math.max(L.content.y + 8, (h - L.footerH - stackH) / 2 - 8);
 
     GameState.titleMenuBoxes.length = 0;
     for (const entry of entries) {
       const rect = { x: menuX, y: my, w: menuW, h: btnH };
-      drawMenuButton(ctx, rect, { label: entry.label, sub: entry.sub });
+      drawMenuButton(ctx, rect, {
+        label: entry.label,
+        sub: btnH >= 48 ? entry.sub : undefined,
+      });
       GameState.titleMenuBoxes.push({
         ...rect,
         action: 'screen',
@@ -1270,18 +1330,18 @@ registerScreen('title', {
         label: entry.label,
         sub: entry.sub,
       });
-      my += btnH + L.btnGap;
+      my += btnH + gap;
     }
 
-    const c = GameState.career || metaState.career;
     if (c) {
-      ctx.font = `bold ${L.phone ? 12 : 13}px "Courier New", monospace`;
+      ctx.font = `bold ${L.phone ? 15 : 16}px "Courier New", monospace`;
       ctx.fillStyle = P.ui.text;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
       ctx.fillText(`${c.pilot.name}  ·  LV ${c.pilot.level}`, menuX + menuW / 2, my + 10);
       ctx.fillStyle = '#ffcc44';
-      ctx.fillText(`$${c.dollars}`, menuX + menuW / 2, my + 30);
+      ctx.font = `bold ${L.phone ? 20 : 22}px "Courier New", monospace`;
+      ctx.fillText(`$${c.dollars}`, menuX + menuW / 2, my + 32);
     }
 
     drawFooterStrip(ctx, w, h);
@@ -1539,7 +1599,11 @@ registerScreen('debrief', {
     if (showPilot) {
       const pair = footerPairRects(L, { backLabel: 'SKILLS ▸', primaryMinW: 200 });
       drawMenuButton(ctx, pair.back, { label: 'SKILLS ▸', kind: 'accent' });
-      drawMenuButton(ctx, pair.primary, { label: 'CAMPAIGN', kind: 'primary', blink: blink2 });
+      drawMenuButton(ctx, pair.primary, {
+        label: practice ? 'HANGAR' : 'CAMPAIGN',
+        kind: 'primary',
+        blink: blink2,
+      });
       debriefPilotBox = pair.back;
       debriefNextBox = pair.primary;
     } else {
@@ -1550,7 +1614,11 @@ registerScreen('debrief', {
         w: Math.min(280, L.content.w),
         h: L.btnH,
       };
-      drawMenuButton(ctx, next, { label: 'CAMPAIGN', kind: 'primary', blink: blink2 });
+      drawMenuButton(ctx, next, {
+        label: practice ? 'HANGAR' : 'CAMPAIGN',
+        kind: 'primary',
+        blink: blink2,
+      });
       debriefNextBox = next;
     }
     ctx.restore();
@@ -1614,7 +1682,9 @@ function drawRadarSweep(ctx, cx, cy, radius, tSec) {
 function drawScreenBackground(ctx, cam, title, subtitle = '') {
   ctx.save();
   ctx.scale(cam.dpr, cam.dpr);
-  paintScreenBackdrop(ctx, cam.screenW, cam.screenH, title, subtitle);
+  const L = paintScreenBackdrop(ctx, cam.screenW, cam.screenH, title, subtitle);
+  const c = GameState.career || metaState.career;
+  if (c && Number.isFinite(c.dollars)) drawHeaderDollars(ctx, L, c.dollars);
   ctx.restore();
 }
 
@@ -1679,7 +1749,7 @@ function drawContractCard(ctx, card, rect, selected = false) {
   ctx.font = 'bold 15px "Courier New", monospace';
   ctx.fillText(card.name, rect.x + 14, rect.y + 6);
   ctx.fillStyle = P.ui.textDim;
-  ctx.font = '10px "Courier New", monospace';
+  ctx.font = '12px "Courier New", monospace';
   ctx.textAlign = 'right';
   ctx.fillText(`NO.${String(card.seed % 97).padStart(2, '0')}`, rect.x + rect.w - 12, rect.y + 9);
   ctx.textAlign = 'left';
@@ -1688,10 +1758,10 @@ function drawContractCard(ctx, card, rect, selected = false) {
   ctx.fillText(card.objectiveLabel, rect.x + 14, rect.y + 28);
   const intelN = card.intelCount || 1;
   ctx.fillStyle = '#44ddff';
-  ctx.font = 'bold 12px "Courier New", monospace';
+  ctx.font = 'bold 13px "Courier New", monospace';
   ctx.fillText(`INTEL ${intelN}  →  TARGET  →  EXTRACT`, rect.x + 14, rect.y + 48);
   ctx.fillStyle = P.ui.text;
-  ctx.font = '11px "Courier New", monospace';
+  ctx.font = '12px "Courier New", monospace';
   const lines = wrapText(card.description, Math.max(22, Math.floor((rect.w - 26) / 6.6)));
   ctx.fillText(lines[0] || '', rect.x + 14, rect.y + 64);
   if (lines[1] && rect.h > 168) ctx.fillText(lines[1], rect.x + 14, rect.y + 78);
@@ -1782,7 +1852,9 @@ registerScreen('contracts', {
       drawContractCard(ctx, GameState.contractBoard[i], contractCardRect(i, w, h));
     }
     const L = layoutOf(w, h);
-    const nav = footerNavRects(L, ['◂ CAMPAIGN', 'HANGAR', 'SKILLS']);
+    const nav = GameState.isPracticeSortie()
+      ? footerNavRects(L, ['◂ HANGAR', 'SKILLS'])
+      : footerNavRects(L, ['◂ CAMPAIGN', 'HANGAR', 'SKILLS']);
     contractsNavBoxes = [];
     for (const rect of nav) {
       drawMenuButton(ctx, rect, { label: rect.label });
@@ -1853,7 +1925,7 @@ registerScreen('briefing', {
     const intelN = GameState.activeContract?.intelCount || 1;
     const intelWord = intelN === 1 ? 'INTEL SITE' : 'INTEL SITES';
     ctx.fillStyle = P.ui.textDim;
-    ctx.font = 'bold 11px "Courier New", monospace';
+    ctx.font = 'bold 13px "Courier New", monospace';
     y += 6;
     ctx.fillText('PLAN OF ACTION', leftX + pad, y);
     y += 18;
@@ -1874,7 +1946,7 @@ registerScreen('briefing', {
     }
 
     ctx.fillStyle = P.ui.text;
-    ctx.font = `${L.compact ? 10 : 11}px "Courier New", monospace`;
+    ctx.font = `${L.compact ? 12 : 13}px "Courier New", monospace`;
     y += 6;
     const blurb = wrapTextPx(ctx, scenario.description, leftW - pad * 2);
     for (const line of blurb.slice(0, L.compact ? 2 : 3)) {
@@ -1893,10 +1965,10 @@ registerScreen('briefing', {
     y += 10;
     for (const [label, value] of meta) {
       ctx.fillStyle = P.ui.textDim;
-      ctx.font = '11px "Courier New", monospace';
+      ctx.font = '13px "Courier New", monospace';
       ctx.fillText(label, leftX + pad, y);
       ctx.fillStyle = label === 'PAY' ? '#ffcc44' : P.ui.text;
-      ctx.font = 'bold 11px "Courier New", monospace';
+      ctx.font = 'bold 13px "Courier New", monospace';
       const valueLines = wrapTextPx(ctx, value, leftW - pad * 2 - 92);
       ctx.fillText(valueLines[0], leftX + pad + 92, y);
       y += 18;
@@ -1913,12 +1985,12 @@ registerScreen('briefing', {
     const eqPanelH = split ? colH : panelH - infoH - gap;
     drawPanel(ctx, eqPanelX, eqPanelY, eqPanelW, eqPanelH);
     ctx.fillStyle = P.ui.textDim;
-    ctx.font = 'bold 11px "Courier New", monospace';
+    ctx.font = 'bold 13px "Courier New", monospace';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     ctx.fillText('FIELD EQUIPMENT', eqPanelX + pad, eqPanelY + 14);
     ctx.fillStyle = P.ui.text;
-    ctx.font = '10px "Courier New", monospace';
+    ctx.font = '12px "Courier New", monospace';
     ctx.fillText('One kit. Press E in the air.', eqPanelX + pad, eqPanelY + 30);
 
     const eqKeys = Object.keys(EQUIPMENT);
@@ -1952,7 +2024,7 @@ registerScreen('briefing', {
       ctx.font = 'bold 13px "Courier New", monospace';
       ctx.fillText(EQUIPMENT[key].name, bx + 12, by + Math.max(8, eqH * 0.18));
       ctx.fillStyle = P.ui.textDim;
-      ctx.font = '11px "Courier New", monospace';
+      ctx.font = '12px "Courier New", monospace';
       ctx.fillText(EQUIPMENT[key].desc, bx + 12, by + Math.max(28, eqH * 0.52));
       ctx.restore();
       GameState.briefingEquipmentBoxes.push({ x: bx, y: by, w: eqW, h: eqH, key });
@@ -2020,7 +2092,14 @@ registerScreen('sortie', {
     } catch (e) {
       console.error('[Gunship] initWorld failed', e);
       const seed = GameState.activeContract?.seed ?? 42;
-      const fallback = generateWorld({ seed, contract: GameState.activeContract });
+      const fallback = generateWorld({
+        seed,
+        contract: GameState.activeContract,
+        act: GameState.isPracticeSortie()
+          ? 4
+          : GameState.activeContract?.campaign?.act || GameState.career?.campaign?.act || 1,
+        practice: GameState.isPracticeSortie(),
+      });
       fallback.debugWorldgen = debugWorldgen;
       world = fallback;
       terrainNoise = createNoise(seed);
@@ -2096,6 +2175,7 @@ registerScreen('sortie', {
         apc: '#7a7a5a',
         shilka: '#5a5a4a',
         sam: '#5a6a5a',
+        aaTruck: '#6a5038',
       };
       for (const convoy of world.convoys) {
         if (!convoy.active || convoy.objectiveHidden) continue;
@@ -2218,8 +2298,10 @@ registerScreen('sortie', {
       // Trail
       ctx.strokeStyle = p.isEnemy
         ? withAlpha(P.projectile.enemyTrail, 0.4)
-        : withAlpha(P.projectile.bulletTrail, 0.4);
-      ctx.lineWidth = 2;
+        : p.kind === 'missile'
+          ? withAlpha(P.projectile.missileTrail || '#aa6633', 0.55)
+          : withAlpha(P.projectile.bulletTrail, 0.4);
+      ctx.lineWidth = p.kind === 'missile' ? 3.2 : 2;
       if (p.trail.length > 1) {
         ctx.beginPath();
         ctx.moveTo(p.trail[0].x, p.trail[0].y);
@@ -2227,10 +2309,13 @@ registerScreen('sortie', {
         ctx.lineTo(p.x, p.y);
         ctx.stroke();
       }
-      // Bullet
-      ctx.fillStyle = p.isEnemy ? P.projectile.enemy : P.projectile.bullet;
+      ctx.fillStyle = p.isEnemy
+        ? P.projectile.enemy
+        : p.kind === 'missile'
+          ? P.projectile.missile || '#ff8844'
+          : P.projectile.bullet;
       ctx.beginPath();
-      ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, p.kind === 'missile' ? 4.2 : 2.5, 0, Math.PI * 2);
       ctx.fill();
     }
 
@@ -2332,12 +2417,13 @@ registerScreen('sortie', {
       (world.objective.type === 'suppression' || (intel && !intel.complete))
     );
     const sysH =
-      46 +
-      nToggles * 16 +
-      (practice ? 16 : 0) +
-      (equipReady ? 16 : 0) +
-      objWrap.length * 14 +
-      (showProgress ? 14 : 0) +
+      52 +
+      nToggles * 18 +
+      (practice ? 18 : 0) +
+      (equipReady ? 18 : 0) +
+      (heli.hasMissiles ? 18 : 0) +
+      objWrap.length * 16 +
+      (showProgress ? 16 : 0) +
       8;
 
     // Centre stack drops below the side plates on narrow screens.
@@ -2360,7 +2446,9 @@ registerScreen('sortie', {
       const hpPctV = heli.hp / heli.maxHp;
       if (hpPctV < 0.35) {
         const pulse = 0.75 + 0.25 * Math.sin(performance.now() / 160);
-        const a = (1 - hpPctV / 0.35) * 0.38 * pulse * (1 - (heli.redScreenRed || 0));
+        const a = heli.noFlinch
+          ? 0
+          : (1 - hpPctV / 0.35) * 0.38 * pulse * (1 - (heli.redScreenRed || 0));
         const vg = ctx.createRadialGradient(
           W / 2,
           H / 2,
@@ -2670,7 +2758,7 @@ registerScreen('sortie', {
       plateHeader(ctx, px, py, pw, 'SYSTEMS');
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
-      ctx.font = 'bold 10px "Courier New", monospace';
+      ctx.font = 'bold 12px "Courier New", monospace';
       // Mode-colored targeting readout
       const modeCol =
         { closest: P.ui.text, strongest: '#ff8844', infrastructure: '#44cccc' }[heli.targetMode] ||
@@ -2679,28 +2767,38 @@ registerScreen('sortie', {
         { closest: 'CLOSEST', strongest: 'STRONGEST', infrastructure: 'INFRA' }[heli.targetMode] ||
         'CLOSEST';
       ctx.fillStyle = modeCol;
-      ctx.fillText(`TGT ${modeLabel}`, px + 14, py + 22);
+      ctx.fillText(`TGT ${modeLabel}`, px + 14, py + 24);
       if (!narrow) {
         ctx.fillStyle = P.ui.textDim;
-        ctx.fillText('[SHIFT/V]', px + 108, py + 22);
+        ctx.fillText('[SHIFT/V]', px + 120, py + 24);
       }
-      let ty = py + 40;
+      let ty = py + 44;
       if (practice) {
         ctx.fillStyle = '#ffcc44';
         ctx.fillText('PRACTICE · NO REWARDS', px + 14, ty);
-        ty += 16;
+        ty += 18;
       }
       for (let i = 0; i < nToggles; i++) {
         ctx.fillStyle = P.ui.rocket;
         ctx.fillText(i === 0 && input.autofire ? 'AUTOFIRE' : 'CLICK-TARGET', px + 14, ty);
-        ty += 16;
+        ty += 18;
       }
       if (equipReady) {
         ctx.fillStyle = '#44cccc';
         ctx.fillText(`E · ${EQUIPMENT[heli.equipmentType].name}`, px + 14, ty);
-        ty += 16;
+        ty += 18;
       }
-      ctx.font = 'bold 10px "Courier New", monospace';
+      if (heli.hasMissiles) {
+        const ready = (heli.missileCooldown || 0) <= 0;
+        ctx.fillStyle = ready ? '#ff8844' : P.ui.textDim;
+        ctx.fillText(
+          ready ? 'MSL READY' : `MSL ${Math.ceil(heli.missileCooldown)}s`,
+          px + 14,
+          ty
+        );
+        ty += 18;
+      }
+      ctx.font = 'bold 12px "Courier New", monospace';
       for (const line of objWrap) {
         ctx.fillStyle = sortieState.objectiveComplete ? '#44ddff' : '#ffcc44';
         ctx.fillText(line, px + 14, ty);
@@ -3288,13 +3386,23 @@ canvas.addEventListener('click', (e) => {
   const h = cam.screenH * cam.dpr;
   if (currentScreen === screens.hangar) {
     const r = handleHangarClick(pos.x, pos.y, cam.dpr);
-    if (r === 'back') switchScreen(metaReturnScreen);
+    if (r === 'back') {
+      if (isSandboxCareer(GameState.career)) switchScreen('title');
+      else switchScreen(metaReturnScreen);
+    }
+    if (r === 'ops') {
+      GameState.setSortieMode('practice');
+      switchScreen('contracts');
+    }
     if (r === 'skills') switchScreen('pilot');
     return;
   }
   if (currentScreen === screens.pilot) {
     const r = handlePilotClick(pos.x, pos.y, cam.dpr);
-    if (r === 'back') switchScreen(metaReturnScreen);
+    if (r === 'back') {
+      if (isSandboxCareer(GameState.career) && metaReturnScreen === 'title') switchScreen('hangar');
+      else switchScreen(metaReturnScreen);
+    }
     if (r === 'hangar') switchScreen('hangar');
     return;
   }
@@ -3309,6 +3417,11 @@ canvas.addEventListener('click', (e) => {
       metaReturnScreen = 'dossiers';
       switchScreen('pilot');
     }
+    return;
+  }
+  if (currentScreen === screens.achievements) {
+    const r = handleAchievementsClick(pos.x, pos.y, cam.dpr);
+    if (r === 'back') switchScreen('title');
     return;
   }
   if (currentScreen === screens.splash) {
@@ -3327,7 +3440,9 @@ canvas.addEventListener('click', (e) => {
           toggleSettings();
           return;
         }
-        if (box.target === 'contracts') GameState.setSortieMode(box.sortieMode || 'campaign');
+        if (box.sortieMode === 'practice') enterSandbox();
+        else exitSandbox();
+        if (box.target === 'contracts') GameState.setSortieMode('campaign');
         metaReturnScreen = 'title';
         switchScreen(box.target);
         return;
@@ -3337,12 +3452,12 @@ canvas.addEventListener('click', (e) => {
   } else if (currentScreen === screens.contracts) {
     for (const box of contractsNavBoxes) {
       if (!posInBox(pos, box, cam.dpr)) continue;
-      if (box.label === 'HANGAR') {
-        metaReturnScreen = 'contracts';
+      if (box.label.includes('HANGAR')) {
+        metaReturnScreen = isSandboxCareer(GameState.career) ? 'title' : 'contracts';
         switchScreen('hangar');
         return;
       }
-      if (box.label === 'SKILLS') {
+      if (box.label.includes('SKILLS')) {
         metaReturnScreen = 'contracts';
         switchScreen('pilot');
         return;
@@ -3377,7 +3492,9 @@ canvas.addEventListener('click', (e) => {
       switchScreen('pilot');
       return;
     }
-    if (posInBox(pos, debriefNextBox, cam.dpr)) switchScreen('title');
+    if (posInBox(pos, debriefNextBox, cam.dpr)) {
+      switchScreen(GameState.isPracticeSortie() ? 'hangar' : 'title');
+    }
   }
 });
 
@@ -3391,11 +3508,16 @@ canvas.addEventListener('touchstart', (e) => {
   );
 });
 
+initPwa({
+  isSafeToReload: () => currentScreen !== screens.sortie || sortieState.status !== 'active',
+});
+
 adoptCareer(bootCareer());
 registerScreen('splash', splashScreen);
 registerScreen('hangar', hangarScreen);
 registerScreen('pilot', pilotScreen);
 registerScreen('dossiers', dossiersScreen);
+registerScreen('achievements', achievementsScreen);
 
 switchScreen('splash');
 console.log('[Gunship] starting loop');

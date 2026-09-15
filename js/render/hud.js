@@ -17,7 +17,7 @@ export function hudPlate(ctx, x, y, w, h, accent = 'rgba(90,140,80,0.55)') {
 }
 
 export function plateHeader(ctx, px, py, pw, title, accent = P.ui.textDim) {
-  ctx.font = 'bold 8px "Courier New", monospace';
+  ctx.font = 'bold 12px "Courier New", monospace';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
   ctx.fillStyle = accent;
@@ -85,7 +85,7 @@ export function drawOffscreenMarker(ctx, cam, w, h, wx, wy, color, textColor, ta
   const distKm = (Math.hypot(cam.x - wx, cam.y - wy) / 1000).toFixed(1);
   const label = tag ? `${tag} · ${distKm} km` : `${distKm} km`;
   ctx.fillStyle = textColor;
-  ctx.font = 'bold 10px "Courier New", monospace';
+  ctx.font = 'bold 12px "Courier New", monospace';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(label, ax - Math.cos(ang) * 30, ay - Math.sin(ang) * 30);

@@ -892,8 +892,9 @@ function drawMainRotor(ctx, h, spec) {
     ctx.lineTo(x1, y1);
     ctx.stroke();
     if (spec.swept) {
-      const tx = Math.cos(a + 0.28) * len * 0.12 * scale;
-      const ty = Math.sin(a + 0.28) * ry * 0.12;
+      const tip = len * 0.12;
+      const tx = Math.cos(a + 0.28) * tip;
+      const ty = Math.sin(a + 0.28) * tip * VIEW25.deckRatio;
       ctx.beginPath();
       ctx.moveTo(x1, y1);
       ctx.lineTo(x1 + tx, y1 + ty);

@@ -130,7 +130,7 @@ export function getConvoyMembers(convoy) {
   let offset = 0;
   for (let i = 0; i < (convoy.composition || []).length; i++) {
     const cls = convoy.composition[i];
-    const isVeh = cls === 'technical' || cls === 'apc' || cls === 'shilka' || cls === 'sam';
+    const isVeh = cls === 'technical' || cls === 'apc' || cls === 'shilka' || cls === 'sam' || cls === 'aaTruck';
     offset += isVeh ? CONVOY_GAP_VEH : CONVOY_GAP_INF;
     const dirSign = convoy.direction >= 0 ? 1 : -1;
     const p = pointAlongRoute(convoy, convoy.s - offset * dirSign);

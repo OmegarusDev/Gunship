@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Deterministic structural checks for Geometry-First Gulf Worldgen V4.
 import { generateWorld } from '../js/world.js';
+import { classMinAct } from '../js/data/enemyClasses.js';
 
 let pass = 0;
 let fail = 0;
@@ -107,6 +108,17 @@ for (const seed of seeds) {
     `${label}: large town present`
   );
   ok(Number.isFinite(world.hour) && world.hour >= 0 && world.hour < 24, `${label}: sortie hour`);
+  ok(world.act === 1, `${label}: campaign act stamped`);
+  const spawned = [
+    ...world.encounters.flatMap((encounter) => encounter.roster.map((entry) => entry.className)),
+    ...(world.convoys || []).flatMap((convoy) => convoy.composition || []),
+  ];
+  for (const className of spawned) {
+    ok(
+      classMinAct(className) <= 1,
+      `${label}: ${className} must not spawn in act 1`
+    );
+  }
   ok(
     world.places.some(
       (place) =>
@@ -214,6 +226,36 @@ for (const seed of seeds) {
 }
 
 ok(profiles.size >= 3, `regional variety: saw ${profiles.size} profiles (${[...profiles].join(', ')})`);
+
+{
+  const late = new Set();
+  for (let i = 0; i < 16; i++) {
+    const seed = 9001 + i * 41;
+    const world = generateWorld({
+      seed,
+      contract: {
+        seed,
+        scenarioId: 'strike',
+        styleId: 'precision_strike',
+        difficultyId: 'standard',
+        campaign: { act: 4, sortie: 1 },
+      },
+    });
+    ok(world.act === 4, `act-4 seed ${seed}: act stamped`);
+    for (const encounter of world.encounters) {
+      for (const entry of encounter.roster) late.add(entry.className);
+    }
+    for (const convoy of world.convoys || []) {
+      for (const className of convoy.composition || []) late.add(className);
+    }
+  }
+  ok(late.has('manpads'), 'act 4 field roster includes MANPADS');
+  ok(late.has('twin23') || late.has('aaTruck') || late.has('shilka'), 'act 4 field roster includes mid/late AA');
+  ok(
+    late.has('shilka') || late.has('tank') || late.has('sam') || late.has('heavyAA'),
+    `act 4 field roster includes heavy kit (${[...late].join(', ')})`
+  );
+}
 
 console.log(`\nWorldgen check: ${pass} passed, ${fail} failed across ${seeds.length} seeds`);
 if (fail) {
