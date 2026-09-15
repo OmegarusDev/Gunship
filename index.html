@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-title" content="Gunship">
   <meta name="application-name" content="Gunship">
   <meta name="description" content="Helicopter combat roguelite. Take the contract, fly the op, extract.">
-  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="manifest" href="./manifest.json">
   <link rel="icon" href="./icons/favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
   <title>Gunship: Freedom Protocol</title>
@@ -19,8 +19,20 @@
 </head>
 <body>
   <canvas id="game"></canvas>
-  <button id="pwa-install" class="pwa-chip hidden" type="button">INSTALL APP</button>
-  <button id="pwa-update" class="pwa-chip hidden" type="button">UPDATE READY — TAP</button>
+  <div id="pwa-chrome" class="pwa-chrome hidden">
+    <button id="pwa-install" class="pwa-chip hidden" type="button">HOW TO INSTALL</button>
+    <button id="pwa-fullscreen" class="pwa-chip hidden" type="button">FULLSCREEN</button>
+  </div>
+  <button id="pwa-update" class="pwa-chip pwa-chip-update hidden" type="button">UPDATE READY — TAP</button>
+  <div id="pwa-install-help" class="pwa-help hidden">
+    <div class="pwa-help-card" role="dialog" aria-labelledby="pwa-help-title">
+      <h2 id="pwa-help-title">INSTALL GUNSHIP</h2>
+      <p><strong>Chrome / Edge (Android &amp; desktop):</strong> tap the install icon in the address bar, or open the browser menu and choose <em>Install app</em> / <em>Cast, save, and share → Install page as app</em>.</p>
+      <p><strong>iPhone / iPad:</strong> Safari → Share → Add to Home Screen.</p>
+      <p>The installed app launches fullscreen.</p>
+      <button id="pwa-install-help-close" type="button">OK</button>
+    </div>
+  </div>
   <script type="module">
     import('./js/app.js').catch(e => {
       console.error('[Gunship BOOT]', e);

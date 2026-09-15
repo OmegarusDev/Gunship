@@ -2,6 +2,7 @@
 // Deterministic structural checks for Geometry-First Gulf Worldgen V4.
 import { generateWorld } from '../js/world.js';
 import { classMinAct } from '../js/data/enemyClasses.js';
+import { worldSizeForAct } from '../js/config.js';
 
 let pass = 0;
 let fail = 0;
@@ -99,6 +100,7 @@ for (const seed of seeds) {
   const label = `seed ${seed}`;
 
   ok(world.worldGenVersion === 4, `${label}: v4 world`);
+  ok(world.worldSize === worldSizeForAct(1), `${label}: act 1 operational area`);
   ok(!('sites' in world), `${label}: no legacy sites`);
   ok(canonical(world) === canonical(again), `${label}: deterministic canonical geometry`);
   ok(world.places.length >= 12 && world.places.length <= 18, `${label}: 12–18 destinations`);
@@ -242,6 +244,7 @@ ok(profiles.size >= 3, `regional variety: saw ${profiles.size} profiles (${[...p
       },
     });
     ok(world.act === 4, `act-4 seed ${seed}: act stamped`);
+    ok(world.worldSize === worldSizeForAct(4), `act-4 seed ${seed}: larger operational area`);
     for (const encounter of world.encounters) {
       for (const entry of encounter.roster) late.add(entry.className);
     }

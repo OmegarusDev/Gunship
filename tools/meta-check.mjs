@@ -22,6 +22,7 @@ import {
   aggregateModifiers,
   loadCareer,
   saveCareer,
+  wipeAllSaves,
   GUNSHIPS,
   GUNSHIP_ORDER,
   syncGunshipUnlocks,
@@ -354,6 +355,8 @@ console.log('— save/load roundtrip (memory shim) —');
   const loaded = loadCareer();
   ok(loaded && loaded.dollars === 321, 'career persists to localStorage');
   ok(loaded.pilot.name === c.pilot.name, 'pilot survives roundtrip');
+  wipeAllSaves();
+  ok(loadCareer() === null, 'wipeAllSaves clears persisted career');
 }
 
 console.log('— practice sandbox —');

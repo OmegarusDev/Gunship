@@ -21,15 +21,15 @@ It boots straight into the game — no setup.
 
 ## Mobile / install (PWA)
 
-Install as a fullscreen app (standalone window, no URL bar) from the live game page — not from the GitHub README itself. On Android Chrome that install is a WebAPK.
+Install as a fullscreen app from the live game page — not from the GitHub README itself. On Android Chrome that install is a WebAPK.
 
 1. Open [omegarusdev.github.io/Gunship](https://omegarusdev.github.io/Gunship/) (the PLAY button).
 2. Install from that page:
-   - **Android Chrome:** address-bar install icon, **INSTALL APP** chip, or menu → Install app / Add to Home screen
-   - **iPhone/iPad (Safari):** Share → Add to Home Screen
-3. Later launches use the home-screen icon. Pushes to `main` deploy a new Pages build; the installed app picks it up (auto-refresh when you’re not mid-sortie, or an **UPDATE READY** tap if you are).
+   - **Chrome / Edge:** **HOW TO INSTALL** at the top of the hub (or **INSTALL APP** if Chrome can prompt), or the browser menu → Install app
+   - **iPhone/iPad (Safari):** Share → Add to Home Screen (or **HOW TO INSTALL** for the steps)
+3. Later launches use the home-screen icon. The installed app opens fullscreen. Pushes to `main` deploy a new Pages build; the installed app picks it up (auto-refresh when you’re not mid-sortie, or an **UPDATE READY** tap if you are).
 
-Fullscreen is only the installed WebAPK / home-screen app. A desktop or browser tab never goes fullscreen on click. Portrait and landscape both work.
+A desktop or browser tab never goes fullscreen on a random click. Use **FULLSCREEN** on the hub, or open Options (the cog, top-left on menu screens) in every version — including the installed app.
 
 ## Controls
 

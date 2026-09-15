@@ -85,6 +85,18 @@ try {
   );
   const optionsBox = titleBoxes.find((box) => box.action === 'options');
   assert.ok(optionsBox, 'campaign hub exposes Options');
+  assert.ok(
+    !titleBoxes.some((box) => box.action === 'install'),
+    'install is a hub chip, not a menu row'
+  );
+  const hubChrome = await page.evaluate(() => ({
+    install: !document.getElementById('pwa-install')?.classList.contains('hidden'),
+    fullscreen: !document.getElementById('pwa-fullscreen')?.classList.contains('hidden'),
+    installLabel: document.getElementById('pwa-install')?.textContent || '',
+  }));
+  assert.equal(hubChrome.install, true, 'hub shows How to Install chip');
+  assert.match(hubChrome.installLabel, /INSTALL/i);
+  assert.equal(hubChrome.fullscreen, true, 'hub shows Fullscreen chip');
   const practiceBox = titleBoxes.find((box) => box.sortieMode === 'practice');
   assert.ok(practiceBox, 'campaign hub exposes Practice mode');
   assert.match(practiceBox.sub, /SANDBOX/);
@@ -94,6 +106,13 @@ try {
   );
   await page.mouse.click(practiceBox.x + practiceBox.w / 2, practiceBox.y + practiceBox.h / 2);
   await wait(150);
+
+  const hangarChrome = await page.evaluate(() => ({
+    install: !document.getElementById('pwa-install')?.classList.contains('hidden'),
+    fullscreen: !document.getElementById('pwa-fullscreen')?.classList.contains('hidden'),
+  }));
+  assert.equal(hangarChrome.install, false, 'How to Install is hub-only');
+  assert.equal(hangarChrome.fullscreen, false, 'Fullscreen chip is hub-only');
 
   const practiceRoute = await page.evaluate(async (url) => {
     const state = await import(url);
@@ -136,6 +155,13 @@ try {
     { stateUrl, appUrl: `http://127.0.0.1:${port}/js/app.js` }
   );
   await wait(300);
+
+  const practiceSortie = await page.evaluate(async (url) => {
+    const state = await import(url);
+    return { worldSize: state.world?.worldSize, act: state.world?.act };
+  }, stateUrl);
+  assert.equal(practiceSortie.act, 4, 'Practice uses the late-act roster');
+  assert.equal(practiceSortie.worldSize, 21000, 'Practice flies the act 4 map');
 
   const practiceOutcome = await page.evaluate(
     async ({ stateUrl: statePath, appUrl }) => {
@@ -223,13 +249,15 @@ try {
         defenses: state.enemies.filter((enemy) => enemy.strongholdDefense).length,
         targetHidden: !!state.world?.objective?.target?.objectiveHidden,
         intelRequired: state.world?.objective?.intel?.required || 0,
+        worldSize: state.world?.worldSize,
       };
     },
     { stateUrl, appUrl: `http://127.0.0.1:${port}/js/app.js`, contractsUrl }
   );
   assert.equal(strongholdRoute.stronghold, true, 'Act 4 sortie 4 routes to a stronghold');
   assert.equal(strongholdRoute.finalBoss, true, 'Act 4 stronghold carries the final boss');
-  assert.equal(strongholdRoute.timer, 300, 'stronghold starts its dedicated timer');
+  assert.equal(strongholdRoute.timer, 270, 'stronghold starts its dedicated timer');
+  assert.equal(strongholdRoute.worldSize, 21000, 'act 4 stronghold uses the largest map');
   assert.equal(strongholdRoute.bossSpawned, true, 'stronghold commander is present at launch');
   assert.ok(strongholdRoute.bodyguards > 0, 'stronghold commander receives bodyguards');
   assert.equal(strongholdRoute.targetHidden, true, 'stronghold target stays hidden until intel');

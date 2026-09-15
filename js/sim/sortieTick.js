@@ -2,12 +2,13 @@
  * Sortie simulation tick. Screens stay in app.js; this module owns the
  * active-operation loop: targeting, flight, contacts, Hunter, convoys.
  */
-import { CAMERA, TIMER, WORLD_SIZE, HELI } from '../config.js';
+import { CAMERA, TIMER, HELI, playableLimit, extractBound } from '../config.js';
 import { recordDossierKill } from '../meta.js';
 import { clamp } from '../rng.js';
 import { updateEnemies } from './enemyAi.js';
 import * as GameState from './gameState.js';
 import { pickAutoTarget, pickClickedTarget, resolveLiveTarget } from './targeting.js';
+import { syncRosterDeath } from './objectives.js';
 
 function lerp(a, b, t) {
   return a + (b - a) * t;
@@ -209,7 +210,7 @@ export function tickSortie(dt, deps) {
 
   heli.x += heli.vx * dt;
   heli.y += heli.vy * dt;
-  const boundLim = world?.extraction?.active ? WORLD_SIZE * 0.55 : WORLD_SIZE * 0.48;
+  const boundLim = world?.extraction?.active ? extractBound(world) : playableLimit(world);
   heli.x = clamp(heli.x, -boundLim, boundLim);
   heli.y = clamp(heli.y, -boundLim, boundLim);
   heli.bladeAngle += 18 * dt;
@@ -448,8 +449,8 @@ export function tickSortie(dt, deps) {
       }
     }
 
-    boss.x = clamp(boss.x, -WORLD_SIZE * 0.48, WORLD_SIZE * 0.48);
-    boss.y = clamp(boss.y, -WORLD_SIZE * 0.48, WORLD_SIZE * 0.48);
+    boss.x = clamp(boss.x, -playableLimit(world), playableLimit(world));
+    boss.y = clamp(boss.y, -playableLimit(world), playableLimit(world));
     if (boss.flashTimer > 0) boss.flashTimer -= dt;
   }
 
@@ -555,6 +556,7 @@ export function tickSortie(dt, deps) {
           if (e.hp <= 0) {
             e.state = 'dead';
             e.deathTimer = 0.5;
+            syncRosterDeath(world, e);
             heli.score += e.points;
             GameState.addSortieXp(e.points);
             sortieState.stats.kills++;

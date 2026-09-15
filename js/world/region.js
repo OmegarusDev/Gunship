@@ -315,7 +315,7 @@ function scoreCandidate(candidate, type, category, scale, terrain, axes, worldSi
 
 function placeAnchor(type, index, profile, terrain, axes, worldSize, placed, rng) {
   const meta = ANCHOR_META[type];
-  const scaleFactor = clamp(worldSize / 6000, 0.58, 1.35);
+  const scaleFactor = clamp(worldSize / 7200, 0.9, 2.05);
   const scale = randomBetween(rng, meta.scale[0], meta.scale[1]) * scaleFactor;
   let best = null;
   let bestScore = -Infinity;
@@ -494,7 +494,7 @@ function buildLandUse(profile, anchors, terrain, rng) {
 /**
  * Choose one grounded regional profile and emit typed physical demand anchors.
  */
-export function generateRegion(seed, worldSize, terrain) {
+export function generateRegion(seed, worldSize, terrain, act = 1) {
   const rng = mulberry32(deriveSeed(seed, 'region-profile'));
   const profiles = Object.values(REGION_PROFILES);
   const profile = profiles[Math.floor(rng() * profiles.length)];
@@ -540,7 +540,8 @@ export function generateRegion(seed, worldSize, terrain) {
     },
   };
 
-  const targetCount = randomInt(rng, 14, 17);
+  const extra = Math.max(0, (Math.floor(act) || 1) - 1) * 2;
+  const targetCount = randomInt(rng, 14 + extra, 17 + extra);
   const typePlan = buildTypePlan(profile.id, targetCount, rng);
   const anchors = [];
   for (let index = 0; index < typePlan.length; index++) {

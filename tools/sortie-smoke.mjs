@@ -21,8 +21,13 @@ import {
   gainXp,
   aggregateModifiers,
 } from '../js/meta.js';
-import { WORLD_SIZE } from '../js/config.js';
-import { objectiveComplete as simObjectiveComplete, intelProgress } from '../js/sim/objectives.js';
+import { playableLimit, worldSizeForAct } from '../js/config.js';
+import {
+  objectiveComplete as simObjectiveComplete,
+  intelProgress,
+  canExtract as simCanExtract,
+  syncRosterDeath,
+} from '../js/sim/objectives.js';
 import { revealObjectiveTarget } from '../js/world/generateV4.js';
 
 let pass = 0,
@@ -41,12 +46,7 @@ function objectiveComplete(world) {
   return simObjectiveComplete(world);
 }
 function canExtract(world, heli) {
-  const lim = WORLD_SIZE * 0.48;
-  return (
-    Boolean(world.extraction && world.extraction.active) &&
-    objectiveComplete(world) &&
-    (Math.abs(heli.x) > lim || Math.abs(heli.y) > lim)
-  );
+  return simCanExtract(world, heli);
 }
 function secureIntel(world) {
   const intel = world.objective?.intel;
@@ -166,11 +166,68 @@ for (const scenarioId of Object.keys(SCENARIOS)) {
     // extraction becomes available once objective done, and is geometrically reachable
     world.extraction.active = true;
     const heli = baseHeli();
-    heli.x = WORLD_SIZE * 0.48 + 50; // crossed the map edge
-    ok(canExtract(world, heli), `[${scenarioId}/${seed}] extraction reachable at map edge`);
+    heli.x = playableLimit(world);
+    ok(canExtract(world, heli), `[${scenarioId}/${seed}] extraction reachable at the border`);
   }
 }
 ok(scenarioCount === Object.keys(SCENARIOS).length, 'all scenarios covered');
+
+{
+  const world = {
+    worldSize: worldSizeForAct(1),
+    objective: {
+      type: 'suppression',
+      revealed: true,
+      requiredCount: 3,
+      intel: { required: 0, holders: [] },
+    },
+    encounters: [
+      {
+        roster: [
+          { id: 'aa-1', objectiveTarget: true, state: 'idle' },
+          { id: 'aa-2', objectiveTarget: true, state: 'idle' },
+          { id: 'aa-3', objectiveTarget: true, state: 'idle' },
+        ],
+      },
+    ],
+    extraction: { active: false },
+  };
+  const corpses = [
+    { id: 'aa-1', objectiveTarget: true, state: 'dead' },
+    { id: 'aa-2', objectiveTarget: true, state: 'dead' },
+    { id: 'aa-3', objectiveTarget: true, state: 'dead' },
+  ];
+  for (const enemy of corpses) syncRosterDeath(world, enemy);
+  ok(objectiveComplete(world, corpses), 'suppression completes while wrecks remain');
+  ok(objectiveComplete(world, []), 'suppression still completes after wrecks despawn');
+  world.objective.complete = true;
+  world.extraction.active = true;
+  ok(
+    canExtract(world, { x: playableLimit(world), y: 0 }),
+    'heli sitting on the playable wall can extract'
+  );
+}
+
+for (const act of [1, 2, 3, 4]) {
+  const seed = 4242;
+  const world = generateWorld({
+    seed,
+    contract: {
+      scenarioId: 'strike',
+      styleId: STYLE,
+      difficultyId: DIFF,
+      seed,
+      campaign: { act, sortie: 1 },
+    },
+  });
+  ok(world.worldSize === worldSizeForAct(act), `act ${act} operational area is ${worldSizeForAct(act)}`);
+}
+ok(
+  worldSizeForAct(4) > worldSizeForAct(3) &&
+    worldSizeForAct(3) > worldSizeForAct(2) &&
+    worldSizeForAct(2) > worldSizeForAct(1),
+  'later acts use strictly larger maps'
+);
 
 // ── 2. Career meta pipeline (what the debrief consumes) ─────────────────────
 const career = createCareer(12345);

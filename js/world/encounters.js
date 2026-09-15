@@ -4,6 +4,7 @@
  * A town can be neutral, partly occupied, or host several contacts. Clearing
  * one encounter never changes the identity of the physical place.
  */
+import { WORLD_SIZE } from '../config.js';
 import { mulberry32 } from '../rng.js';
 import { deriveSeed, pointAlongPolyline, cumulativePolylineLengths } from './geometry.js';
 import { classMinAct, isVehicleClass } from '../data/enemyClasses.js';
@@ -283,9 +284,10 @@ function roadPatrolCandidate(roads, index, rng) {
   return { road, point };
 }
 
-export function generateEncounters(seed, places, districts, buildings, roads, act = 1) {
+export function generateEncounters(seed, places, districts, buildings, roads, act = 1, worldSize = WORLD_SIZE) {
   const rng = mulberry32(deriveSeed(seed, 'encounters'));
-  const targetCount = integer(rng, 10, 14);
+  const extra = Math.max(0, (Math.floor(act) || 1) - 1) * 2;
+  const targetCount = integer(rng, 10 + extra, 14 + extra);
   const encounters = [];
   const usedDistricts = new Set();
   let encounterNumber = 1;
@@ -310,10 +312,11 @@ export function generateEncounters(seed, places, districts, buildings, roads, ac
     .sort((a, b) => b.priority - a.priority);
 
   const selected = [];
+  const minCenter = Math.max(520, worldSize * 0.085);
   const farEnough = (candidate) => {
     const x = candidate.district?.x ?? candidate.place.x;
     const y = candidate.district?.y ?? candidate.place.y;
-    return Math.hypot(x, y) >= 520;
+    return Math.hypot(x, y) >= minCenter;
   };
   for (const candidate of mandatory) {
     if (selected.length >= targetCount - 2) break;
@@ -370,7 +373,7 @@ export function generateEncounters(seed, places, districts, buildings, roads, ac
   while (encounters.length < targetCount && patrolAttempts++ < 240) {
     const candidate = roadPatrolCandidate(roads, patrolIndex++, rng);
     if (!candidate) break;
-    if (Math.hypot(candidate.point.x, candidate.point.y) < 520) continue;
+    if (Math.hypot(candidate.point.x, candidate.point.y) < minCenter) continue;
     if (
       encounters.some(
         (encounter) =>
@@ -413,10 +416,10 @@ export function generateEncounters(seed, places, districts, buildings, roads, ac
     const t = 0.12 + ((fallbackAttempts * 0.17) % 0.76);
     fallbackAttempts++;
     let point = pointAlongPolyline(road.points, total * t, cumulative);
-    if (Math.hypot(point.x, point.y) < 520) {
+    if (Math.hypot(point.x, point.y) < minCenter) {
       point = pointAlongPolyline(road.points, total * ((t + 0.37) % 1), cumulative);
     }
-    if (Math.hypot(point.x, point.y) < 520) continue;
+    if (Math.hypot(point.x, point.y) < minCenter) continue;
     const id = nextId();
     const encounter = {
       id,

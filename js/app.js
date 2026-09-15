@@ -3,7 +3,16 @@
  */
 console.log('[Gunship] app.js loading...');
 
-import { SIM_DT, WORLD_SIZE, TIMER, HUD, HELI } from './config.js';
+import {
+  SIM_DT,
+  WORLD_SIZE,
+  TIMER,
+  HUD,
+  HELI,
+  worldSizeForAct,
+  playableLimit,
+  extractBound,
+} from './config.js';
 import { WorldCamera } from './camera.js';
 import { Input } from './input.js';
 import { P, mats } from './palette.js';
@@ -17,7 +26,6 @@ import { generateWorld } from './world.js';
 import { createTerrain } from './terrain.js';
 import {
   drawCornerBrackets,
-  drawBackButton,
   drawMenuButton,
   drawPanel,
   layoutOf,
@@ -31,7 +39,9 @@ import {
   applyMenuHitTransform,
   paintMenuGlow,
   drawHeaderDollars,
-  drawFooterStrip,
+  drawHeaderCog,
+  clearHeaderCog,
+  lastHeaderCogRect,
 } from './appBridge.js';
 import {
   metaState,
@@ -48,6 +58,7 @@ import {
   ACHIEVEMENTS,
   achievementCount,
   skillRank,
+  wipeAllSaves,
 } from './meta.js';
 import {
   hangarScreen,
@@ -60,13 +71,14 @@ import {
   handleAchievementsClick,
 } from './screens_meta.js';
 import { splashScreen, bootCareer } from './screens_flow.js';
-import { initPwa } from './pwa.js';
+import { initPwa, promptInstall, toggleFullscreen, isDomFullscreen, setPwaSurface, layoutPwaChrome } from './pwa.js';
 import { createEnemyFromRoster } from './data/enemies.js';
 import {
   createContractBoard,
   getDifficulty as getDifficultyProfile,
   getScenario,
   getStyle,
+  CAMPAIGN_RULES,
 } from './contracts.js';
 import { createUpgradeChoices } from './upgrades.js';
 import {
@@ -90,6 +102,8 @@ import {
   nearestExitPoint as _nearestExitPoint,
   intelProgress as _intelProgress,
   objectiveHudText as _objectiveHudText,
+  suppressionProgress as _suppressionProgress,
+  syncRosterDeath as _syncRosterDeath,
 } from './sim/objectives.js';
 import { revealObjectiveTarget } from './world/generateV4.js';
 import {
@@ -128,6 +142,16 @@ const input = new Input(canvas);
 
 const screens = {};
 let currentScreen = null;
+let currentScreenName = '';
+let settingsOpen = false;
+let settingsHitBoxes = [];
+let settingsPanelBox = null;
+let resetConfirmOpen = false;
+let resetHoldStart = 0;
+let resetHoldBox = null;
+let resetConfirmPanel = null;
+let resetConfirmHitBoxes = [];
+const RESET_HOLD_MS = 1400;
 
 export function registerScreen(name, screen) {
   screens[name] = screen;
@@ -136,8 +160,10 @@ export function registerScreen(name, screen) {
 export function switchScreen(name, data) {
   if (name === 'title') exitSandbox();
   if (currentScreen && currentScreen.exit) currentScreen.exit();
+  currentScreenName = name;
   currentScreen = screens[name];
   if (currentScreen && currentScreen.enter) currentScreen.enter(data);
+  setPwaSurface({ screen: name, settingsOpen });
 }
 
 function adoptCareer(career) {
@@ -205,6 +231,7 @@ function loop(now) {
       inside: input.mouseOnScreen,
     });
     if (currentScreen && currentScreen.draw) {
+      clearHeaderCog();
       currentScreen.draw(camera.ctx, camera, dt);
     }
     input.draw(camera.ctx);
@@ -212,8 +239,10 @@ function loop(now) {
     GameState.setLastFps(fps);
 
     // ── Settings overlay ──
+    if (resetConfirmOpen) updateResetHold();
     if (settingsOpen) {
       drawSettings(camera.ctx, camera);
+      if (resetConfirmOpen) drawResetConfirm(camera.ctx, camera);
     }
     canvas.style.cursor =
       currentScreen !== screens.sortie || settingsOpen || sortieState.levelUpOpen
@@ -233,7 +262,6 @@ function lerp(a, b, t) {
   return a + (b - a) * t;
 }
 
-let settingsOpen = false;
 const IS_TOUCH = typeof window !== 'undefined' && 'ontouchstart' in window;
 // Sortie clock, FPS, equipment, and gunfire memory live on GameState.
 
@@ -280,6 +308,12 @@ function getConvoyMembers(convoy) {
 
 function toggleSettings() {
   settingsOpen = !settingsOpen;
+  if (!settingsOpen) {
+    resetConfirmOpen = false;
+    resetHoldStart = 0;
+    resetHoldBox = null;
+  }
+  setPwaSurface({ screen: currentScreenName, settingsOpen });
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -314,14 +348,19 @@ function initWorld(contract = null) {
   const seed = Number.isFinite(worldgenSeedOverride)
     ? worldgenSeedOverride
     : (contract?.seed ?? 42);
-  sharedTerrain = createTerrain(seed, WORLD_SIZE);
+  const act = GameState.isPracticeSortie()
+    ? 4
+    : contract?.campaign?.act || GameState.career?.campaign?.act || 1;
+  const worldSize = worldSizeForAct(act);
+  sharedTerrain = createTerrain(seed, worldSize);
   world = generateWorld({
     seed,
     contract,
     terrain: sharedTerrain,
     luck: skillRank(GameState.career?.pilot, 'luck'),
-    act: GameState.isPracticeSortie() ? 4 : contract?.campaign?.act || GameState.career?.campaign?.act || 1,
+    act,
     practice: GameState.isPracticeSortie(),
+    worldSize,
   });
   world.debugWorldgen = debugWorldgen;
   _roadSegsCache = null;
@@ -393,7 +432,8 @@ function spawnStrongholdDefenses() {
 function getDifficultyForEnemy(worldX, worldY) {
   const dist = Math.hypot(worldX, worldY);
   const difficulty = getDifficultyProfile(GameState.activeContract?.difficultyId);
-  return (1 + dist / 2500) * difficulty.radialMultiplier;
+  const radial = (world?.worldSize || WORLD_SIZE) * (2500 / 6000);
+  return (1 + dist / radial) * difficulty.radialMultiplier;
 }
 
 function applyEnemyDifficulty(enemy) {
@@ -484,7 +524,8 @@ const floatingTexts = GameState.floatingTexts; // shared // CLEAR! popups and da
 function getDifficulty(worldX, worldY) {
   const dist = Math.hypot(worldX, worldY);
   const difficulty = getDifficultyProfile(GameState.activeContract?.difficultyId);
-  return (1 + dist / 2500) * difficulty.radialMultiplier;
+  const radial = (world?.worldSize || WORLD_SIZE) * (2500 / 6000);
+  return (1 + dist / radial) * difficulty.radialMultiplier;
 }
 
 /** Discover an occupied district or field position and activate its hidden roster. */
@@ -519,6 +560,10 @@ function discoverEncounter(encounter) {
 /** Check if an individual contact has been secured. */
 function checkEncounterClear(encounter) {
   if (encounter.cleared) return false;
+  const pendingObjective = (encounter.roster || []).some(
+    (entry) => entry.objectiveTarget && entry.state !== 'dead' && !entry.destroyed
+  );
+  if (pendingObjective) return false;
   const alive = enemies.filter(
     (enemy) =>
       enemy.encounterId === encounter.id && enemy.className !== 'unarmed' && enemy.state !== 'dead'
@@ -612,7 +657,7 @@ function spawnBoss() {
   const seed = GameState.activeContract?.seed ?? 42;
   const rng = mulberry32((seed + 8800) >>> 0);
   const angle = rng() * Math.PI * 2;
-  const spawnDist = WORLD_SIZE * 0.55; // just outside playable area
+  const spawnDist = extractBound(world);
   boss.x = Math.cos(angle) * spawnDist;
   boss.y = Math.sin(angle) * spawnDist;
   boss.spawnAngle = angle;
@@ -716,7 +761,7 @@ function resetSortieState() {
   sortieState.rewards.hunter = 0;
   sortieState.rewards.secured = 0;
   sortieState.strongholdTimeRemaining = GameState.activeContract?.stronghold
-    ? GameState.activeContract.strongholdTime || 300
+    ? GameState.activeContract.strongholdTime || CAMPAIGN_RULES.strongholdTime
     : 0;
   sortieState.stats.kills = 0;
   sortieState.stats.crates = 0;
@@ -919,6 +964,7 @@ function damageWorldTarget(target, damage, x, y) {
           if (e.hp <= 0) {
             e.state = 'dead';
             e.deathTimer = 0.5;
+            _syncRosterDeath(world, e);
             heli.score += e.points;
             sortieState.stats.kills++;
             spawnFloatingText(e.x, e.y - 10, `+${e.points}`, '#ffcc44');
@@ -1030,7 +1076,7 @@ function spawnOutdoorHiddenObjective() {
   const difficulty = getDifficultyForEnemy(heli.x, heli.y);
   for (const encounter of world.encounters) {
     for (const entry of encounter.roster) {
-      if (entry.isIndoor || !entry.objectiveTarget || entry.active) continue;
+      if (!entry.objectiveTarget || entry.active) continue;
       const enemy = createEnemyFromRoster(entry, 0, 0, getDifficultyForEnemy(entry.x, entry.y) || difficulty);
       if (!enemy) continue;
       enemy.encounterId = encounter.id;
@@ -1068,17 +1114,10 @@ function checkObjectiveProgress() {
   const intel = _intelProgress(world);
   if (!intel.complete) return;
   if (!world.objective.revealed) revealMissionTarget();
-  const objective = world.objective;
-  if (objective.type === 'suppression') {
-    const targetEnemies = enemies.filter((enemy) => enemy.objectiveTarget);
-    const destroyed = targetEnemies.filter((enemy) => enemy.state === 'dead').length;
-    objective.progress = destroyed;
-    if (destroyed >= objective.requiredCount) completeObjective();
-  } else if (objective.type === 'recovery') {
-    if (objective.target?.collected) completeObjective();
-  } else if (objective.target && !objective.target.objectiveHidden && !isTargetAlive(objective.target)) {
-    completeObjective();
+  if (world.objective.type === 'suppression') {
+    world.objective.progress = _suppressionProgress(world, enemies).dead;
   }
+  if (_objectiveComplete(world, enemies)) completeObjective();
 }
 
 function objectiveHudText() {
@@ -1090,7 +1129,12 @@ function objectiveHudText() {
 function collectSupplyCrates() {
   if (!world?.supplyCrates) return;
   for (const crate of world.supplyCrates) {
-    if (crate.collected || crate.objectiveHidden || Math.hypot(crate.x - heli.x, crate.y - heli.y) > (heli.lootRadius || 24))
+    if (
+      crate.collected ||
+      crate.objectiveHidden ||
+      Math.hypot(crate.x - heli.x, crate.y - heli.y) >
+        (crate.objective ? Math.max(heli.lootRadius || 24, 40) : heli.lootRadius || 24)
+    )
       continue;
     crate.collected = true;
     sortieState.stats.crates++;
@@ -1120,22 +1164,18 @@ function collectSupplyCrates() {
   }
 }
 
-/** Extraction = cross the map boundary after the objective. */
+/** Extraction = reach the map boundary after the objective. */
 function updateExtraction(dt) {
   void dt;
-  if (
-    !world?.extraction?.active ||
-    !sortieState.objectiveComplete ||
-    sortieState.status !== 'active'
-  )
-    return;
-  const lim = WORLD_SIZE * 0.48;
-  if (Math.abs(heli.x) > lim || Math.abs(heli.y) > lim) finishSortie('complete');
+  if (sortieState.status !== 'active') return;
+  if (!_canExtract(world, heli, enemies)) return;
+  if (!sortieState.objectiveComplete) completeObjective();
+  if (sortieState.objectiveComplete) finishSortie('complete');
 }
 
 /** Nearest boundary exit from the helicopter, with compass cardinal. */
 function nearestExitPoint() {
-  return _nearestExitPoint(heli);
+  return _nearestExitPoint(heli, world);
 }
 
 function finishSortie(status) {
@@ -1301,30 +1341,35 @@ registerScreen('title', {
     ];
     const menuW = split ? Math.min(340, L.content.w * 0.44) : Math.min(400, L.content.w);
     const menuX = split ? L.content.x + L.content.w - menuW : (w - menuW) / 2;
-    const menuBottom = h - L.footerH - (c ? 52 : 10);
+    const menuBottom = h - L.pad - L.inset.b - (c ? 52 : 10);
     let my = split ? L.content.y + 8 : wordBottom + (L.phone ? 16 : 24);
     const gap0 = L.btnGap;
-    let btnH = L.btnH;
+    let btnH = L.phone ? 62 : 66;
     let gap = gap0;
     const fit = (height, g) => entries.length * height + (entries.length - 1) * g;
     const avail = Math.max(180, menuBottom - my);
     if (fit(btnH, gap) > avail) {
       gap = Math.min(gap, 8);
-      btnH = Math.max(38, Math.floor((avail - (entries.length - 1) * gap) / entries.length));
+      btnH = Math.max(52, Math.floor((avail - (entries.length - 1) * gap) / entries.length));
     }
     const stackH = fit(btnH, gap);
-    if (split) my = Math.max(L.content.y + 8, (h - L.footerH - stackH) / 2 - 8);
+    if (split) my = Math.max(L.content.y + 8, (h - stackH) / 2 - 8);
 
     GameState.titleMenuBoxes.length = 0;
+    L.headerMetaY = L.inset.t + Math.max(10, (L.headerH - L.inset.t - 32) * 0.4);
+    layoutPwaChrome(L);
+    const cogRect = drawHeaderCog(ctx, L);
+    GameState.titleMenuBoxes.push({ ...cogRect, action: 'options' });
     for (const entry of entries) {
       const rect = { x: menuX, y: my, w: menuW, h: btnH };
       drawMenuButton(ctx, rect, {
         label: entry.label,
-        sub: btnH >= 48 ? entry.sub : undefined,
+        sub: btnH >= 50 ? entry.sub : undefined,
+        prominent: true,
       });
       GameState.titleMenuBoxes.push({
         ...rect,
-        action: 'screen',
+        action: entry.action || 'screen',
         target: entry.target,
         sortieMode: entry.sortieMode,
         label: entry.label,
@@ -1344,9 +1389,6 @@ registerScreen('title', {
       ctx.fillText(`$${c.dollars}`, menuX + menuW / 2, my + 32);
     }
 
-    drawFooterStrip(ctx, w, h);
-    const optionsRect = drawBackButton(ctx, w, h, 'OPTIONS');
-    GameState.titleMenuBoxes.push({ ...optionsRect, action: 'options' });
     ctx.restore();
   },
 });
@@ -2092,13 +2134,15 @@ registerScreen('sortie', {
     } catch (e) {
       console.error('[Gunship] initWorld failed', e);
       const seed = GameState.activeContract?.seed ?? 42;
+      const act = GameState.isPracticeSortie()
+        ? 4
+        : GameState.activeContract?.campaign?.act || GameState.career?.campaign?.act || 1;
       const fallback = generateWorld({
         seed,
         contract: GameState.activeContract,
-        act: GameState.isPracticeSortie()
-          ? 4
-          : GameState.activeContract?.campaign?.act || GameState.career?.campaign?.act || 1,
+        act,
         practice: GameState.isPracticeSortie(),
+        worldSize: worldSizeForAct(act),
       });
       fallback.debugWorldgen = debugWorldgen;
       world = fallback;
@@ -2644,7 +2688,7 @@ registerScreen('sortie', {
       );
       // Time-remaining underline (normalized against base timer)
       const baseT = Math.max(1, TIMER.baseTime);
-      const frac = clamp(remaining / (strongholdClock ? 300 : baseT), 0, 1);
+      const frac = clamp(remaining / (strongholdClock ? CAMPAIGN_RULES.strongholdTime : baseT), 0, 1);
       ctx.fillStyle = urgent ? 'rgba(255,68,68,0.8)' : 'rgba(120,180,100,0.6)';
       ctx.fillRect(bx + 8, by + 20, (bw - 16) * frac, 2);
     }
@@ -2988,7 +3032,7 @@ registerScreen('sortie', {
       }
       // Extraction = leave the map: highlight the nearest map edge
       if (world.extraction?.active) {
-        const lim = WORLD_SIZE * 0.48;
+        const lim = playableLimit(world);
         const ep = nearestExitPoint();
         ctx.strokeStyle = '#44ddff';
         ctx.lineWidth = 2.5;
@@ -3232,7 +3276,6 @@ function drawSettings(ctx, cam) {
   ctx.save();
   ctx.scale(dpr, dpr);
 
-  // Dimmed backdrop
   ctx.fillStyle = 'rgba(0,0,0,0.6)';
   ctx.fillRect(0, 0, w, h);
 
@@ -3240,15 +3283,18 @@ function drawSettings(ctx, cam) {
   const cx = w / 2,
     cy = h / 2;
   const panelW = Math.min(460, L.content.w);
-  const panelH = Math.min(360, h - L.pad * 2);
+  const panelH = Math.min(420, h - L.pad * 2);
+  const panelX = cx - panelW / 2;
+  const panelY = cy - panelH / 2;
+  settingsPanelBox = { x: panelX, y: panelY, w: panelW, h: panelH };
+  settingsHitBoxes = [];
   ctx.fillStyle = '#0a1a0a';
-  ctx.fillRect(cx - panelW / 2, cy - panelH / 2, panelW, panelH);
+  ctx.fillRect(panelX, panelY, panelW, panelH);
   ctx.strokeStyle = '#3a5a2a';
   ctx.lineWidth = 2;
-  ctx.strokeRect(cx - panelW / 2, cy - panelH / 2, panelW, panelH);
-  drawCornerBrackets(ctx, cx - panelW / 2, cy - panelH / 2, panelW, panelH, P.ui.borderHi, 14, 2);
+  ctx.strokeRect(panelX, panelY, panelW, panelH);
+  drawCornerBrackets(ctx, panelX, panelY, panelW, panelH, P.ui.borderHi, 14, 2);
 
-  // Title
   ctx.fillStyle = P.ui.textBright;
   ctx.font = 'bold 16px "Courier New", monospace';
   ctx.textAlign = 'center';
@@ -3256,21 +3302,22 @@ function drawSettings(ctx, cam) {
   ctx.fillText(
     currentScreen === screens.sortie ? 'PAUSE — SETTINGS' : 'SETTINGS',
     cx,
-    cy - panelH / 2 + 14
+    panelY + 14
   );
 
   ctx.strokeStyle = '#3a5a2a';
   ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.moveTo(cx - 100, cy - panelH / 2 + 38);
-  ctx.lineTo(cx + 100, cy - panelH / 2 + 38);
+  ctx.moveTo(cx - 100, panelY + 38);
+  ctx.lineTo(cx + 100, panelY + 38);
   ctx.stroke();
 
-  const optX = cx - panelW / 2 + 24;
-  let optY = cy - panelH / 2 + 52;
-  const lineH = 36;
+  const optX = panelX + 24;
+  let optY = panelY + 52;
+  const rowW = panelW - 48;
 
-  function drawOption(label, enabled) {
+  function drawToggle(label, enabled, action) {
+    settingsHitBoxes.push({ x: optX, y: optY, w: rowW, h: 28, action });
     ctx.fillStyle = '#1a2a1a';
     ctx.fillRect(optX, optY, 22, 22);
     ctx.strokeStyle = enabled ? P.ui.textBright : '#446633';
@@ -3280,49 +3327,167 @@ function drawSettings(ctx, cam) {
       ctx.fillStyle = P.ui.textBright;
       ctx.fillRect(optX + 5, optY + 5, 12, 12);
     }
-    // Label
     ctx.fillStyle = P.ui.text;
     ctx.font = '12px "Courier New", monospace';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     ctx.fillText(label, optX + 32, optY + 4);
-    optY += lineH;
+    optY += 36;
   }
 
-  drawOption('Autofire (F key)', input.autofire);
-  drawOption('Click to Target (T key)', input.clickToTarget);
-  optY += 8;
+  function drawAction(label, action, accent = P.ui.textBright) {
+    const rect = { x: optX, y: optY, w: rowW, h: 36, action };
+    settingsHitBoxes.push(rect);
+    ctx.fillStyle = '#132214';
+    ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+    ctx.strokeStyle = '#3a5a2a';
+    ctx.lineWidth = 1.2;
+    ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
+    ctx.fillStyle = accent;
+    ctx.font = 'bold 13px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2 + 0.5);
+    optY += 44;
+  }
 
-  // Abandon option (in-sortie only)
+  drawToggle('Autofire (F key)', input.autofire, 'autofire');
+  drawToggle('Click to Target (T key)', input.clickToTarget, 'clickTarget');
+  drawToggle('Fullscreen', isDomFullscreen(), 'fullscreen');
+  drawAction('RESET SAVE', 'resetSave', '#ff6644');
+
   if (currentScreen === screens.sortie && sortieState.status === 'active') {
     ctx.fillStyle = '#ff7744';
     ctx.font = 'bold 12px "Courier New", monospace';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     ctx.fillText('Q — ABANDON SORTIE', optX, optY);
-    optY += lineH;
+    settingsHitBoxes.push({ x: optX, y: optY, w: rowW, h: 28, action: 'abandon' });
+    optY += 36;
   }
 
-  // Close hint
   ctx.fillStyle = P.ui.textDim;
   ctx.font = '11px "Courier New", monospace';
   ctx.textAlign = 'center';
-  ctx.fillText('Press ESC or P to close', cx, cy + panelH / 2 - 24);
+  ctx.fillText('Press ESC or P to close', cx, panelY + panelH - 22);
 
-  // Controls reference
-  ctx.fillStyle = P.ui.textDim;
-  ctx.font = '10px "Courier New", monospace';
-  ctx.textAlign = 'left';
-  const refX = cx - panelW / 2 + 24;
-  optY = cy + panelH / 2 - 70;
-  ctx.fillText('Mouse: steer', refX, optY);
-  optY += 16;
-  ctx.fillText('Click / Space: fire', refX, optY);
-  optY += 16;
-  ctx.fillText('Shift: cycle target', refX, optY);
-  optY += 16;
-  ctx.fillText('WASD: move', refX, optY);
-  optY += 16;
+  ctx.restore();
+}
+
+function resetHoldProgress() {
+  if (!resetHoldStart) return 0;
+  return clamp((performance.now() - resetHoldStart) / RESET_HOLD_MS, 0, 1);
+}
+
+function updateResetHold() {
+  if (!resetConfirmOpen || !resetHoldBox) {
+    resetHoldStart = 0;
+    return;
+  }
+  const over =
+    input.mouseOnScreen &&
+    input.mouseX >= resetHoldBox.x &&
+    input.mouseX <= resetHoldBox.x + resetHoldBox.w &&
+    input.mouseY >= resetHoldBox.y &&
+    input.mouseY <= resetHoldBox.y + resetHoldBox.h;
+  if (input.pointerDown && over) {
+    if (!resetHoldStart) resetHoldStart = performance.now();
+    if (performance.now() - resetHoldStart >= RESET_HOLD_MS) performSaveReset();
+  } else {
+    resetHoldStart = 0;
+  }
+}
+
+function performSaveReset() {
+  resetConfirmOpen = false;
+  resetHoldStart = 0;
+  resetHoldBox = null;
+  settingsOpen = false;
+  campaignCareerHold = null;
+  if (sortieState.status === 'active') sortieState.status = 'abandoned';
+  wipeAllSaves();
+  adoptCareer(bootCareer());
+  setPwaSurface({ screen: 'title', settingsOpen: false });
+  switchScreen('title');
+}
+
+function drawResetConfirm(ctx, cam) {
+  const dpr = cam.dpr;
+  const w = cam.screenW;
+  const h = cam.screenH;
+  ctx.save();
+  ctx.scale(dpr, dpr);
+
+  ctx.fillStyle = 'rgba(0,0,0,0.72)';
+  ctx.fillRect(0, 0, w, h);
+
+  const L = layoutOf(w, h);
+  const panelW = Math.min(420, L.content.w);
+  const panelH = Math.min(280, h - L.pad * 2);
+  const panelX = (w - panelW) / 2;
+  const panelY = (h - panelH) / 2;
+  resetConfirmPanel = { x: panelX, y: panelY, w: panelW, h: panelH };
+  resetConfirmHitBoxes = [];
+
+  ctx.fillStyle = '#140c0a';
+  ctx.fillRect(panelX, panelY, panelW, panelH);
+  ctx.strokeStyle = '#aa4433';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(panelX, panelY, panelW, panelH);
+  drawCornerBrackets(ctx, panelX, panelY, panelW, panelH, '#ff6644', 14, 2);
+
+  ctx.fillStyle = '#ff8866';
+  ctx.font = 'bold 16px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillText('RESET SAVE', w / 2, panelY + 18);
+
+  ctx.fillStyle = P.ui.text;
+  ctx.font = '13px "Courier New", monospace';
+  const lines = [
+    'This permanently deletes all save data',
+    '— career, hangar, pilots, and progress.',
+    'This cannot be undone.',
+  ];
+  let ty = panelY + 52;
+  for (const line of lines) {
+    ctx.fillText(line, w / 2, ty);
+    ty += 18;
+  }
+
+  const btnW = panelW - 48;
+  const btnH = 40;
+  const hold = { x: panelX + 24, y: panelY + panelH - 24 - btnH * 2 - 10, w: btnW, h: btnH };
+  const cancel = { x: panelX + 24, y: panelY + panelH - 24 - btnH, w: btnW, h: btnH };
+  resetHoldBox = hold;
+  resetConfirmHitBoxes.push({ ...cancel, action: 'cancelReset' });
+
+  const progress = resetHoldProgress();
+  ctx.fillStyle = '#2a1210';
+  ctx.fillRect(hold.x, hold.y, hold.w, hold.h);
+  if (progress > 0) {
+    ctx.fillStyle = 'rgba(204, 51, 34, 0.85)';
+    ctx.fillRect(hold.x, hold.y, hold.w * progress, hold.h);
+  }
+  ctx.strokeStyle = '#cc5533';
+  ctx.lineWidth = 1.2;
+  ctx.strokeRect(hold.x, hold.y, hold.w, hold.h);
+  ctx.fillStyle = '#ffccbb';
+  ctx.font = 'bold 13px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(
+    progress > 0 ? 'HOLDING…' : 'HOLD TO CONFIRM',
+    hold.x + hold.w / 2,
+    hold.y + hold.h / 2 + 0.5
+  );
+
+  ctx.fillStyle = '#132214';
+  ctx.fillRect(cancel.x, cancel.y, cancel.w, cancel.h);
+  ctx.strokeStyle = '#3a5a2a';
+  ctx.strokeRect(cancel.x, cancel.y, cancel.w, cancel.h);
+  ctx.fillStyle = P.ui.textBright;
+  ctx.fillText('CANCEL', cancel.x + cancel.w / 2, cancel.y + cancel.h / 2 + 0.5);
 
   ctx.restore();
 }
@@ -3378,7 +3543,41 @@ canvas.addEventListener('click', (e) => {
 
   const pos = getCanvasClickPos(e);
   const cam = camera;
+  if (resetConfirmOpen) {
+    for (const box of resetConfirmHitBoxes) {
+      if (!posInBox(pos, box, cam.dpr)) continue;
+      if (box.action === 'cancelReset') {
+        resetConfirmOpen = false;
+        resetHoldStart = 0;
+        resetHoldBox = null;
+      }
+      return;
+    }
+    if (!resetConfirmPanel || !posInBox(pos, resetConfirmPanel, cam.dpr)) {
+      resetConfirmOpen = false;
+      resetHoldStart = 0;
+      resetHoldBox = null;
+    }
+    return;
+  }
   if (settingsOpen) {
+    for (const box of settingsHitBoxes) {
+      if (!posInBox(pos, box, cam.dpr)) continue;
+      if (box.action === 'autofire') input.autofire = !input.autofire;
+      else if (box.action === 'clickTarget') input.clickToTarget = !input.clickToTarget;
+      else if (box.action === 'fullscreen') toggleFullscreen();
+      else if (box.action === 'install') promptInstall();
+      else if (box.action === 'resetSave') {
+        resetConfirmOpen = true;
+        resetHoldStart = 0;
+      }
+      else if (box.action === 'abandon') abandonSortie();
+      return;
+    }
+    if (!settingsPanelBox || !posInBox(pos, settingsPanelBox, cam.dpr)) toggleSettings();
+    return;
+  }
+  if (lastHeaderCogRect() && posInBox(pos, lastHeaderCogRect(), cam.dpr)) {
     toggleSettings();
     return;
   }
@@ -3438,6 +3637,14 @@ canvas.addEventListener('click', (e) => {
       ) {
         if (box.action === 'options') {
           toggleSettings();
+          return;
+        }
+        if (box.action === 'install') {
+          promptInstall();
+          return;
+        }
+        if (box.action === 'fullscreen') {
+          toggleFullscreen();
           return;
         }
         if (box.sortieMode === 'practice') enterSandbox();

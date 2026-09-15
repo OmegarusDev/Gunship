@@ -2,7 +2,7 @@
  * sim/objectives.js — objective predicates & extraction helpers.
  * Pure over world/boss/enemies — no DOM, no canvas. Shared by app.js and tools/.
  */
-import { WORLD_SIZE } from '../config.js';
+import { playableLimit } from '../config.js';
 import { isRosterStub, resolveLiveTarget, resolveObjectiveAim } from './targeting.js';
 
 export function isAlive(target) {
@@ -36,33 +36,57 @@ export function intelProgress(world) {
   return { required, secured, complete: required <= 0 || secured >= required };
 }
 
+/** Persist a kill onto the worldgen roster so suppression still counts after corpses despawn. */
+export function syncRosterDeath(world, enemy) {
+  if (!world || !enemy?.id) return;
+  for (const encounter of world.encounters || []) {
+    const entry = (encounter.roster || []).find((item) => item.id === enemy.id);
+    if (!entry) continue;
+    entry.state = 'dead';
+    entry.destroyed = true;
+    return;
+  }
+}
+
+export function suppressionProgress(world, enemies = []) {
+  const seen = new Set();
+  let dead = 0;
+  const note = (id, isDead) => {
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    if (isDead) dead++;
+  };
+  for (const enemy of enemies) {
+    if (enemy?.objectiveTarget) note(enemy.id, enemy.state === 'dead');
+  }
+  for (const encounter of world?.encounters || []) {
+    for (const entry of encounter.roster || []) {
+      if (entry.objectiveTarget) note(entry.id, entry.state === 'dead' || entry.destroyed);
+    }
+  }
+  const required = world?.objective?.requiredCount || 0;
+  return { dead, required, complete: required > 0 && dead >= required };
+}
+
 export function objectiveComplete(world, enemies = []) {
   const o = world?.objective;
   if (!o) return false;
   if (!intelProgress(world).complete || !o.revealed) return false;
-  if (o.type === 'suppression') {
-    let dead = 0;
-    const pools = enemies.length ? enemies : [];
-    if (pools.length === 0 && world.encounters) {
-      for (const encounter of world.encounters)
-        for (const entry of encounter.roster || [])
-          if (entry.objectiveTarget && entry.state === 'dead') dead++;
-    } else {
-      for (const e of pools) if (e.objectiveTarget && e.state === 'dead') dead++;
-    }
-    return dead >= (o.requiredCount || 0);
+  if (o.type === 'suppression') return suppressionProgress(world, enemies).complete;
+  if (o.type === 'recovery') {
+    const crate =
+      (world.supplyCrates || []).find((c) => c.objective || c.id === o.targetId) || o.target;
+    return Boolean(crate?.collected);
   }
-  if (o.type === 'recovery') return Boolean(o.target && o.target.collected);
   return Boolean(o.target && !isAlive(o.target));
 }
 
-export function canExtract(world, heli) {
-  const lim = WORLD_SIZE * 0.48;
-  return (
-    Boolean(world?.extraction?.active) &&
-    objectiveComplete(world) &&
-    (Math.abs(heli.x) > lim || Math.abs(heli.y) > lim)
-  );
+export function canExtract(world, heli, enemies = []) {
+  if (!heli) return false;
+  const done = Boolean(world?.objective?.complete) || objectiveComplete(world, enemies);
+  if (!done && !world?.extraction?.active) return false;
+  const lim = playableLimit(world);
+  return Math.abs(heli.x) >= lim || Math.abs(heli.y) >= lim;
 }
 
 export function getObjectiveFocus(world, boss, enemies, heli) {
@@ -79,8 +103,8 @@ export function getObjectiveFocus(world, boss, enemies, heli) {
   return { x: aim.x, y: aim.y };
 }
 
-export function nearestExitPoint(heli) {
-  const lim = WORLD_SIZE * 0.48;
+export function nearestExitPoint(heli, world) {
+  const lim = playableLimit(world);
   const dL = heli.x + lim,
     dR = lim - heli.x;
   const dT = heli.y + lim,

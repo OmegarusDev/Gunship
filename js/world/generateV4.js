@@ -4,7 +4,7 @@
  * Region → transport → places → encounters → semantic contract overlay.
  * Physical geometry is authoritative; places and encounters are derived.
  */
-import { WORLD_SIZE } from '../config.js';
+import { worldSizeForAct } from '../config.js';
 import { getDifficulty, getScenario, getStyle, intelCountForCampaign } from '../contracts.js';
 import { createTerrain } from '../terrain.js';
 import { mulberry32 } from '../rng.js';
@@ -399,16 +399,19 @@ function applyContractPlan(world, contract) {
   } else if (scenario.id === 'suppression') {
     const air = world.encounters.filter((encounter) => hasTag(encounter, 'airDefense') || encounter.kind === 'air_defense');
     const pool = air.length ? air : world.encounters.filter((encounter) => encounter.placeId);
-    const marked = [];
+    const candidates = [];
     for (const encounter of pool) {
       for (const entry of encounter.roster) {
         if (AA_CLASSES.includes(entry.className) && classMinAct(entry.className) <= (world.act || 1)) {
-          entry.objectiveTarget = true;
-          marked.push(entry);
+          candidates.push(entry);
         }
-        if (marked.length >= 3) break;
       }
-      if (marked.length >= 3) break;
+    }
+    candidates.sort((a, b) => Number(Boolean(a.isIndoor)) - Number(Boolean(b.isIndoor)));
+    const marked = candidates.slice(0, 3);
+    for (const entry of marked) {
+      entry.objectiveTarget = true;
+      entry.isIndoor = false;
     }
     while (marked.length < 3) {
       const encounter = pool[0] || world.encounters[0];
@@ -616,12 +619,12 @@ function placeIntelHolders(world, contract, rng) {
 export function generateWorldV4(input) {
   const context = typeof input === 'number' ? { seed: input } : input || {};
   const seed = context.seed ?? context.rootSeed ?? 42;
-  const worldSize = context.worldSize || WORLD_SIZE;
-  const terrain = context.terrain || createTerrain(seed, worldSize);
   const contract = context.contract || null;
   const act = rosterAct(context, contract);
+  const worldSize = context.worldSize || worldSizeForAct(act);
+  const terrain = context.terrain || createTerrain(seed, worldSize);
 
-  const { region, landUse: regionalLandUse } = generateRegion(seed, worldSize, terrain);
+  const { region, landUse: regionalLandUse } = generateRegion(seed, worldSize, terrain, act);
   const transport = generateTransport(seed, worldSize, terrain, region);
   const placesResult = generatePlaces(seed, worldSize, terrain, region, transport, regionalLandUse);
   const encounters = generateEncounters(
@@ -630,7 +633,8 @@ export function generateWorldV4(input) {
     placesResult.districts,
     placesResult.buildings,
     placesResult.roads,
-    act
+    act,
+    worldSize
   );
   const convoys = generateConvoys(seed, placesResult.roads, encounters, act);
   const decorations = generateDecorations(seed, terrain, placesResult.landUse, placesResult.places);

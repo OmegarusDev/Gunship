@@ -217,13 +217,79 @@ export function menuPointerPos() {
   return { x: menuPointer.x, y: menuPointer.y, inside: menuPointer.inside };
 }
 
+const HEADER_CHIP_H = 32;
+let lastHeaderCog = null;
+
+export function headerCogRect(layout) {
+  return {
+    x: layout.content.x,
+    y: (layout.headerMetaY || 18) - 2,
+    w: HEADER_CHIP_H,
+    h: HEADER_CHIP_H,
+  };
+}
+
+export function lastHeaderCogRect() {
+  return lastHeaderCog;
+}
+
+export function clearHeaderCog() {
+  lastHeaderCog = null;
+}
+
+function drawCogIcon(ctx, cx, cy, radius, color) {
+  const teeth = 8;
+  const tip = radius;
+  const valley = radius * 0.62;
+  const hole = radius * 0.32;
+  const step = Math.PI / teeth;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  for (let i = 0; i < teeth; i++) {
+    const a = i * step * 2 - step * 0.5;
+    const pt = (ang, r) => [cx + Math.cos(ang) * r, cy + Math.sin(ang) * r];
+    const p0 = pt(a, valley);
+    if (i === 0) ctx.moveTo(p0[0], p0[1]);
+    else ctx.lineTo(p0[0], p0[1]);
+    ctx.lineTo(...pt(a + step * 0.55, tip));
+    ctx.lineTo(...pt(a + step, tip));
+    ctx.lineTo(...pt(a + step * 1.45, valley));
+  }
+  ctx.closePath();
+  ctx.moveTo(cx + hole, cy);
+  ctx.arc(cx, cy, hole, 0, Math.PI * 2, true);
+  ctx.fill('evenodd');
+}
+
+/** Settings cog in the header, left-aligned opposite the cash chip. */
+export function drawHeaderCog(ctx, layout) {
+  const rect = headerCogRect(layout);
+  ctx.save();
+  const hit = applyMenuHitTransform(ctx, rect);
+  ctx.fillStyle = hit.hover || hit.pressed ? 'rgba(28,48,20,0.96)' : 'rgba(10,18,8,0.92)';
+  ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+  ctx.strokeStyle = hit.hover || hit.pressed ? P.ui.borderHi : 'rgba(136,170,102,0.7)';
+  ctx.lineWidth = 1.2;
+  ctx.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.w - 1, rect.h - 1);
+  drawCogIcon(
+    ctx,
+    rect.x + rect.w / 2,
+    rect.y + rect.h / 2,
+    9,
+    hit.hover || hit.pressed ? P.ui.textBright : '#c8e8a8'
+  );
+  ctx.restore();
+  lastHeaderCog = rect;
+  return rect;
+}
+
 /** Wallet chip in the header, right-aligned to the content column. */
 export function drawHeaderDollars(ctx, layout, dollars) {
   const label = `$${dollars}`;
   ctx.font = 'bold 20px "Courier New", monospace';
   const tw = ctx.measureText(label).width;
   const chipW = tw + 24;
-  const chipH = 32;
+  const chipH = HEADER_CHIP_H;
   const x = layout.content.x + layout.content.w - chipW;
   const y = (layout.headerMetaY || 18) - 2;
   ctx.fillStyle = 'rgba(10,18,8,0.92)';
@@ -314,7 +380,7 @@ export function drawPanel(ctx, x, y, w, h, { stroke = P.ui.border, fill = '#0d21
 export function drawMenuButton(
   ctx,
   rect,
-  { label, sub, kind = 'menu', blink = false, disabled = false, compact = false } = {}
+  { label, sub, kind = 'menu', blink = false, disabled = false, compact = false, prominent = false } = {}
 ) {
   const { x, y, w, h } = rect;
   const primary = kind === 'primary';
@@ -370,14 +436,17 @@ export function drawMenuButton(
   ctx.textBaseline = 'middle';
   if (sub) {
     ctx.fillStyle = primary || kind === 'menu' ? P.ui.textBright : '#88eeee';
-    ctx.font = `bold ${h >= 54 ? 16 : 14}px "Courier New", monospace`;
+    const labelPx = prominent ? (h >= 52 ? 20 : 18) : h >= 54 ? 16 : 14;
+    ctx.font = `bold ${labelPx}px "Courier New", monospace`;
     ctx.fillText(label, x + w / 2, y + h * 0.38);
     ctx.fillStyle = P.ui.textDim;
-    ctx.font = `${h >= 54 ? 12 : 11}px "Courier New", monospace`;
+    const subPx = prominent ? (h >= 52 ? 13 : 12) : h >= 54 ? 12 : 11;
+    ctx.font = `${subPx}px "Courier New", monospace`;
     ctx.fillText(sub, x + w / 2, y + h * 0.7);
   } else {
     ctx.fillStyle = accent ? '#88eeee' : P.ui.textBright;
-    ctx.font = `bold ${small ? 14 : h >= 52 ? 16 : 15}px "Courier New", monospace`;
+    const labelPx = prominent ? (small ? 16 : 20) : small ? 14 : h >= 52 ? 16 : 15;
+    ctx.font = `bold ${labelPx}px "Courier New", monospace`;
     ctx.fillText(label, x + w / 2, y + h / 2 + 0.5);
   }
   ctx.restore();
@@ -456,6 +525,7 @@ export function paintScreenBackdrop(ctx, w, h, title, subtitle = '') {
   }
   layout.headerMetaY = titleY;
   drawFooterStrip(ctx, w, h);
+  drawHeaderCog(ctx, layout);
   return layout;
 }
 

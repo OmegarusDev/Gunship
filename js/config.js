@@ -3,10 +3,40 @@
 export const SIM_HZ = 60;
 export const SIM_DT = 1 / SIM_HZ;
 
-export const WORLD_SIZE = 6000;
+/** Act 1 operational area. Later acts use WORLD_SIZE_BY_ACT. */
+export const WORLD_SIZE_BY_ACT = {
+  1: 7200,
+  2: 10800,
+  3: 15200,
+  4: 21000,
+};
+export const WORLD_SIZE = WORLD_SIZE_BY_ACT[1];
 export const TILE_SIZE = 32;
 export const CHUNK_SIZE = 32;
 export const CHUNKS_PER_AXIS = Math.ceil(WORLD_SIZE / CHUNK_SIZE);
+export const PLAYABLE_FRAC = 0.48;
+export const EXTRACT_FRAC = 0.55;
+
+export function worldSizeForAct(act = 1) {
+  const n = Math.max(1, Math.min(4, Math.floor(Number(act) || 1)));
+  return WORLD_SIZE_BY_ACT[n] || WORLD_SIZE;
+}
+
+function sizeOf(worldOrSize) {
+  if (typeof worldOrSize === 'number' && Number.isFinite(worldOrSize)) return worldOrSize;
+  if (Number.isFinite(worldOrSize?.worldSize)) return worldOrSize.worldSize;
+  return WORLD_SIZE;
+}
+
+/** Soft wall until the objective is done. Crossing it after that extracts. */
+export function playableLimit(worldOrSize) {
+  return sizeOf(worldOrSize) * PLAYABLE_FRAC;
+}
+
+/** Extra slack past the border so the heli can actually leave. */
+export function extractBound(worldOrSize) {
+  return sizeOf(worldOrSize) * EXTRACT_FRAC;
+}
 
 export const PITCH_DEG = 24;
 
@@ -73,7 +103,7 @@ export const HUD = {
  * and kept for save compat but not wired to gameplay yet.
  */
 export const TIMER = {
-  baseTime: 180, // live — multiplied by difficulty.hunterEtaMultiplier & heatFactor
+  baseTime: 165, // live — multiplied by difficulty.hunterEtaMultiplier & heatFactor
   jammerBonus: 60, // legacy — jammer meta upgrade not yet implemented
   maxJammerLevel: 3, // legacy
   fuelTankBonus: 20, // live — fuel depot chain explosion extends timer

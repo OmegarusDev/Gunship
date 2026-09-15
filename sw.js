@@ -1,8 +1,9 @@
 /* Gunship service worker — network-first, cache fallback. Bump CACHE to invalidate. */
-const CACHE = 'gunship-pwa-2';
+const CACHE = 'gunship-pwa-5';
 const PRECACHE = [
   './index.html',
   './css/main.css',
+  './manifest.json',
   './manifest.webmanifest',
   './icons/favicon.svg',
   './icons/icon-192.png',
@@ -36,6 +37,20 @@ self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          if (response && response.ok) {
+            const copy = response.clone();
+            caches.open(CACHE).then((cache) => cache.put(event.request, copy));
+          }
+          return response;
+        })
+        .catch(() => caches.match('./index.html'))
+    );
+    return;
+  }
   event.respondWith(
     fetch(event.request)
       .then((response) => {

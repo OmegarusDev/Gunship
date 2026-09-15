@@ -20,6 +20,9 @@ export {
   applyMenuHitTransform,
   paintMenuGlow,
   drawHeaderDollars,
+  drawHeaderCog,
+  clearHeaderCog,
+  lastHeaderCogRect,
   drawFooterStrip,
   drawCursorTooltip,
 } from './ui/layout.js';

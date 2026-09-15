@@ -6,7 +6,7 @@ import { P, mats } from '../palette.js';
 import { withAlpha } from '../drawUtil.js';
 import { VIEW25, deckRy } from '../view25.js';
 import { box25, frustum25, footprintPrism25 } from '../prims25.js';
-import { WORLD_SIZE } from '../config.js';
+import { playableLimit } from '../config.js';
 import { clamp } from '../rng.js';
 import { getConvoyMembers } from '../sim/movement.js';
 import { isTargetAlive as _isTargetAlive } from '../sim/objectives.js';
@@ -442,7 +442,7 @@ function drawScenarioOverlays(ctx, cam) {
 
   if (_world.extraction?.active) {
     // Extraction = leave the map. Highlight the nearest boundary edge.
-    const lim = WORLD_SIZE * 0.48;
+    const lim = playableLimit(_world);
     const dL = _heli.x + lim,
       dR = lim - _heli.x;
     const dT = _heli.y + lim,

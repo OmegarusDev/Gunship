@@ -177,7 +177,7 @@ export const CAMPAIGN_RULES = {
   acts: 4,
   sortiesPerAct: 4,
   strongholdSortie: 4,
-  strongholdTime: 300,
+  strongholdTime: 270,
 };
 
 export const STRONGHOLDS = {

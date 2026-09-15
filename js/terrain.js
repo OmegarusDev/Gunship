@@ -130,7 +130,7 @@ function buildWadis(skeleton, half, rng, noise) {
         x: high.x + (rng() - 0.5) * high.radius,
         y: high.y + (rng() - 0.5) * high.radius,
       };
-      const pts = traceWadi(start, dip, basin, half, rng, noise, 6000);
+      const pts = traceWadi(start, dip, basin, half, rng, noise, half * 2);
       if (pts.length >= 3) {
         wadis.push({ points: pts, order: 1, width: 90 + rng() * 60 });
       }
@@ -146,7 +146,7 @@ function buildWadis(skeleton, half, rng, noise) {
       const idx = randInt(1, Math.max(2, parent.points.length - 2), rng);
       const start = { x: parent.points[idx].x, y: parent.points[idx].y };
       // Tributary flows with a slight offset from the parent's direction.
-      const pts = traceWadi(start, dip, basin, half, rng, noise, 3000 + rng() * 2000);
+      const pts = traceWadi(start, dip, basin, half, rng, noise, half + rng() * half * 0.7);
       if (pts.length >= 3) {
         wadis.push({ points: pts, order: 2, width: 40 + rng() * 30 });
       }

@@ -956,6 +956,16 @@ export function clearCareer() {
   }
 }
 
+/** Wipe roster + legacy save. Caller boots a fresh career afterwards. */
+export function wipeAllSaves() {
+  try {
+    localStorage.removeItem(SAVE_KEY);
+    localStorage.removeItem(ROSTER_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 export function recordDossierKill(career, className) {
   if (!career || !className) return;
   if (!career.dossierKills || typeof career.dossierKills !== 'object') career.dossierKills = {};

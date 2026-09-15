@@ -37,7 +37,7 @@ function sampleTerrain(terrain, x, y) {
 }
 
 function buildCostGrid(terrain, worldSize) {
-  const targetCell = clamp(worldSize / 82, 58, 104);
+  const targetCell = clamp(worldSize / 82, 64, 160);
   const count = Math.max(16, Math.ceil(worldSize / targetCell));
   const cell = worldSize / count;
   const half = worldSize * 0.5;
