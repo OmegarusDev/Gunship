@@ -4,7 +4,7 @@
  * DPR-aware rendering.
  */
 
-import { CAMERA, WORLD_SIZE, TILE_SIZE } from './config.js';
+import { CAMERA, RENDER } from './config.js';
 import { lerp } from './rng.js';
 
 export class WorldCamera {
@@ -38,11 +38,18 @@ export class WorldCamera {
   }
 
   _resize() {
-    this.dpr = window.devicePixelRatio || 1;
     this.screenW = window.innerWidth;
     this.screenH = window.innerHeight;
-    this.canvas.width = this.screenW * this.dpr;
-    this.canvas.height = this.screenH * this.dpr;
+    const raw = window.devicePixelRatio || 1;
+    const area = Math.max(1, this.screenW * this.screenH);
+    let dpr = Math.min(raw, RENDER.maxDpr);
+    if (area * dpr * dpr > RENDER.maxBackingPixels) {
+      dpr = Math.sqrt(RENDER.maxBackingPixels / area);
+    }
+    this.dpr = Math.max(0.75, dpr);
+    this.canvas.width = Math.max(1, Math.round(this.screenW * this.dpr));
+    this.canvas.height = Math.max(1, Math.round(this.screenH * this.dpr));
+    this.dpr = this.canvas.width / Math.max(1, this.screenW);
     this.canvas.style.width = this.screenW + 'px';
     this.canvas.style.height = this.screenH + 'px';
   }

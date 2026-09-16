@@ -183,6 +183,104 @@ function buildOases(wadis, skeleton, half, rng) {
   return oases;
 }
 
+const WADI_GRID_CELL = 256;
+
+function wadiSegDist2(s, x, y) {
+  const dx = s.b.x - s.a.x;
+  const dy = s.b.y - s.a.y;
+  const l2 = dx * dx + dy * dy;
+  let t = l2 === 0 ? 0 : ((x - s.a.x) * dx + (y - s.a.y) * dy) / l2;
+  if (t < 0) t = 0;
+  else if (t > 1) t = 1;
+  const px = s.a.x + t * dx - x;
+  const py = s.a.y + t * dy - y;
+  return px * px + py * py;
+}
+
+function buildWadiGrid(wadiSegs, worldSize) {
+  const cell = WADI_GRID_CELL;
+  const half = worldSize / 2;
+  const minC = Math.floor(-half / cell) - 2;
+  const maxC = Math.floor(half / cell) + 2;
+  const n = maxC - minC + 1;
+  const buckets = new Array(n * n);
+  for (const s of wadiSegs) {
+    s.stamp = 0;
+    const x0 = Math.floor(Math.min(s.a.x, s.b.x) / cell);
+    const x1 = Math.floor(Math.max(s.a.x, s.b.x) / cell);
+    const y0 = Math.floor(Math.min(s.a.y, s.b.y) / cell);
+    const y1 = Math.floor(Math.max(s.a.y, s.b.y) / cell);
+    for (let gy = y0; gy <= y1; gy++) {
+      for (let gx = x0; gx <= x1; gx++) {
+        const ix = gx - minC + (gy - minC) * n;
+        if (ix < 0 || ix >= buckets.length) continue;
+        const bucket = buckets[ix] || (buckets[ix] = []);
+        bucket.push(s);
+      }
+    }
+  }
+  return { cell, buckets, minC, n, stamp: 1 };
+}
+
+function nearestWadiOnGrid(grid, wadiSegs, x, y) {
+  if (!wadiSegs.length) return { dist: Infinity, order: 0 };
+  const { cell, buckets, minC, n } = grid;
+  let stamp = ++grid.stamp;
+  if (stamp > 1e9) {
+    grid.stamp = 1;
+    stamp = 1;
+    for (const s of wadiSegs) s.stamp = 0;
+  }
+  const gx0 = Math.floor(x / cell);
+  const gy0 = Math.floor(y / cell);
+  let bestD2 = Infinity;
+  let bestOrder = 0;
+  let bestIndex = Infinity;
+  const maxRing = n;
+  for (let ring = 0; ring <= maxRing; ring++) {
+    if (ring > 0) {
+      const minDist = (ring - 1) * cell;
+      if (bestD2 <= minDist * minDist) break;
+    }
+    const xStart = gx0 - ring;
+    const xEnd = gx0 + ring;
+    const yStart = gy0 - ring;
+    const yEnd = gy0 + ring;
+    for (let gy = yStart; gy <= yEnd; gy++) {
+      const row = (gy - minC) * n - minC;
+      for (let gx = xStart; gx <= xEnd; gx++) {
+        if (ring > 0 && gx !== xStart && gx !== xEnd && gy !== yStart && gy !== yEnd) continue;
+        const ix = row + gx;
+        if (ix < 0 || ix >= buckets.length) continue;
+        const bucket = buckets[ix];
+        if (!bucket) continue;
+        for (let i = 0; i < bucket.length; i++) {
+          const s = bucket[i];
+          if (s.stamp === stamp) continue;
+          s.stamp = stamp;
+          const d2 = wadiSegDist2(s, x, y);
+          if (d2 < bestD2 || (d2 === bestD2 && s.index < bestIndex)) {
+            bestD2 = d2;
+            bestOrder = s.order;
+            bestIndex = s.index;
+          }
+        }
+      }
+    }
+  }
+  if (bestIndex === Infinity) {
+    for (let i = 0; i < wadiSegs.length; i++) {
+      const s = wadiSegs[i];
+      const d2 = wadiSegDist2(s, x, y);
+      if (d2 < bestD2) {
+        bestD2 = d2;
+        bestOrder = s.order;
+      }
+    }
+  }
+  return { dist: Math.sqrt(bestD2), order: bestOrder };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  TERRAIN MODEL
 // ─────────────────────────────────────────────────────────────────────────────
@@ -205,29 +303,20 @@ export function createTerrain(seed, worldSize = 6000) {
   const wadiSegs = [];
   for (const w of wadis) {
     for (let i = 0; i < w.points.length - 1; i++) {
-      wadiSegs.push({ a: w.points[i], b: w.points[i + 1], order: w.order, width: w.width });
+      wadiSegs.push({
+        a: w.points[i],
+        b: w.points[i + 1],
+        order: w.order,
+        width: w.width,
+        index: wadiSegs.length,
+      });
     }
   }
+  const wadiGrid = buildWadiGrid(wadiSegs, worldSize);
 
   // Distance from (x,y) to nearest wadi centerline (returns {dist, order}).
   function nearestWadi(x, y) {
-    let best = Infinity;
-    let bestOrder = 0;
-    for (const s of wadiSegs) {
-      const dx = s.b.x - s.a.x;
-      const dy = s.b.y - s.a.y;
-      const l2 = dx * dx + dy * dy;
-      let t = l2 === 0 ? 0 : ((x - s.a.x) * dx + (y - s.a.y) * dy) / l2;
-      t = clamp(t, 0, 1);
-      const px = s.a.x + t * dx;
-      const py = s.a.y + t * dy;
-      const d = Math.hypot(x - px, y - py);
-      if (d < best) {
-        best = d;
-        bestOrder = s.order;
-      }
-    }
-    return { dist: best, order: bestOrder };
+    return nearestWadiOnGrid(wadiGrid, wadiSegs, x, y);
   }
 
   // Distance from (x,y) to nearest oasis.
@@ -317,7 +406,7 @@ export function createTerrain(seed, worldSize = 6000) {
       t = TERRAIN_TYPES.SAND;
     }
 
-    return { type: t, elevation: e };
+    return { type: t, elevation: e, oasisDist: no, wadiDist: nw.dist, wadiOrder: nw.order };
   }
 
   // ── Terrain classification ──
@@ -359,19 +448,13 @@ export function createTerrain(seed, worldSize = 6000) {
   // ── Settlement suitability — for world-gen site placement ──
   // High near water, moderate elevation, on stable ground.
   function suitability(x, y) {
-    const no = nearestOasis(x, y);
-    const nw = nearestWadi(x, y);
-    const e = elevation(x, y);
-
+    const sample = classify(x, y);
     let s = 0;
-    // Water proximity (dominant driver in a desert).
-    const water = Math.min(no, nw.dist);
+    const water = Math.min(sample.oasisDist, sample.wadiDist);
     s += Math.exp(-water / 900) * 1.0;
-    // Avoid mountains and wadi floors (flood risk), prefer gentle rises.
-    if (e > 500) s -= 0.5;
-    if (e < 30) s -= 0.3;
-    // Oases are ideal.
-    if (no < 260) s += 0.6;
+    if (sample.elevation > 500) s -= 0.5;
+    if (sample.elevation < 30) s -= 0.3;
+    if (sample.oasisDist < 260) s += 0.6;
     return s;
   }
 

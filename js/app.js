@@ -263,10 +263,11 @@ function loop(now) {
       drawSettings(camera.ctx, camera);
       if (resetConfirmOpen) drawResetConfirm(camera.ctx, camera);
     }
-    canvas.style.cursor =
+    const nextCursor =
       currentScreen !== screens.sortie || settingsOpen || sortieState.levelUpOpen
         ? menuCursor()
         : 'default';
+    if (canvas.style.cursor !== nextCursor) canvas.style.cursor = nextCursor;
     dismissHtmlSplash();
   } catch (err) {
     console.error('[Gunship]', err);
@@ -2738,7 +2739,7 @@ function drawHunter(ctx) {
 
 function getCanvasClickPos(e) {
   const rect = canvas.getBoundingClientRect();
-  const dpr = window.devicePixelRatio || 1;
+  const dpr = camera.dpr || 1;
   return {
     x: (e.clientX - rect.left) * dpr,
     y: (e.clientY - rect.top) * dpr,

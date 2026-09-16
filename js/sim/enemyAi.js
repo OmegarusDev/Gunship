@@ -35,7 +35,13 @@ function returnToPost(enemy, dt, sharedTerrain) {
   if (enemy.category === 'vehicle' && enemy.speed > 0) {
     const steer = steerAlongRoads(GameState.world, homeAngle, enemy.x, enemy.y);
     homeAngle = steer.angle;
-    homeFactor = vehicleSpeedFactor(GameState.world, sharedTerrain, enemy.x, enemy.y);
+    homeFactor = vehicleSpeedFactor(
+      GameState.world,
+      sharedTerrain,
+      enemy.x,
+      enemy.y,
+      enemy._groundCache || (enemy._groundCache = {})
+    );
   }
   enemy.angle += shortestDiff(homeAngle, enemy.angle) * Math.min(1, 1.6 * dt);
   if (enemy.speed > 0) {
@@ -128,7 +134,13 @@ export function updateEnemies(dt, { addHeat, spawnProjectile, lastShotX, lastSho
         if (enemy.category === 'vehicle') {
           const steer = steerAlongRoads(world, moveAngle, enemy.x, enemy.y);
           moveAngle = steer.angle;
-          vehFactor = vehicleSpeedFactor(world, sharedTerrain, enemy.x, enemy.y);
+          vehFactor = vehicleSpeedFactor(
+            world,
+            sharedTerrain,
+            enemy.x,
+            enemy.y,
+            enemy._groundCache || (enemy._groundCache = {})
+          );
         }
         enemy.angle += shortestDiff(moveAngle, enemy.angle) * Math.min(1, 2 * dt);
         enemy.x += Math.cos(enemy.angle) * enemy.speed * vehFactor * dt;

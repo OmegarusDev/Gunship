@@ -83,7 +83,10 @@ export const TERRAIN_VEHICLE_SPEED = {
 };
 
 /** Terrain + road speed factor for a ground vehicle at (x,y). */
-export function vehicleSpeedFactor(world, terrain, x, y) {
+export function vehicleSpeedFactor(world, terrain, x, y, cache = null) {
+  const qx = Math.round(x / 40);
+  const qy = Math.round(y / 40);
+  if (cache && cache.world === world && cache.qx === qx && cache.qy === qy) return cache.f;
   let f = 1.0;
   if (terrain) {
     const ty = terrain.type(x, y);
@@ -91,6 +94,12 @@ export function vehicleSpeedFactor(world, terrain, x, y) {
   }
   const rp = nearestRoadPoint(world, x, y, 120);
   if (rp) f *= 1.2;
+  if (cache) {
+    cache.world = world;
+    cache.qx = qx;
+    cache.qy = qy;
+    cache.f = f;
+  }
   return f;
 }
 

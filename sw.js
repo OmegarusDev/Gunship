@@ -1,5 +1,5 @@
 /* Gunship service worker — network-first, cache fallback. Bump CACHE to invalidate. */
-const CACHE = 'gunship-pwa-8';
+const CACHE = 'gunship-pwa-9';
 const PRECACHE = [
   './index.html',
   './css/main.css',

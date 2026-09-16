@@ -111,6 +111,34 @@ function terrainType(terrain, x, y) {
   return typeof terrain?.type === 'function' ? terrain.type(x, y) : 'sand';
 }
 
+function terrainSample(terrain, x, y) {
+  if (typeof terrain?.typeAndElevation === 'function') {
+    const sample = terrain.typeAndElevation(x, y);
+    return {
+      type: sample.type || 'sand',
+      elevation: Number.isFinite(sample.elevation) ? sample.elevation : 0,
+      oasisDist: Number.isFinite(sample.oasisDist) ? sample.oasisDist : Infinity,
+      wadiDist: Number.isFinite(sample.wadiDist) ? sample.wadiDist : Infinity,
+    };
+  }
+  return {
+    type: terrainType(terrain, x, y),
+    elevation: terrainElevation(terrain, x, y),
+    oasisDist: Infinity,
+    wadiDist: Infinity,
+  };
+}
+
+function suitabilityFromSample(sample) {
+  let s = 0;
+  const water = Math.min(sample.oasisDist, sample.wadiDist);
+  s += Math.exp(-water / 900) * 1.0;
+  if (sample.elevation > 500) s -= 0.5;
+  if (sample.elevation < 30) s -= 0.3;
+  if (sample.oasisDist < 260) s += 0.6;
+  return s;
+}
+
 function terrainElevation(terrain, x, y) {
   return typeof terrain?.elevation === 'function' ? terrain.elevation(x, y) : 0;
 }
@@ -119,17 +147,9 @@ function terrainSuitability(terrain, x, y) {
   return typeof terrain?.suitability === 'function' ? terrain.suitability(x, y) : 0.5;
 }
 
-function nearestWaterDistance(terrain, x, y) {
-  const oasis =
-    typeof terrain?.nearestOasis === 'function' ? terrain.nearestOasis(x, y) : Infinity;
-  const wadi =
-    typeof terrain?.nearestWadi === 'function' ? terrain.nearestWadi(x, y)?.dist : Infinity;
-  return Math.min(Number.isFinite(oasis) ? oasis : Infinity, Number.isFinite(wadi) ? wadi : Infinity);
-}
-
-function localRelief(terrain, x, y) {
+function localRelief(terrain, x, y, centerElevation) {
   if (typeof terrain?.elevation !== 'function') return 0;
-  const center = terrainElevation(terrain, x, y);
+  const center = Number.isFinite(centerElevation) ? centerElevation : terrainElevation(terrain, x, y);
   const east = terrainElevation(terrain, x + 55, y);
   const north = terrainElevation(terrain, x, y + 55);
   return Math.max(Math.abs(center - east), Math.abs(center - north));
@@ -267,7 +287,8 @@ function scoreCandidate(candidate, type, category, scale, terrain, axes, worldSi
   if (HOSTILE_CATEGORIES.has(category) && radial < centerExclusion) return -Infinity;
   if (type === 'town' && radial < Math.max(900, worldSize * 0.18)) return -Infinity;
 
-  const ground = terrainType(terrain, candidate.x, candidate.y);
+  const sample = terrainSample(terrain, candidate.x, candidate.y);
+  const ground = sample.type;
   if (ground === 'rock' && type !== 'sam_site') return -Infinity;
   if (ground === 'wadi') return -Infinity;
 
@@ -279,10 +300,10 @@ function scoreCandidate(candidate, type, category, scale, terrain, axes, worldSi
     nearestSpacing = Math.min(nearestSpacing, distance);
   }
 
-  const suitability = terrainSuitability(terrain, candidate.x, candidate.y);
-  const waterDistance = nearestWaterDistance(terrain, candidate.x, candidate.y);
-  const relief = localRelief(terrain, candidate.x, candidate.y);
-  const elevation = terrainElevation(terrain, candidate.x, candidate.y);
+  const suitability = suitabilityFromSample(sample);
+  const waterDistance = Math.min(sample.oasisDist, sample.wadiDist);
+  const relief = localRelief(terrain, candidate.x, candidate.y, sample.elevation);
+  const elevation = sample.elevation;
   const direction = axes.trade.direction;
   const corridorDistance = Math.abs(candidate.x * -direction.y + candidate.y * direction.x);
 

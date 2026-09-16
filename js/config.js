@@ -76,6 +76,15 @@ export const CAMERA = {
   zoomCombatFloor: 0.95, // minimum while firing at a target
 };
 
+/**
+ * Canvas backing store. Uncapped 2× DPR on a tall phone/sidebar view is ~2.2M
+ * pixels and the 2D rasterizer falls to ~8 fps. Cap both DPR and total pixels.
+ */
+export const RENDER = {
+  maxDpr: 1.5,
+  maxBackingPixels: 1_200_000,
+};
+
 /** Ground-combat tuning — aggro, leashes, civilian panic. */
 export const COMBAT = {
   aggroBase: 330, // attack range at Heat tier 0

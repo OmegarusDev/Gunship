@@ -116,7 +116,7 @@ const DIRECTIONS = [
   [-1, -1],
 ];
 
-function leastCostPath(startPoint, endPoint, grid) {
+function leastCostPath(startPoint, endPoint, grid, buffers) {
   const { count, cell, half, costs, elevations } = grid;
   const toCell = (point) => ({
     column: clamp(Math.floor((point.x + half) / cell), 0, count - 1),
@@ -128,11 +128,12 @@ function leastCostPath(startPoint, endPoint, grid) {
   const goal = endCell.row * count + endCell.column;
   if (start === goal) return [{ ...startPoint }, { ...endPoint }];
 
-  const scores = new Float64Array(count * count);
+  const scores = buffers.scores;
   scores.fill(Infinity);
-  const previous = new Int32Array(count * count);
+  const previous = buffers.previous;
   previous.fill(-1);
-  const closed = new Uint8Array(count * count);
+  const closed = buffers.closed;
+  closed.fill(0);
   const heap = new MinHeap();
   const heuristic = (index) => {
     const column = index % count;
@@ -278,10 +279,16 @@ export function generateTransport(seed, worldSize, terrain, region) {
   const roads = [];
   const connections = {};
   const grid = buildCostGrid(terrain, worldSize);
+  const cellCount = grid.count * grid.count;
+  const pathBuffers = {
+    scores: new Float64Array(cellCount),
+    previous: new Int32Array(cellCount),
+    closed: new Uint8Array(cellCount),
+  };
   let roadNumber = 1;
 
   const addRoad = (start, end, hierarchy, surface, width, tags) => {
-    const points = cleanPath(leastCostPath(start, end, grid));
+    const points = cleanPath(leastCostPath(start, end, grid, pathBuffers));
     const road = {
       id: `road-${String(roadNumber++).padStart(3, '0')}`,
       points,

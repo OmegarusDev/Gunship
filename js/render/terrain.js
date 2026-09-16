@@ -3,21 +3,22 @@
  * Extracted from app.js. Module owns its caches (tgCanvas, grain/mottle/macro).
  * Call setTerrain(...) after world generation so sampling sees the current model.
  */
-import { mulberry32 } from '../rng.js';
-import { clamp, lerp } from '../rng.js';
-import { fbm, ridged, duneNoise, windStreaks, voronoi } from '../noise.js';
+import { mulberry32, clamp, lerp } from '../rng.js';
+import { fbm, duneNoise, windStreaks, voronoi } from '../noise.js';
 
 // ── Module-local refs set by the app after initWorld ──
 let _sharedTerrain = null;
 let _terrainNoise = null;
 let _moistureNoise = null;
 let _detailNoise = null;
+let _terrainEpoch = 0;
 
 export function setTerrain(sharedTerrain, terrainNoise, moistureNoise, detailNoise) {
   _sharedTerrain = sharedTerrain;
   _terrainNoise = terrainNoise;
   _moistureNoise = moistureNoise;
   _detailNoise = detailNoise;
+  _terrainEpoch++;
 }
 
 export const BIOME = {
@@ -119,12 +120,16 @@ function sampleTerrain(wx, wy) {
 }
 
 const TERRAIN_GRID_STEP = 72;
+const TERRAIN_SHADE_SCALE = 4;
 let tgX0 = 0,
   tgY0 = 0,
   tgCols = 0,
-  tgRows = 0;
+  tgRows = 0,
+  tgEpoch = -1;
 let tgCanvas = null,
-  tgCtx = null;
+  tgCtx = null,
+  tgShade = null,
+  tgShadeCtx = null;
 
 function updateTerrainGrid(cam) {
   const b = cam.getVisibleBounds();
@@ -132,32 +137,73 @@ function updateTerrainGrid(cam) {
   const y0 = Math.floor(b.top / TERRAIN_GRID_STEP) * TERRAIN_GRID_STEP;
   const cols = Math.ceil((b.right - x0) / TERRAIN_GRID_STEP) + 2;
   const rows = Math.ceil((b.bottom - y0) / TERRAIN_GRID_STEP) + 2;
-  if (!tgCanvas || cols !== tgCols || rows !== tgRows || x0 !== tgX0 || y0 !== tgY0) {
-    tgX0 = x0;
-    tgY0 = y0;
-    tgCols = cols;
-    tgRows = rows;
-    if (!tgCanvas) {
-      tgCanvas = document.createElement('canvas');
-      tgCtx = tgCanvas.getContext('2d');
-    }
-    if (tgCanvas.width !== cols || tgCanvas.height !== rows) {
-      tgCanvas.width = cols;
-      tgCanvas.height = rows;
-    }
-    const img = tgCtx.createImageData(cols, rows);
-    const d = img.data;
-    for (let r = 0; r < rows; r++)
-      for (let c = 0; c < cols; c++) {
-        const col = sampleTerrain(x0 + c * TERRAIN_GRID_STEP, y0 + r * TERRAIN_GRID_STEP);
-        const i = (r * cols + c) * 4;
-        d[i] = col.r;
-        d[i + 1] = col.g;
-        d[i + 2] = col.b;
-        d[i + 3] = 255;
-      }
-    tgCtx.putImageData(img, 0, 0);
+  if (
+    tgEpoch === _terrainEpoch &&
+    tgCanvas &&
+    cols === tgCols &&
+    rows === tgRows &&
+    x0 === tgX0 &&
+    y0 === tgY0
+  ) {
+    return false;
   }
+  tgEpoch = _terrainEpoch;
+  tgX0 = x0;
+  tgY0 = y0;
+  tgCols = cols;
+  tgRows = rows;
+  if (!tgCanvas) {
+    tgCanvas = document.createElement('canvas');
+    tgCtx = tgCanvas.getContext('2d');
+  }
+  if (tgCanvas.width !== cols || tgCanvas.height !== rows) {
+    tgCanvas.width = cols;
+    tgCanvas.height = rows;
+  }
+  const img = tgCtx.createImageData(cols, rows);
+  const d = img.data;
+  for (let r = 0; r < rows; r++)
+    for (let c = 0; c < cols; c++) {
+      const col = sampleTerrain(x0 + c * TERRAIN_GRID_STEP, y0 + r * TERRAIN_GRID_STEP);
+      const i = (r * cols + c) * 4;
+      d[i] = col.r;
+      d[i + 1] = col.g;
+      d[i + 2] = col.b;
+      d[i + 3] = 255;
+    }
+  tgCtx.putImageData(img, 0, 0);
+  bakeTerrainShade();
+  return true;
+}
+
+function bakeTerrainShade() {
+  const w = Math.max(1, tgCols * TERRAIN_SHADE_SCALE);
+  const h = Math.max(1, tgRows * TERRAIN_SHADE_SCALE);
+  if (!tgShade) {
+    tgShade = document.createElement('canvas');
+    tgShadeCtx = tgShade.getContext('2d');
+  }
+  if (tgShade.width !== w || tgShade.height !== h) {
+    tgShade.width = w;
+    tgShade.height = h;
+  }
+  const g = tgShadeCtx;
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.imageSmoothingEnabled = true;
+  g.imageSmoothingQuality = 'low';
+  g.drawImage(tgCanvas, 0, 0, w, h);
+  const worldW = tgCols * TERRAIN_GRID_STEP;
+  const worldH = tgRows * TERRAIN_GRID_STEP;
+  g.save();
+  g.scale(TERRAIN_SHADE_SCALE / TERRAIN_GRID_STEP, TERRAIN_SHADE_SCALE / TERRAIN_GRID_STEP);
+  g.translate(-tgX0, -tgY0);
+  g.fillStyle = getMacroPattern(g);
+  g.fillRect(tgX0, tgY0, worldW, worldH);
+  g.fillStyle = getMottlePattern(g);
+  g.fillRect(tgX0, tgY0, worldW, worldH);
+  g.fillStyle = getGrainPattern(g);
+  g.fillRect(tgX0, tgY0, worldW, worldH);
+  g.restore();
 }
 
 function drawTileWrapped(g, S, fn) {
@@ -265,18 +311,14 @@ function getMacroPattern(ctx) {
 
 export function drawSmoothTerrain(ctx, cam) {
   updateTerrainGrid(cam);
+  const prevSmooth = ctx.imageSmoothingEnabled;
+  const prevQuality = ctx.imageSmoothingQuality;
   ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(tgCanvas, tgX0, tgY0, tgCols * TERRAIN_GRID_STEP, tgRows * TERRAIN_GRID_STEP);
-  const b = cam.getVisibleBounds();
-  const bw = b.right - b.left,
-    bh = b.bottom - b.top;
-  ctx.fillStyle = getMacroPattern(ctx);
-  ctx.fillRect(b.left, b.top, bw, bh);
-  ctx.fillStyle = getMottlePattern(ctx);
-  ctx.fillRect(b.left, b.top, bw, bh);
-  ctx.fillStyle = getGrainPattern(ctx);
-  ctx.fillRect(b.left, b.top, bw, bh);
+  ctx.imageSmoothingQuality = 'medium';
+  const src = tgShade || tgCanvas;
+  ctx.drawImage(src, tgX0, tgY0, tgCols * TERRAIN_GRID_STEP, tgRows * TERRAIN_GRID_STEP);
+  ctx.imageSmoothingEnabled = prevSmooth;
+  ctx.imageSmoothingQuality = prevQuality;
 }
 
 export { sampleTerrain };
