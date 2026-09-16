@@ -229,6 +229,21 @@ function joinAccessToStreet(street, access) {
   };
 }
 
+function attachGateToStreets(place, streets, roads, nextRoadId) {
+  const stub = joinAccessToStreet(primaryStreet(streets), place.accessPoints[0]);
+  if (!stub) return;
+  const road = {
+    id: nextRoadId(),
+    points: stub.points,
+    width: 8,
+    surface: 'dirt',
+    hierarchy: 'access',
+    tags: ['place-street', `place:${place.id}`, 'gate-connection'],
+  };
+  roads.push(road);
+  place.roadIds.push(road.id);
+}
+
 function courtyardFootprint(center, w, d, rotation, wall, openAcross) {
   const hw = w * 0.5;
   const hd = d * 0.5;
@@ -943,7 +958,6 @@ export function generatePlaces(seed, worldSize, terrain, region, transport, regi
   const nextBuildingId = () => `building-${String(buildingNumber++).padStart(4, '0')}`;
   const nextFeatureId = () => `feature-${String(featureNumber++).padStart(4, '0')}`;
   const usedNames = new Set();
-  const localStreets = new Map();
 
   for (let index = 0; index < region.destinationAnchors.length; index++) {
     const anchor = region.destinationAnchors[index];
@@ -1007,7 +1021,7 @@ export function generatePlaces(seed, worldSize, terrain, region, transport, regi
     const streets = streetsForAnchor(anchor, placeId, nextRoadId, rng);
     roads.push(...streets);
     place.roadIds.push(...streets.map((road) => road.id));
-    localStreets.set(placeId, streets);
+    attachGateToStreets(place, streets, roads, nextRoadId);
     const generated = placeBuildings(
       anchor,
       place,
@@ -1040,26 +1054,6 @@ export function generatePlaces(seed, worldSize, terrain, region, transport, regi
       ]),
     ];
     places.push(place);
-  }
-
-  // Plug the regional connector into the local street at a gate, not a slash through the fabric.
-  for (const place of places) {
-    const access = place.accessPoints[0];
-    const streets = localStreets.get(place.id) || [];
-    const street = primaryStreet(streets);
-    const stub = joinAccessToStreet(street, access);
-    if (stub) {
-      const road = {
-        id: nextRoadId(),
-        points: stub.points,
-        width: 8,
-        surface: 'dirt',
-        hierarchy: 'access',
-        tags: ['place-street', `place:${place.id}`, 'gate-connection'],
-      };
-      roads.push(road);
-      place.roadIds.push(road.id);
-    }
   }
 
   return { roads, districts, parcels, buildings, features, places, landUse };

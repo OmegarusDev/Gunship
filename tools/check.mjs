@@ -12,6 +12,7 @@ const suites = [
   'worldgen-check.mjs',
   'sortie-smoke.mjs',
   'targeting-check.mjs',
+  'hud-layout-check.mjs',
   'browser-smoke.mjs',
 ];
 

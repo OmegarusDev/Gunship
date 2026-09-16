@@ -4,6 +4,7 @@
  */
 import { CAMERA, TIMER, HELI, playableLimit, extractBound } from '../config.js';
 import { recordDossierKill } from '../meta.js';
+import { hunterBountyForCampaign } from '../contracts.js';
 import { clamp } from '../rng.js';
 import { updateEnemies } from './enemyAi.js';
 import * as GameState from './gameState.js';
@@ -531,9 +532,10 @@ export function tickSortie(dt, deps) {
             boss.deathTimer = 2.0;
             bossState.defeated = true;
             bossState.active = false;
+            const bounty = hunterBountyForCampaign(GameState.activeContract?.campaign);
             if (!GameState.isPracticeSortie()) {
-              sortieState.rewards.hunter += 300;
-              GameState.addSortieDollars(250);
+              sortieState.rewards.hunter += bounty;
+              GameState.addSortieDollars(bounty);
             }
             recordDossierKill(GameState.career, boss.type || boss.className);
             heli.score += 500;
@@ -541,7 +543,7 @@ export function tickSortie(dt, deps) {
             reduceHeat(18, 'Hunter destroyed');
             spawnExplosion(boss.x, boss.y, 3.0);
             spawnFloatingText(boss.x, boss.y - 30, 'HUNTER DESTROYED', '#ff4444');
-            spawnFloatingText(boss.x, boss.y - 50, '+300 BOUNTY', '#ffcc44');
+            spawnFloatingText(boss.x, boss.y - 50, `+${bounty} BOUNTY`, '#ffcc44');
           }
           continue;
         }

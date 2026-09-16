@@ -15,6 +15,7 @@ import {
   localToWorld,
   orientedRectangle,
   pointAlongPolyline,
+  polygonIntersectsPolygon,
 } from './geometry.js';
 import { generateRegion } from './region.js';
 import { generateTransport } from './transport.js';
@@ -48,11 +49,22 @@ function attachToPlace(world, place, building, parcel) {
   }
 }
 
+function parcelOccupied(world, parcel) {
+  return world.buildings.some((building) => building.parcelId === parcel.id);
+}
+
+function pickOpenParcel(world, place, rng, extraTags = []) {
+  const open = eligibleParcels(world, place, extraTags).filter((parcel) => !parcelOccupied(world, parcel));
+  return pick(rng, open);
+}
+
 function makeBuilding(world, place, parcel, type, tags, hp) {
   const host =
-    parcel ||
-    world.parcels.find((item) => item.placeId === place.id && item.kind !== 'residential') ||
-    world.parcels.find((item) => item.placeId === place.id);
+    (parcel && !parcelOccupied(world, parcel) ? parcel : null) ||
+    world.parcels.find(
+      (item) => item.placeId === place.id && item.kind !== 'residential' && !parcelOccupied(world, item)
+    ) ||
+    world.parcels.find((item) => item.placeId === place.id && !parcelOccupied(world, item));
   if (!host) return null;
   const index = world.buildings.length + 1;
   const rotation = host.rotation ?? place?.rotation ?? 0;
@@ -61,6 +73,10 @@ function makeBuilding(world, place, parcel, type, tags, hp) {
   const w = type === 'radar' ? 30 : type === 'command' ? 48 : 36;
   const d = type === 'radar' ? 30 : type === 'command' ? 36 : 28;
   const h = type === 'radar' ? 22 : 16;
+  const footprint = orientedRectangle(x, y, w, d, rotation);
+  if (world.buildings.some((building) => polygonIntersectsPolygon(building.footprint, footprint))) {
+    return null;
+  }
   const building = {
     id: `building-${String(index).padStart(4, '0')}-objective`,
     x,
@@ -71,7 +87,7 @@ function makeBuilding(world, place, parcel, type, tags, hp) {
     col: type === 'radar' ? '#898c77' : '#8f9075',
     type,
     rotation,
-    footprint: orientedRectangle(x, y, w, d, rotation),
+    footprint,
     placeId: place.id,
     districtId: host.districtId || place.districtIds[0] || null,
     parcelId: host.id,
@@ -103,8 +119,10 @@ function eligibleParcels(world, place, extraTags = []) {
 }
 
 function choosePlace(world, kinds, tags) {
-  const byKind = world.places.filter((place) => kinds.includes(place.kind));
-  if (byKind.length) return byKind[0];
+  for (const kind of kinds || []) {
+    const match = world.places.find((place) => place.kind === kind);
+    if (match) return match;
+  }
   const byTag = world.places.filter((place) => tags.some((tag) => hasTag(place, tag)));
   return byTag[0] || world.places.find((place) => place.category === 'military') || world.places[0];
 }
@@ -333,7 +351,7 @@ function applyContractPlan(world, contract) {
       (item) => item.placeId === place.id && (item.type === 'command' || hasTag(item, 'command'))
     );
     if (!building) {
-      const parcel = pick(rng, eligibleParcels(world, place, ['military'])) || world.parcels.find((item) => item.placeId === place.id);
+      const parcel = pickOpenParcel(world, place, rng, ['military']);
       building = makeBuilding(world, place, parcel, 'command', ['military', 'command', 'missionEligible', 'highPriority'], Math.round(90 * difficulty.targetHpMultiplier));
     }
     if (!building) {
@@ -356,7 +374,7 @@ function applyContractPlan(world, contract) {
       (item) => item.placeId === place.id && (item.type === 'radar' || hasTag(item, 'radar'))
     );
     if (!building) {
-      const parcel = pick(rng, eligibleParcels(world, place, ['military'])) || world.parcels.find((item) => item.placeId === place.id);
+      const parcel = pickOpenParcel(world, place, rng, ['military']);
       building = makeBuilding(world, place, parcel, 'radar', ['military', 'radar', 'communications', 'missionEligible', 'highPriority'], Math.round(70 * difficulty.targetHpMultiplier));
     }
     if (!building) {
@@ -483,7 +501,7 @@ function applyContractPlan(world, contract) {
     const place =
       world.places.find((item) => item.id !== world.objective.targetPlaceId && item.kind === 'sam_site') ||
       choosePlace(world, ['sam_site', 'camp'], ['military']);
-    const parcel = pick(rng, eligibleParcels(world, place, ['military'])) || world.parcels.find((item) => item.placeId === place.id);
+    const parcel = pickOpenParcel(world, place, rng, ['military']);
     radar = makeBuilding(world, place, parcel, 'radar', ['military', 'radar', 'communications', 'missionEligible'], 65);
   }
   if (radar) {
@@ -590,9 +608,7 @@ function placeIntelHolders(world, contract, rng) {
       world.places.find((p) => p.id !== excludePlace && !usedPlaces.has(p.id) && p.category !== 'civilian') ||
       world.places.find((p) => p.id !== excludePlace && !usedPlaces.has(p.id));
     if (!place) break;
-    const parcel =
-      pick(rng, eligibleParcels(world, place, ['military'])) ||
-      world.parcels.find((item) => item.placeId === place.id);
+    const parcel = pickOpenParcel(world, place, rng, ['military']);
     const shack = makeBuilding(
       world,
       place,

@@ -1,5 +1,5 @@
 /* Gunship service worker — network-first, cache fallback. Bump CACHE to invalidate. */
-const CACHE = 'gunship-pwa-7';
+const CACHE = 'gunship-pwa-8';
 const PRECACHE = [
   './index.html',
   './css/main.css',
@@ -60,8 +60,6 @@ self.addEventListener('fetch', (event) => {
         }
         return response;
       })
-      .catch(() =>
-        caches.match(event.request).then((cached) => cached || caches.match('./index.html'))
-      )
+      .catch(() => caches.match(event.request))
   );
 });

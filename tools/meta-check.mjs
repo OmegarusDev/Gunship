@@ -34,7 +34,7 @@ import {
 } from '../js/meta.js';
 import { GUNSHIP_DRAW_IDS } from '../js/render/gunships.js';
 import * as GameState from '../js/sim/gameState.js';
-import { CAMPAIGN_RULES, createContractBoard, getCampaignMission } from '../js/contracts.js';
+import { CAMPAIGN_RULES, createContractBoard, getCampaignMission, hunterBountyForCampaign } from '../js/contracts.js';
 import { formatClock, periodLabel, sunFromHour, hourFromSeed } from '../js/sun.js';
 import {
   ENEMY_CLASSES,
@@ -274,6 +274,12 @@ console.log('— campaign structure —');
     getCampaignMission({ act: 2, sortie: CAMPAIGN_RULES.strongholdSortie }).stronghold,
     'each act ends with a stronghold mission'
   );
+  ok(
+    !getCampaignMission({ act: 4, sortie: 4, allowStronghold: false }).stronghold,
+    'allowStronghold false blocks the final'
+  );
+  ok(hunterBountyForCampaign({ act: 1, sortie: 1 }) === 250, 'act 1 hunter bounty is $250');
+  ok(hunterBountyForCampaign({ act: 4, sortie: 3 }) === 600, 'late-act hunter bounty scales');
 
   const c = createCareer(8080);
   c.campaign = { act: 1, sortie: 1 };
@@ -367,6 +373,13 @@ console.log('— practice sandbox —');
   saveCareer(campaign);
   const sand = createSandboxCareer(campaign);
   ok(isSandboxCareer(sand), 'sandbox flag is set');
+  ok(sand.campaign.act === 4 && sand.campaign.sortie === 3, 'practice sits on late-act ops');
+  ok(sand.campaign.allowStronghold === false, 'practice cannot open the final stronghold');
+  ok(
+    createContractBoard(77, sand.campaign).length === 4 &&
+      createContractBoard(77, sand.campaign).every((card) => !card.stronghold),
+    'practice board is four regular contracts'
+  );
   ok(sand.unlocked.length === GUNSHIP_ORDER.length, 'all airframes unlocked');
   ok(
     PILOT_SKILLS.every((skill) => sand.pilot.skills[skill.id] === SKILL_MAX),

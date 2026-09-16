@@ -110,7 +110,10 @@ export class Input {
       const y = e.clientY - rect.top;
       this.mouseX = x;
       this.mouseY = y;
-      if (typeof this.shouldBlockFire === 'function' && this.shouldBlockFire(x, y)) return;
+      if (typeof this.shouldBlockFire === 'function' && this.shouldBlockFire(x, y)) {
+        if (typeof this.onHudPointer === 'function') this.onHudPointer(x, y);
+        return;
+      }
       if (this.clickToTarget) {
         this.clickTargetX = x;
         this.clickTargetY = y;
@@ -155,7 +158,10 @@ export class Input {
       this.mouseOnScreen = true;
       this.pointerDown = true;
 
-      if (typeof this.shouldBlockFire === 'function' && this.shouldBlockFire(x, y)) continue;
+      if (typeof this.shouldBlockFire === 'function' && this.shouldBlockFire(x, y)) {
+        if (typeof this.onHudPointer === 'function') this.onHudPointer(x, y);
+        continue;
+      }
 
       if (norm.x < 0.45) {
         // Left side = movement joystick
@@ -275,17 +281,22 @@ export class Input {
 
     // ── Aim (mouse cursor always steers, unless gamepad right stick overrides) ──
     if (this.mouseOnScreen) {
-      const cx = this.canvas.clientWidth / 2;
-      const cy = this.canvas.clientHeight / 2;
-      const dx = this.mouseX - cx;
-      const dy = this.mouseY - cy;
-      const dist = Math.hypot(dx, dy);
-      if (dist > 5) {
-        this.aimX = dx / dist;
-        this.aimY = dy / dist;
-        this.hasAim = true;
-      } else {
-        this.hasAim = false;
+      const overHud =
+        typeof this.shouldBlockFire === 'function' &&
+        this.shouldBlockFire(this.mouseX, this.mouseY);
+      if (!overHud) {
+        const cx = this.canvas.clientWidth / 2;
+        const cy = this.canvas.clientHeight / 2;
+        const dx = this.mouseX - cx;
+        const dy = this.mouseY - cy;
+        const dist = Math.hypot(dx, dy);
+        if (dist > 5) {
+          this.aimX = dx / dist;
+          this.aimY = dy / dist;
+          this.hasAim = true;
+        } else {
+          this.hasAim = false;
+        }
       }
     } else if (!(this.gamepadConnected && (this.aimX !== 0 || this.aimY !== 0))) {
       // No mouse, no gamepad aim — aim in movement direction

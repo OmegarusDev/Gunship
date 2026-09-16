@@ -229,6 +229,14 @@ for (const seed of seeds) {
     !world.objective?.targetPlaceId || placeIds.has(world.objective.targetPlaceId),
     `${label}: objective place resolves`
   );
+  if (contract.scenarioId === 'sabotage') {
+    const sam = world.places.find((place) => place.kind === 'sam_site');
+    const targetPlace = world.places.find((place) => place.id === world.objective?.targetPlaceId);
+    ok(
+      !sam || targetPlace?.kind === 'sam_site',
+      `${label}: sabotage prefers SAM over camp`
+    );
+  }
 }
 
 ok(profiles.size >= 3, `regional variety: saw ${profiles.size} profiles (${[...profiles].join(', ')})`);

@@ -611,7 +611,7 @@ export function createSandboxCareer(source) {
     hangar,
     unlocked: GUNSHIP_ORDER.slice(),
     gunship: GUNSHIPS[src.gunship] ? src.gunship : 'cobra',
-    campaign: { act: 1, sortie: 1 },
+    campaign: { act: 4, sortie: 3, allowStronghold: false },
     prestige: Math.max(1, src.prestige || 0),
     dossierKills: { ...(src.dossierKills || {}) },
     achievements: { ...(src.achievements || {}) },

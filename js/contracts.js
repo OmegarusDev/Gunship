@@ -263,14 +263,30 @@ export function getCampaignMission(campaign = { act: 1, sortie: 1 }) {
     1,
     Math.min(CAMPAIGN_RULES.sortiesPerAct, Math.floor(campaign.sortie || 1))
   );
-  const bossProfile = CAMPAIGN_BOSSES[(act - 1) * CAMPAIGN_RULES.sortiesPerAct + sortie - 1];
+  const stronghold =
+    campaign.allowStronghold !== false && sortie === CAMPAIGN_RULES.strongholdSortie;
+  const bossSortie =
+    !stronghold && campaign.allowStronghold === false && sortie === CAMPAIGN_RULES.strongholdSortie
+      ? CAMPAIGN_RULES.strongholdSortie - 1
+      : sortie;
+  const bossProfile = CAMPAIGN_BOSSES[(act - 1) * CAMPAIGN_RULES.sortiesPerAct + bossSortie - 1];
   return {
     act,
     sortie,
-    stronghold: sortie === CAMPAIGN_RULES.strongholdSortie,
-    strongholdTime: sortie === CAMPAIGN_RULES.strongholdSortie ? CAMPAIGN_RULES.strongholdTime : 0,
+    stronghold,
+    strongholdTime: stronghold ? CAMPAIGN_RULES.strongholdTime : 0,
     bossProfile,
   };
+}
+
+/** Hunter cash bounty. Act 1 sortie 1 is $250; later stages pay more. */
+export function hunterBountyForCampaign(campaign = { act: 1, sortie: 1 }) {
+  const act = Math.max(1, Math.min(CAMPAIGN_RULES.acts, Math.floor(campaign.act || 1)));
+  const sortie = Math.max(
+    1,
+    Math.min(CAMPAIGN_RULES.sortiesPerAct, Math.floor(campaign.sortie || 1))
+  );
+  return 250 + (act - 1) * 100 + (sortie - 1) * 25;
 }
 
 function nextSeed(rng) {

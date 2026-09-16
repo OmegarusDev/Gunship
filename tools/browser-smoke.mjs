@@ -147,6 +147,16 @@ try {
     return state.contractBoard.length;
   }, stateUrl);
   assert.equal(practiceBoard, 4, 'Practice operations still uses the normal contract board');
+  const practiceOffers = await page.evaluate(async (url) => {
+    const state = await import(url);
+    return {
+      act: state.career?.campaign?.act,
+      stronghold: state.contractBoard.some((card) => card.stronghold),
+      boss: state.contractBoard[0]?.bossProfile?.id || null,
+    };
+  }, stateUrl);
+  assert.equal(practiceOffers.act, 4, 'Practice sits on the act 4 board');
+  assert.equal(practiceOffers.stronghold, false, 'Practice never deals the final stronghold');
 
   await page.evaluate(
     async ({ stateUrl: statePath, appUrl }) => {
