@@ -274,7 +274,7 @@ function scoreCandidate(candidate, type, category, scale, terrain, axes, worldSi
   let nearestSpacing = Infinity;
   for (const anchor of placed) {
     const distance = Math.hypot(candidate.x - anchor.x, candidate.y - anchor.y);
-    const required = Math.max(300, (scale + anchor.scale) * 0.42);
+    const required = Math.max(340, (scale + anchor.scale) * 0.5);
     if (distance < required) return -Infinity;
     nearestSpacing = Math.min(nearestSpacing, distance);
   }
@@ -320,7 +320,7 @@ function placeAnchor(type, index, profile, terrain, axes, worldSize, placed, rng
   let best = null;
   let bestScore = -Infinity;
 
-  for (let attempt = 0; attempt < 220; attempt++) {
+  for (let attempt = 0; attempt < 280; attempt++) {
     const candidate = chooseCandidateSource(type, terrain, scale, axes, worldSize * 0.5, rng);
     const score = scoreCandidate(
       candidate,
@@ -332,7 +332,7 @@ function placeAnchor(type, index, profile, terrain, axes, worldSize, placed, rng
       worldSize,
       placed
     );
-    if (score > bestScore) {
+    if (Number.isFinite(score) && score > bestScore) {
       best = candidate;
       bestScore = score;
     }

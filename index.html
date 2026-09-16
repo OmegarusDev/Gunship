@@ -26,11 +26,15 @@
   <button id="pwa-update" class="pwa-chip pwa-chip-update hidden" type="button">UPDATE READY — TAP</button>
   <div id="pwa-install-help" class="pwa-help hidden">
     <div class="pwa-help-card" role="dialog" aria-labelledby="pwa-help-title">
-      <h2 id="pwa-help-title">INSTALL GUNSHIP</h2>
-      <p><strong>Chrome / Edge (Android &amp; desktop):</strong> tap the install icon in the address bar, or open the browser menu and choose <em>Install app</em> / <em>Cast, save, and share → Install page as app</em>.</p>
-      <p><strong>iPhone / iPad:</strong> Safari → Share → Add to Home Screen.</p>
-      <p>The installed app launches fullscreen.</p>
-      <button id="pwa-install-help-close" type="button">OK</button>
+      <div class="pwa-help-titlebar">
+        <h2 id="pwa-help-title">INSTALL GUNSHIP</h2>
+        <button id="pwa-install-help-close" type="button" aria-label="Close">X</button>
+      </div>
+      <div class="pwa-help-body">
+        <p><strong>Chrome / Edge (Android &amp; desktop):</strong> tap the install icon in the address bar, or open the browser menu and choose <em>Install app</em> / <em>Cast, save, and share → Install page as app</em>.</p>
+        <p><strong>iPhone / iPad:</strong> Safari → Share → Add to Home Screen.</p>
+        <p>The installed app launches fullscreen.</p>
+      </div>
     </div>
   </div>
   <script type="module">

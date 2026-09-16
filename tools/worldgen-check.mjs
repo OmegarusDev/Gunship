@@ -189,6 +189,10 @@ for (const seed of seeds) {
       place.accessPoints.every((point) => distanceToRoads(point, world.roads) < 45),
       `${label}/${place.id}: connected access points`
     );
+    if (place.kind === 'town') {
+      const local = world.roads.filter((road) => road.tags?.includes(`place:${place.id}`));
+      ok(local.length >= 5, `${label}/${place.id}: town street blocks`);
+    }
   }
   for (const encounter of world.encounters) {
     ok(

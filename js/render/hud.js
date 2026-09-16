@@ -8,7 +8,7 @@ import { drawCornerBrackets } from '../appBridge.js';
 import { clamp } from '../rng.js';
 
 export function hudPlate(ctx, x, y, w, h, accent = 'rgba(90,140,80,0.55)') {
-  ctx.fillStyle = 'rgba(6,12,6,0.62)';
+  ctx.fillStyle = 'rgba(6,12,6,0.78)';
   ctx.fillRect(x, y, w, h);
   ctx.strokeStyle = accent;
   ctx.lineWidth = 1;
@@ -17,7 +17,7 @@ export function hudPlate(ctx, x, y, w, h, accent = 'rgba(90,140,80,0.55)') {
 }
 
 export function plateHeader(ctx, px, py, pw, title, accent = P.ui.textDim) {
-  ctx.font = 'bold 12px "Courier New", monospace';
+  ctx.font = 'bold 13px "Courier New", monospace';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
   ctx.fillStyle = accent;

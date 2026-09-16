@@ -25,4 +25,6 @@ export {
   lastHeaderCogRect,
   drawFooterStrip,
   drawCursorTooltip,
+  drawOsWindow,
+  WINDOW_TITLE_H,
 } from './ui/layout.js';

@@ -36,13 +36,18 @@ import {
   fearUpgradeRects,
   setMenuPointer,
   menuCursor,
+  menuPointerPos,
   applyMenuHitTransform,
   paintMenuGlow,
   drawHeaderDollars,
   drawHeaderCog,
   clearHeaderCog,
   lastHeaderCogRect,
+  drawOsWindow,
+  drawCursorTooltip,
 } from './appBridge.js';
+import { uiSettings, loadUiSettings, setUiSetting, hoverTipsActive } from './ui/settings.js';
+import { GAME_VERSION_LABEL } from './version.js';
 import {
   metaState,
   commitSortieOutcome,
@@ -139,6 +144,14 @@ import { tickSortie } from './sim/sortieTick.js';
 const canvas = document.getElementById('game');
 const camera = new WorldCamera(canvas);
 const input = new Input(canvas);
+input.shouldBlockFire = (x, y) => {
+  if (currentScreen !== screens.sortie) return false;
+  if (settingsOpen || sortieState.levelUpOpen) return true;
+  for (const box of sortieHudHits) {
+    if (x >= box.x && x <= box.x + box.w && y >= box.y && y <= box.y + box.h) return true;
+  }
+  return false;
+};
 
 const screens = {};
 let currentScreen = null;
@@ -146,6 +159,7 @@ let currentScreenName = '';
 let settingsOpen = false;
 let settingsHitBoxes = [];
 let settingsPanelBox = null;
+let sortieHudHits = [];
 let resetConfirmOpen = false;
 let resetHoldStart = 0;
 let resetHoldBox = null;
@@ -871,6 +885,16 @@ function plateHeader(ctx, px, py, pw, title, accent = P.ui.textDim) {
 function hudBar(ctx, x, y, w, h, frac, col, opts = {}) {
   return _hudBar(ctx, x, y, w, h, frac, col, opts);
 }
+function pushHudHit(rect, action, uiS) {
+  if (!rect || !action) return;
+  sortieHudHits.push({
+    x: rect.x * uiS,
+    y: rect.y * uiS,
+    w: rect.w * uiS,
+    h: rect.h * uiS,
+    action,
+  });
+}
 function drawOffscreenMarker(ctx, cam, w, h, wx, wy, color, textColor, tag, uiScale = 1) {
   return _drawOffscreenMarker(ctx, cam, w, h, wx, wy, color, textColor, tag, uiScale);
 }
@@ -1389,6 +1413,12 @@ registerScreen('title', {
       ctx.fillText(`$${c.dollars}`, menuX + menuW / 2, my + 32);
     }
 
+    ctx.font = `${L.phone ? 11 : 12}px "Courier New", monospace`;
+    ctx.fillStyle = P.ui.textDim;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(GAME_VERSION_LABEL, L.content.x, h - L.pad - L.inset.b);
+
     ctx.restore();
   },
 });
@@ -1400,20 +1430,25 @@ function drawFearUpgradeOverlay(ctx, cam) {
   const L = layoutOf(w, h);
   ctx.save();
   ctx.scale(dpr, dpr);
-  ctx.fillStyle = 'rgba(0,0,0,0.72)';
-  ctx.fillRect(0, 0, w, h);
-  drawPanel(ctx, L.content.x - 4, 12 + L.inset.t, L.content.w + 8, h - 24 - L.inset.t - L.inset.b, {
-    fill: '#0a1a0a',
-    stroke: '#cc8833',
-  });
-  ctx.fillStyle = '#ffcc66';
-  ctx.font = `bold ${L.compact ? 18 : 20}px "Courier New", monospace`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'top';
-  ctx.fillText('FEAR GROWS', w / 2, 22 + L.inset.t);
-  ctx.fillStyle = P.ui.textDim;
-  ctx.font = '11px "Courier New", monospace';
-  ctx.fillText('SELECT ONE FIELD UPGRADE', w / 2, 48 + L.inset.t);
+    ctx.fillStyle = 'rgba(0,0,0,0.72)';
+    ctx.fillRect(0, 0, w, h);
+    const fearPanel = {
+      x: L.content.x - 4,
+      y: 12 + L.inset.t,
+      w: L.content.w + 8,
+      h: h - 24 - L.inset.t - L.inset.b,
+    };
+    const fearChrome = drawOsWindow(ctx, fearPanel, {
+      title: 'FEAR GROWS',
+      close: false,
+      danger: true,
+      fill: '#0a1a0a',
+    });
+    ctx.fillStyle = P.ui.textDim;
+    ctx.font = '11px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillText('SELECT ONE FIELD UPGRADE', w / 2, fearChrome.body.y + 10);
 
   const rects = fearUpgradeRects(w, h);
   for (let i = 0; i < sortieState.upgradeChoices.length; i++) {
@@ -1902,6 +1937,19 @@ registerScreen('contracts', {
       drawMenuButton(ctx, rect, { label: rect.label });
       contractsNavBoxes.push(rect);
     }
+    if (hoverTipsActive()) {
+      const pointer = menuPointerPos();
+      if (pointer.inside) {
+        for (let i = 0; i < GameState.contractBoard.length; i++) {
+          const r = contractCardRect(i, w, h);
+          if (!pointInRect(pointer.x, pointer.y, r)) continue;
+          const card = GameState.contractBoard[i];
+          const tip = card.description || card.objectiveLabel;
+          if (tip) drawCursorTooltip(ctx, tip, pointer.x, pointer.y, L.content);
+          break;
+        }
+      }
+    }
     ctx.restore();
   },
 });
@@ -2033,7 +2081,7 @@ registerScreen('briefing', {
     ctx.fillText('FIELD EQUIPMENT', eqPanelX + pad, eqPanelY + 14);
     ctx.fillStyle = P.ui.text;
     ctx.font = '12px "Courier New", monospace';
-    ctx.fillText('One kit. Press E in the air.', eqPanelX + pad, eqPanelY + 30);
+    ctx.fillText(IS_TOUCH ? 'One kit. Tap EQUIP in the air.' : 'One kit. Press E or tap EQUIP in the air.', eqPanelX + pad, eqPanelY + 30);
 
     const eqKeys = Object.keys(EQUIPMENT);
     GameState.briefingEquipmentBoxes.length = 0;
@@ -2070,6 +2118,18 @@ registerScreen('briefing', {
       ctx.fillText(EQUIPMENT[key].desc, bx + 12, by + Math.max(28, eqH * 0.52));
       ctx.restore();
       GameState.briefingEquipmentBoxes.push({ x: bx, y: by, w: eqW, h: eqH, key });
+    }
+
+    if (hoverTipsActive()) {
+      const pointer = menuPointerPos();
+      if (pointer.inside) {
+        for (const box of GameState.briefingEquipmentBoxes) {
+          if (!pointInRect(pointer.x, pointer.y, box)) continue;
+          const eq = EQUIPMENT[box.key];
+          if (eq?.desc) drawCursorTooltip(ctx, eq.desc, pointer.x, pointer.y, L.content);
+          break;
+        }
+      }
     }
 
     const pair = footerPairRects(L, { backLabel: '◂ OPERATIONS', primaryMinW: 200 });
@@ -2429,6 +2489,7 @@ registerScreen('sortie', {
     cam.end(ctx);
 
     // ── HUD ──
+    sortieHudHits = [];
     ctx.save();
     ctx.scale(dpr, dpr);
 
@@ -2449,37 +2510,33 @@ registerScreen('sortie', {
 
     const practice = GameState.isPracticeSortie();
     const nToggles = (input.autofire ? 1 : 0) + (input.clickToTarget ? 1 : 0);
-    const equipReady = sortieState.status === 'active' && heli.equipmentType && !heli.equipmentUsed;
-    const objText = world?.objective ? objectiveHudText() : null;
-    const objWrap = objText
-      ? wrapText(objText, Math.max(16, Math.floor((lpw - 32) / 6))).slice(0, 2)
-      : [];
+    const objText = world?.objective ? objectiveHudText() : 'STANDBY';
+    const objWrap = wrapText(objText, Math.max(16, Math.floor((lpw - 32) / 6.4))).slice(0, 2);
     const intel = world?.objective ? _intelProgress(world) : null;
     const showProgress = !!(
       world?.objective &&
       !sortieState.objectiveComplete &&
       (world.objective.type === 'suppression' || (intel && !intel.complete))
     );
+    const missionH = 42 + objWrap.length * 17 + (showProgress ? 17 : 0) + 8;
     const sysH =
-      52 +
+      54 +
       nToggles * 18 +
       (practice ? 18 : 0) +
-      (equipReady ? 18 : 0) +
       (heli.hasMissiles ? 18 : 0) +
-      objWrap.length * 16 +
-      (showProgress ? 16 : 0) +
       8;
+    const leftStackH = missionH + 8 + sysH;
 
     // Centre stack drops below the side plates on narrow screens.
-    const hpY0 = narrow ? hudPad + Math.max(sysH, rph) + 14 : hudPad;
+    const hpY0 = narrow ? hudPad + Math.max(leftStackH, rph) + 14 : hudPad;
     const hudEtaY = hpY0 + 40;
 
     // Bottom row metrics (radar / compass / sortie stats)
     const mmS = narrow ? 118 : 176;
     const mmX = hudPad;
     const mmY = H - mmS - hudPad - 12;
-    const stW = narrow ? 148 : 192;
-    const stH = narrow ? 58 : 68;
+    const stW = narrow ? 132 : 192;
+    const stH = narrow ? 78 : 72;
     const stX = W - stW - hudPad;
     const stY = H - stH - hudPad;
     const cpW = Math.max(0, Math.min(W - mmS - stW - hudPad * 2 - 48, 360));
@@ -2538,10 +2595,10 @@ registerScreen('sortie', {
 
     // Hull plate (centred — animated bar, segments, damage flash)
     {
-      const hpBarW = narrow ? 110 : 132,
-        hpBarH = 9;
-      const plateW = narrow ? 228 : 280,
-        plateH = 34;
+      const hpBarW = narrow ? 128 : 168,
+        hpBarH = 11;
+      const plateW = narrow ? 248 : 320,
+        plateH = 40;
       const px = W / 2 - plateW / 2,
         py = hpY0;
       const hpPct = heli.hp / heli.maxHp;
@@ -2574,7 +2631,7 @@ registerScreen('sortie', {
       }
 
       const num = `${Math.round(Math.max(0, heli.hp))}/${Math.round(heli.maxHp)}`;
-      ctx.font = 'bold 10px "Courier New", monospace';
+      ctx.font = 'bold 12px "Courier New", monospace';
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
       const labelW = ctx.measureText(label).width;
@@ -2621,17 +2678,17 @@ registerScreen('sortie', {
         (sortieState.heat.value / 100 - hudAnim.heat) * Math.min(1, 8 * (dt || 0.016));
 
       // SCORE — big number, right-aligned
-      ctx.font = 'bold 10px "Courier New", monospace';
+      ctx.font = 'bold 11px "Courier New", monospace';
       ctx.fillStyle = P.ui.textDim;
       ctx.fillText('SCORE', px + 14, py + 22);
-      ctx.font = 'bold 15px "Courier New", monospace';
+      ctx.font = 'bold 16px "Courier New", monospace';
       ctx.fillStyle = P.ui.infamy;
       ctx.textAlign = 'right';
       ctx.fillText(`${heli.score}`, px + pw - 14, py + 20);
       ctx.textAlign = 'left';
 
       // FEAR
-      ctx.font = 'bold 10px "Courier New", monospace';
+      ctx.font = 'bold 11px "Courier New", monospace';
       ctx.fillStyle = '#ff8844';
       ctx.fillText(`FEAR LV ${sortieState.fearLevel || 0}`, px + 14, py + 46);
       hudBar(ctx, px + 14, py + 60, fbW, 5, heli.fear / fearThreshold, '#cc8833', {
@@ -2793,17 +2850,47 @@ registerScreen('sortie', {
       ctx.fillText(`${tRange} m`, ts.x, ts.y + 22);
     }
 
-    // Systems plate — targeting, toggles, equipment, objective
+    // Mission plate — objective and intel, separate from weapons systems
     {
       const px = hudPad,
         py = hudPad,
+        pw = lpw,
+        ph = missionH;
+      hudPlate(ctx, px, py, pw, ph, 'rgba(90,140,80,0.55)');
+      plateHeader(ctx, px, py, pw, 'MISSION');
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.font = 'bold 13px "Courier New", monospace';
+      let ty = py + 24;
+      for (const line of objWrap) {
+        ctx.fillStyle = sortieState.objectiveComplete ? '#44ddff' : '#ffcc44';
+        ctx.fillText(line, px + 14, ty);
+        ty += 17;
+      }
+      if (showProgress) {
+        ctx.fillStyle = P.ui.textDim;
+        ctx.font = 'bold 12px "Courier New", monospace';
+        const intelNow = _intelProgress(world);
+        ctx.fillText(
+          intelNow.complete
+            ? `PROGRESS ${world.objective.progress}/${world.objective.requiredCount}`
+            : `INTEL ${intelNow.secured}/${intelNow.required}`,
+          px + 14,
+          ty
+        );
+      }
+    }
+
+    // Systems plate — targeting, toggles, missiles
+    {
+      const px = hudPad,
+        py = hudPad + missionH + 8,
         pw = lpw;
       hudPlate(ctx, px, py, pw, sysH, 'rgba(90,140,80,0.55)');
       plateHeader(ctx, px, py, pw, 'SYSTEMS');
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
-      ctx.font = 'bold 12px "Courier New", monospace';
-      // Mode-colored targeting readout
+      ctx.font = 'bold 13px "Courier New", monospace';
       const modeCol =
         { closest: P.ui.text, strongest: '#ff8844', infrastructure: '#44cccc' }[heli.targetMode] ||
         P.ui.text;
@@ -2814,9 +2901,9 @@ registerScreen('sortie', {
       ctx.fillText(`TGT ${modeLabel}`, px + 14, py + 24);
       if (!narrow) {
         ctx.fillStyle = P.ui.textDim;
-        ctx.fillText('[SHIFT/V]', px + 120, py + 24);
+        ctx.fillText(IS_TOUCH ? '[MODE]' : '[V]', px + 128, py + 24);
       }
-      let ty = py + 44;
+      let ty = py + 46;
       if (practice) {
         ctx.fillStyle = '#ffcc44';
         ctx.fillText('PRACTICE · NO REWARDS', px + 14, ty);
@@ -2825,11 +2912,6 @@ registerScreen('sortie', {
       for (let i = 0; i < nToggles; i++) {
         ctx.fillStyle = P.ui.rocket;
         ctx.fillText(i === 0 && input.autofire ? 'AUTOFIRE' : 'CLICK-TARGET', px + 14, ty);
-        ty += 18;
-      }
-      if (equipReady) {
-        ctx.fillStyle = '#44cccc';
-        ctx.fillText(`E · ${EQUIPMENT[heli.equipmentType].name}`, px + 14, ty);
         ty += 18;
       }
       if (heli.hasMissiles) {
@@ -2841,23 +2923,6 @@ registerScreen('sortie', {
           ty
         );
         ty += 18;
-      }
-      ctx.font = 'bold 12px "Courier New", monospace';
-      for (const line of objWrap) {
-        ctx.fillStyle = sortieState.objectiveComplete ? '#44ddff' : '#ffcc44';
-        ctx.fillText(line, px + 14, ty);
-        ty += 14;
-      }
-      if (showProgress) {
-        ctx.fillStyle = P.ui.textDim;
-        const intel = _intelProgress(world);
-        ctx.fillText(
-          intel.complete
-            ? `PROGRESS ${world.objective.progress}/${world.objective.requiredCount}`
-            : `INTEL ${intel.secured}/${intel.required}`,
-          px + 14,
-          ty
-        );
       }
     }
 
@@ -3084,7 +3149,7 @@ registerScreen('sortie', {
     }
 
     // ── BOTTOM-CENTRE: compass tape + speed ─────────────────────────────
-    if (cpW >= 130) {
+    if (cpW >= 88) {
       const cx = W / 2,
         cy = stY + stH / 2;
       hudPlate(ctx, cx - cpW / 2, cy - cpH / 2, cpW, cpH, 'rgba(90,140,80,0.55)');
@@ -3167,34 +3232,65 @@ registerScreen('sortie', {
       const tStr = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
       const clearedN = world ? world.encounters.filter((encounter) => encounter.cleared).length : 0;
       const totalEncounters = world ? world.encounters.length : 0;
-      ctx.font = 'bold 11px "Courier New", monospace';
+      ctx.font = 'bold 12px "Courier New", monospace';
       ctx.fillStyle = P.ui.text;
-      ctx.fillText(`KILLS ${sortieState.stats.kills}`, stX + 14, stY + 12);
-      ctx.fillText(`TIME ${tStr}`, stX + 14, stY + 32);
-      ctx.textAlign = 'right';
+      ctx.fillText(`KILLS ${sortieState.stats.kills}`, stX + 12, stY + 10);
+      ctx.fillText(`TIME ${tStr}`, stX + 12, stY + 28);
       ctx.fillStyle = '#ffcc44';
-      ctx.fillText(`CONTACTS ${clearedN}/${totalEncounters}`, stX + stW - 14, stY + 12);
-      ctx.font = 'bold 9px "Courier New", monospace';
-      ctx.fillStyle = 'rgba(90,130,80,0.8)';
-      ctx.fillText(`FPS ${GameState.lastFps}`, stX + stW - 14, stY + 32);
+      ctx.fillText(`CONTACTS ${clearedN}/${totalEncounters}`, stX + 12, stY + 46);
+      ctx.font = 'bold 10px "Courier New", monospace';
+      ctx.fillStyle = 'rgba(90,130,80,0.85)';
+      ctx.textAlign = 'right';
+      ctx.fillText(`FPS ${GameState.lastFps}`, stX + stW - 12, stY + 10);
       ctx.textAlign = 'left';
     }
 
-    // ── Target-MODE chip (touch: sits on the mode tap-zone near fire) ──
-    if (IS_TOUCH) {
-      const chipW = 118,
-        chipH = 24;
-      const chipX = W - chipW - 10,
-        chipY = H * 0.36 - chipH / 2;
-      hudPlate(ctx, chipX, chipY, chipW, chipH, 'rgba(90,140,80,0.55)');
+    // ── MODE + EQUIP — always visible, tappable (desktop shows key hints)
+    {
+      const chipW = narrow ? 138 : 152;
+      const modeH = 30;
+      const eqH = 44;
+      const chipX = W - chipW - hudPad;
+      const modeY = Math.max(hudPad + rph + 12, H * 0.32 - 20);
+      const eqY = modeY + modeH + 8;
       const modeLabel =
         { closest: 'CLOSEST', strongest: 'STRONGEST', infrastructure: 'INFRA' }[heli.targetMode] ||
         'CLOSEST';
-      ctx.font = 'bold 9px "Courier New", monospace';
-      ctx.fillStyle = P.ui.text;
+      hudPlate(ctx, chipX, modeY, chipW, modeH, 'rgba(90,140,80,0.7)');
+      ctx.font = 'bold 11px "Courier New", monospace';
+      ctx.fillStyle = P.ui.textBright;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(`MODE ▸ ${modeLabel}`, chipX + chipW / 2, chipY + chipH / 2 + 0.5);
+      ctx.fillText(
+        IS_TOUCH ? `MODE  ${modeLabel}` : `MODE  ${modeLabel}  V`,
+        chipX + chipW / 2,
+        modeY + modeH / 2 + 0.5
+      );
+      pushHudHit({ x: chipX, y: modeY, w: chipW, h: modeH }, 'mode', uiS);
+
+      const eq = heli.equipmentType && EQUIPMENT[heli.equipmentType];
+      const ready = sortieState.status === 'active' && eq && !heli.equipmentUsed;
+      hudPlate(
+        ctx,
+        chipX,
+        eqY,
+        chipW,
+        eqH,
+        ready ? 'rgba(68,220,200,0.9)' : 'rgba(90,140,80,0.45)'
+      );
+      const eqHint = !eq ? 'EQUIP' : heli.equipmentUsed ? 'EQUIP  USED' : IS_TOUCH ? 'EQUIP  TAP' : 'EQUIP  E';
+      plateHeader(ctx, chipX, eqY, chipW, eqHint, ready ? '#88eeee' : P.ui.textDim);
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.font = 'bold 12px "Courier New", monospace';
+      ctx.fillStyle = ready ? P.ui.textBright : P.ui.textDim;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(chipX + 8, eqY + 20, chipW - 16, 18);
+      ctx.clip();
+      ctx.fillText(eq ? eq.name : 'NO KIT', chipX + 10, eqY + 22);
+      ctx.restore();
+      if (ready) pushHudHit({ x: chipX, y: eqY, w: chipW, h: eqH }, 'equipment', uiS);
     }
 
     // ── Objective + extraction direction markers (drawn above all plates) ──
@@ -3232,18 +3328,23 @@ registerScreen('sortie', {
       }
     }
 
-    // Controls hint — fades out after the first seconds of a sortie,
-    // lifted above the bottom HUD row.
+    // Controls hint — fades after the first seconds of a sortie.
     {
       const age = (performance.now() - GameState.sortieStartedAt) / 1000;
-      const alpha = clamp(1 - (age - 10) / 3, 0, 1) * 0.55;
+      const alpha = clamp(1 - (age - 12) / 4, 0, 1) * 0.7;
       if (alpha > 0.01) {
         ctx.globalAlpha = alpha;
         ctx.fillStyle = P.ui.text;
-        ctx.font = '9px "Courier New", monospace';
+        ctx.font = 'bold 11px "Courier New", monospace';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'bottom';
-        ctx.fillText('MOUSE STEER · CLICK FIRE · V MODE · E EQUIP · P SETTINGS', W / 2, mmY - 10);
+        ctx.fillText(
+          IS_TOUCH
+            ? 'JOYSTICK  ·  TAP FIRE  ·  MODE  ·  EQUIP'
+            : 'WASD  ·  AIM  ·  FIRE  ·  V MODE  ·  E EQUIP  ·  P',
+          W / 2,
+          stY - 10
+        );
         ctx.globalAlpha = 1;
       }
     }
@@ -3280,40 +3381,20 @@ function drawSettings(ctx, cam) {
   ctx.fillRect(0, 0, w, h);
 
   const L = layoutOf(w, h);
-  const cx = w / 2,
-    cy = h / 2;
+  const cx = w / 2;
   const panelW = Math.min(460, L.content.w);
-  const panelH = Math.min(420, h - L.pad * 2);
+  const panelH = Math.min(380, h - L.pad * 2);
   const panelX = cx - panelW / 2;
-  const panelY = cy - panelH / 2;
+  const panelY = h / 2 - panelH / 2;
   settingsPanelBox = { x: panelX, y: panelY, w: panelW, h: panelH };
   settingsHitBoxes = [];
-  ctx.fillStyle = '#0a1a0a';
-  ctx.fillRect(panelX, panelY, panelW, panelH);
-  ctx.strokeStyle = '#3a5a2a';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(panelX, panelY, panelW, panelH);
-  drawCornerBrackets(ctx, panelX, panelY, panelW, panelH, P.ui.borderHi, 14, 2);
-
-  ctx.fillStyle = P.ui.textBright;
-  ctx.font = 'bold 16px "Courier New", monospace';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'top';
-  ctx.fillText(
-    currentScreen === screens.sortie ? 'PAUSE — SETTINGS' : 'SETTINGS',
-    cx,
-    panelY + 14
-  );
-
-  ctx.strokeStyle = '#3a5a2a';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(cx - 100, panelY + 38);
-  ctx.lineTo(cx + 100, panelY + 38);
-  ctx.stroke();
+  const chrome = drawOsWindow(ctx, settingsPanelBox, {
+    title: currentScreen === screens.sortie ? 'PAUSE — SETTINGS' : 'SETTINGS',
+  });
+  if (chrome.close) settingsHitBoxes.push({ ...chrome.close, action: 'close' });
 
   const optX = panelX + 24;
-  let optY = panelY + 52;
+  let optY = chrome.body.y + 16;
   const rowW = panelW - 48;
 
   function drawToggle(label, enabled, action) {
@@ -3353,6 +3434,7 @@ function drawSettings(ctx, cam) {
 
   drawToggle('Autofire (F key)', input.autofire, 'autofire');
   drawToggle('Click to Target (T key)', input.clickToTarget, 'clickTarget');
+  drawToggle('Hover tooltips (mouse)', uiSettings.hoverTips, 'hoverTips');
   drawToggle('Fullscreen', isDomFullscreen(), 'fullscreen');
   drawAction('RESET SAVE', 'resetSave', '#ff6644');
 
@@ -3429,27 +3511,23 @@ function drawResetConfirm(ctx, cam) {
   resetConfirmPanel = { x: panelX, y: panelY, w: panelW, h: panelH };
   resetConfirmHitBoxes = [];
 
-  ctx.fillStyle = '#140c0a';
-  ctx.fillRect(panelX, panelY, panelW, panelH);
-  ctx.strokeStyle = '#aa4433';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(panelX, panelY, panelW, panelH);
-  drawCornerBrackets(ctx, panelX, panelY, panelW, panelH, '#ff6644', 14, 2);
-
-  ctx.fillStyle = '#ff8866';
-  ctx.font = 'bold 16px "Courier New", monospace';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'top';
-  ctx.fillText('RESET SAVE', w / 2, panelY + 18);
+  const chrome = drawOsWindow(ctx, resetConfirmPanel, {
+    title: 'RESET SAVE',
+    danger: true,
+    fill: '#140c0a',
+  });
+  if (chrome.close) resetConfirmHitBoxes.push({ ...chrome.close, action: 'cancelReset' });
 
   ctx.fillStyle = P.ui.text;
   ctx.font = '13px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
   const lines = [
     'This permanently deletes all save data',
     '— career, hangar, pilots, and progress.',
     'This cannot be undone.',
   ];
-  let ty = panelY + 52;
+  let ty = chrome.body.y + 16;
   for (const line of lines) {
     ctx.fillText(line, w / 2, ty);
     ty += 18;
@@ -3565,8 +3643,10 @@ canvas.addEventListener('click', (e) => {
       if (!posInBox(pos, box, cam.dpr)) continue;
       if (box.action === 'autofire') input.autofire = !input.autofire;
       else if (box.action === 'clickTarget') input.clickToTarget = !input.clickToTarget;
+      else if (box.action === 'hoverTips') setUiSetting('hoverTips', !uiSettings.hoverTips);
       else if (box.action === 'fullscreen') toggleFullscreen();
       else if (box.action === 'install') promptInstall();
+      else if (box.action === 'close') toggleSettings();
       else if (box.action === 'resetSave') {
         resetConfirmOpen = true;
         resetHoldStart = 0;
@@ -3576,6 +3656,14 @@ canvas.addEventListener('click', (e) => {
     }
     if (!settingsPanelBox || !posInBox(pos, settingsPanelBox, cam.dpr)) toggleSettings();
     return;
+  }
+  if (currentScreen === screens.sortie && sortieState.status === 'active') {
+    for (const box of sortieHudHits) {
+      if (!posInBox(pos, box, cam.dpr)) continue;
+      if (box.action === 'equipment') input.equipment = true;
+      else if (box.action === 'mode') input.cycleMode = true;
+      return;
+    }
   }
   if (lastHeaderCogRect() && posInBox(pos, lastHeaderCogRect(), cam.dpr)) {
     toggleSettings();
@@ -3719,6 +3807,7 @@ initPwa({
   isSafeToReload: () => currentScreen !== screens.sortie || sortieState.status !== 'active',
 });
 
+loadUiSettings();
 adoptCareer(bootCareer());
 registerScreen('splash', splashScreen);
 registerScreen('hangar', hangarScreen);

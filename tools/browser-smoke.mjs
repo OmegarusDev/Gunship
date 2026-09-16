@@ -75,14 +75,17 @@ try {
     localStorage.setItem('gunship_roster_v1', savedRoster);
   }, JSON.stringify(roster));
   await page.goto(`http://127.0.0.1:${port}/index.html`, { waitUntil: 'load' });
-  await wait(2200);
-
   const stateUrl = `http://127.0.0.1:${port}/js/sim/gameState.js`;
   const contractsUrl = `http://127.0.0.1:${port}/js/contracts.js`;
-  const titleBoxes = await page.evaluate(
-    async (url) => (await import(url)).titleMenuBoxes,
-    stateUrl
-  );
+  let titleBoxes = [];
+  for (let attempt = 0; attempt < 25; attempt++) {
+    titleBoxes = await page.evaluate(
+      async (url) => (await import(url)).titleMenuBoxes,
+      stateUrl
+    );
+    if (titleBoxes.some((box) => box.action === 'options')) break;
+    await wait(200);
+  }
   const optionsBox = titleBoxes.find((box) => box.action === 'options');
   assert.ok(optionsBox, 'campaign hub exposes Options');
   assert.ok(

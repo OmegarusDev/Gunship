@@ -11,10 +11,10 @@ export const FEAR_THRESHOLDS = [10, 25, 50, 85, 130, 190, 270, 370, 500, 660];
 export const HEAT_LABELS = ['QUIET', 'SUSPICIOUS', 'CONTACT', 'COORDINATED', 'CRITICAL'];
 
 export const EQUIPMENT = {
-  repair: { name: 'REPAIR PATCH', desc: 'E: +40 hull instantly' },
-  rocket: { name: 'ROCKET SALVO', desc: 'E: 6 rockets on target' },
-  overboost: { name: 'OVERBOOST', desc: 'E: +50% spd & fire 6s' },
-  flares: { name: 'FLARES', desc: 'E: dissolve nearby fire 3s' },
+  repair: { name: 'REPAIR PATCH', desc: 'E / TAP: +40 hull instantly' },
+  rocket: { name: 'ROCKET SALVO', desc: 'E / TAP: 6 rockets on target' },
+  overboost: { name: 'OVERBOOST', desc: 'E / TAP: +50% spd & fire 6s' },
+  flares: { name: 'FLARES', desc: 'E / TAP: dissolve nearby fire 3s' },
 };
 
 export function createHeli() {

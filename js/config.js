@@ -93,7 +93,7 @@ export const COMBAT = {
 /** HUD layout tuning. */
 export const HUD = {
   scaleDivisor: 720, // uiScale = clamp(min(w,h)/this, 1, scaleMax)
-  scaleMax: 1.7,
+  scaleMax: 1.85,
   narrowBreakpoint: 720, // W below this = stacked HUD layout
 };
 

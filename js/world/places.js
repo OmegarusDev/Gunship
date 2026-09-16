@@ -11,6 +11,7 @@ import {
   deriveSeed,
   distance,
   localToWorld,
+  nearestPointOnPolyline,
   orientedRectangle,
   pointAlongPolyline,
   polygonIntersectsPolygon,
@@ -185,6 +186,49 @@ function roadThrough(id, origin, angle, length, width, surface, hierarchy, tags,
   return makeStreet(id, points, width, surface, hierarchy, tags);
 }
 
+function xy(point) {
+  return { x: point.x, y: point.y };
+}
+
+function offsetPoint(point, angle, dist) {
+  return {
+    x: point.x + Math.cos(angle) * dist,
+    y: point.y + Math.sin(angle) * dist,
+  };
+}
+
+function spurFrom(start, angle, length) {
+  return [xy(start), offsetPoint(start, angle, length)];
+}
+
+function primaryStreet(streets) {
+  return (
+    streets.find((road) => road.tags?.includes('main-street')) ||
+    streets.find((road) => road.hierarchy === 'local') ||
+    streets[0] ||
+    null
+  );
+}
+
+function joinAccessToStreet(street, access) {
+  if (!street?.points?.length || !access) return null;
+  const hit = nearestPointOnPolyline(street.points, access.x, access.y);
+  if (!hit) return null;
+  if (hit.distance < 2) return null;
+  const start = street.points[0];
+  const end = street.points[street.points.length - 1];
+  const dStart = distance(start, access);
+  const dEnd = distance(end, access);
+  if (Math.min(dStart, dEnd) <= hit.distance + 22) {
+    if (dStart <= dEnd) street.points.unshift(xy(access));
+    else street.points.push(xy(access));
+    return null;
+  }
+  return {
+    points: [xy(access), { x: hit.x, y: hit.y }],
+  };
+}
+
 function courtyardFootprint(center, w, d, rotation, wall, openAcross) {
   const hw = w * 0.5;
   const hd = d * 0.5;
@@ -321,15 +365,13 @@ function streetsForAnchor(anchor, placeId, nextRoadId, rng) {
   const a = anchor.axis;
   const cross = a + Math.PI * 0.5;
   if (anchor.type === 'town') {
-    const spineLen = anchor.scale * 0.96;
-    const spinePts = [0, 0.3, 0.62, 1].map((t, index) =>
-      localToWorld(
-        anchor,
-        a,
-        -spineLen * 0.5 + spineLen * t,
-        index === 0 || index === 3 ? 0 : between(rng, -26, 26)
-      )
-    );
+    const half = anchor.scale * 0.48;
+    const bow = between(rng, -10, 10);
+    const spinePts = [
+      localToWorld(anchor, a, -half, 0),
+      localToWorld(anchor, a, 0, bow),
+      localToWorld(anchor, a, half, 0),
+    ];
     const spine = makeStreet(
       nextRoadId(),
       spinePts,
@@ -339,60 +381,79 @@ function streetsForAnchor(anchor, placeId, nextRoadId, rng) {
       ['place-street', `place:${placeId}`, 'souk-spine', 'main-street']
     );
     roads.push(spine);
-    const spineLength = polylineLength(spine.points);
-    const alleyCount = 4 + Math.floor(rng() * 2);
-    for (let i = 0; i < alleyCount; i++) {
-      const t = 0.13 + (i / Math.max(1, alleyCount - 1)) * 0.74 + between(rng, -0.03, 0.03);
-      const start = pointAlongPolyline(spine.points, spineLength * Math.max(0.08, Math.min(0.92, t)));
+    const spineLen = polylineLength(spine.points);
+    const blockDepth = anchor.scale * 0.26;
+    const sides = [-1, 1];
+    for (const side of sides) {
+      const backPts = [
+        localToWorld(anchor, a, -half, side * blockDepth),
+        localToWorld(anchor, a, 0, bow + side * blockDepth),
+        localToWorld(anchor, a, half, side * blockDepth),
+      ];
+      const back = makeStreet(
+        nextRoadId(),
+        backPts,
+        8,
+        'dirt',
+        'alley',
+        ['place-street', `place:${placeId}`, 'back-street', 'block-street']
+      );
+      roads.push(back);
+      const backLen = polylineLength(back.points);
+      const crosses = 3;
+      for (let i = 0; i < crosses; i++) {
+        const t = (i + 1) / (crosses + 1);
+        const from = pointAlongPolyline(spine.points, spineLen * t);
+        const to = pointAlongPolyline(back.points, backLen * t);
+        roads.push(
+          makeStreet(
+            nextRoadId(),
+            [xy(from), xy(to)],
+            7,
+            'dirt',
+            'alley',
+            ['place-street', `place:${placeId}`, 'cross-street', 't-junction']
+          )
+        );
+      }
+    }
+  } else if (anchor.type === 'village' || anchor.type === 'compound') {
+    const main = add(a, anchor.scale * 0.96, 9, 'dirt', 'local', ['village-lane', 'main-street']);
+    const mainLen = polylineLength(main.points);
+    const spurCount = anchor.type === 'compound' ? 2 : 1 + (rng() < 0.55 ? 1 : 0);
+    for (let i = 0; i < spurCount; i++) {
+      const t = Math.max(0.22, Math.min(0.78, 0.3 + i * 0.28 + between(rng, -0.04, 0.04)));
+      const start = pointAlongPolyline(main.points, mainLen * t);
       const side = i % 2 === 0 ? 1 : -1;
-      const deadEnd = i === alleyCount - 1 || rng() < 0.38;
-      const alleyLen = anchor.scale * (deadEnd ? between(rng, 0.2, 0.3) : between(rng, 0.38, 0.55));
-      const mid = localToWorld(start, a, between(rng, -12, 12), side * alleyLen * (deadEnd ? 1 : 0.52));
-      const end = localToWorld(start, a, between(rng, -16, 16), side * alleyLen);
+      const len = anchor.scale * between(rng, 0.28, 0.4);
       roads.push(
         makeStreet(
           nextRoadId(),
-          deadEnd ? [start, end] : [start, mid, end],
-          deadEnd ? 6 : 8,
-          'dirt',
+          spurFrom(start, start.angle + Math.PI * 0.5, side * len),
+          6,
+          'track',
           'alley',
-          [
-            'place-street',
-            `place:${placeId}`,
-            deadEnd ? 'dead-end' : 't-junction',
-            'quarter-lane',
-          ]
+          ['place-street', `place:${placeId}`, 'farm-spur', 't-junction']
         )
       );
     }
-    add(
-      a + between(rng, -0.05, 0.05),
-      anchor.scale * 0.42,
-      7,
-      'dirt',
-      'alley',
-      ['back-lane'],
-      between(rng, -anchor.scale * 0.08, anchor.scale * 0.1),
-      (rng() < 0.5 ? -1 : 1) * anchor.scale * between(rng, 0.2, 0.3),
-      between(rng, -8, 8)
-    );
-  } else if (anchor.type === 'village' || anchor.type === 'compound') {
-    add(a, anchor.scale * 0.88, 9, 'dirt', 'local', ['village-lane'], 0, 0, between(rng, -14, 14));
-    add(
-      cross + between(rng, -0.08, 0.08),
-      anchor.scale * between(rng, 0.34, 0.5),
-      6,
-      'track',
-      'alley',
-      ['farm-spur', rng() < 0.45 ? 'dead-end' : 't-junction'],
-      between(rng, -anchor.scale * 0.12, anchor.scale * 0.16)
-    );
   } else if (anchor.type === 'farm') {
-    add(a, anchor.scale * 0.76, 7, 'track', 'local', ['farm-track']);
+    const track = add(a, anchor.scale * 0.8, 7, 'track', 'local', ['farm-track', 'main-street']);
+    const at = pointAlongPolyline(track.points, polylineLength(track.points) * 0.4);
+    roads.push(
+      makeStreet(
+        nextRoadId(),
+        spurFrom(at, at.angle + Math.PI * 0.5, (rng() < 0.5 ? 1 : -1) * anchor.scale * 0.22),
+        5,
+        'track',
+        'alley',
+        ['place-street', `place:${placeId}`, 'farm-spur', 't-junction']
+      )
+    );
   } else if (anchor.type === 'roadside_service') {
-    add(a, anchor.scale * 0.82, 11, 'compacted', 'service', ['frontage-road']);
+    add(a, anchor.scale * 0.82, 11, 'compacted', 'service', ['frontage-road', 'main-street']);
   } else if (anchor.type === 'fuel_depot' || anchor.type === 'industrial_depot') {
-    add(a, anchor.scale * 0.76, 11, 'compacted', 'service', ['yard-spine']);
+    add(a, anchor.scale * 0.76, 11, 'compacted', 'service', ['yard-spine', 'main-street']);
     add(cross, anchor.scale * 0.56, 9, 'dirt', 'service', ['loading-lane']);
   } else if (anchor.type === 'checkpoint') {
     const length = anchor.scale * 0.96;
@@ -402,33 +463,22 @@ function streetsForAnchor(anchor, placeId, nextRoadId, rng) {
         nextRoadId(),
         [
           localToWorld(origin, a, -length * 0.5, 0),
-          localToWorld(origin, a, -length * 0.16, 16),
-          localToWorld(origin, a, length * 0.16, -16),
+          localToWorld(origin, a, -length * 0.18, 7),
+          localToWorld(origin, a, length * 0.18, -7),
           localToWorld(origin, a, length * 0.5, 0),
         ],
         11,
         'compacted',
         'local',
-        ['place-street', `place:${placeId}`, 'inspection-lane', 'chicane']
+        ['place-street', `place:${placeId}`, 'inspection-lane', 'chicane', 'main-street']
       )
     );
   } else if (anchor.type === 'camp') {
-    add(a, anchor.scale * 0.74, 10, 'dirt', 'local', ['parade-road']);
+    add(a, anchor.scale * 0.74, 10, 'dirt', 'local', ['parade-road', 'main-street']);
     add(cross, anchor.scale * 0.58, 9, 'dirt', 'service', ['motor-pool-road']);
   } else {
-    const center = anchor;
-    for (let i = 0; i < 3; i++) {
-      const angle = a + (i / 3) * Math.PI * 2;
-      const end = localToWorld(center, angle, anchor.scale * 0.36, 0);
-      roads.push({
-        id: nextRoadId(),
-        points: [{ x: center.x, y: center.y }, end],
-        width: 8,
-        surface: 'dirt',
-        hierarchy: 'service',
-        tags: ['place-street', `place:${placeId}`, 'battery-spur'],
-      });
-    }
+    add(a, anchor.scale * 0.72, 8, 'dirt', 'service', ['battery-approach', 'main-street']);
+    add(cross, anchor.scale * 0.4, 7, 'dirt', 'service', ['battery-pad'], anchor.scale * 0.12, 0);
   }
   return roads;
 }
@@ -654,12 +704,12 @@ function placeBuildings(anchor, place, districts, streets, rng, nextParcelId, ne
             true
           );
           if (overlapsExisting(buildings, candidate.building.footprint)) {
-            cursor += 5;
+            cursor += Math.max(8, width * 0.4);
             continue;
           }
           commitBuilding(candidate, parcels, buildings);
           planIndex++;
-          cursor += candidate.building.w + between(rng, 0.9, 2.1);
+          cursor += candidate.building.w + between(rng, 1.4, 3.2);
         }
       }
     }
@@ -675,7 +725,7 @@ function placeBuildings(anchor, place, districts, streets, rng, nextParcelId, ne
     const slot = laneIndex % slotsPerRoad;
     const amount = total * ((slot + 1) / (slotsPerRoad + 1));
     const base = pointAlongPolyline(road.points, amount, lengths);
-    const jitter = between(rng, -Math.min(7, total * 0.02), Math.min(7, total * 0.02));
+    const jitter = packed ? 0 : between(rng, -Math.min(7, total * 0.02), Math.min(7, total * 0.02));
     const point = {
       x: base.x + Math.cos(base.angle) * jitter,
       y: base.y + Math.sin(base.angle) * jitter,
@@ -893,6 +943,7 @@ export function generatePlaces(seed, worldSize, terrain, region, transport, regi
   const nextBuildingId = () => `building-${String(buildingNumber++).padStart(4, '0')}`;
   const nextFeatureId = () => `feature-${String(featureNumber++).padStart(4, '0')}`;
   const usedNames = new Set();
+  const localStreets = new Map();
 
   for (let index = 0; index < region.destinationAnchors.length; index++) {
     const anchor = region.destinationAnchors[index];
@@ -934,17 +985,21 @@ export function generatePlaces(seed, worldSize, terrain, region, transport, regi
       discovered: false,
     };
 
-    const connector = nearestRoadPoint(
-      roads,
-      anchor.x,
-      anchor.y,
-      (road) => (transport.connections[anchor.id] || []).includes(road.id)
-    );
+    const connectorIds = transport.connections[anchor.id] || [];
+    const connectorRoad = roads.find((road) => connectorIds.includes(road.id));
+    const start = connectorRoad?.points?.[0];
+    const end = connectorRoad?.points?.[connectorRoad.points.length - 1];
+    const gate =
+      start && end
+        ? distance(start, anchor) <= distance(end, anchor)
+          ? start
+          : end
+        : nearestRoadPoint(roads, anchor.x, anchor.y, (road) => connectorIds.includes(road.id));
     place.accessPoints.push({
       id: `access-${placeId}-01`,
-      x: connector?.x ?? anchor.x,
-      y: connector?.y ?? anchor.y,
-      roadId: connector?.roadId || place.roadIds[0],
+      x: gate?.x ?? anchor.x,
+      y: gate?.y ?? anchor.y,
+      roadId: connectorRoad?.id || gate?.roadId || place.roadIds[0],
       kind: 'road-gate',
     });
 
@@ -952,6 +1007,7 @@ export function generatePlaces(seed, worldSize, terrain, region, transport, regi
     const streets = streetsForAnchor(anchor, placeId, nextRoadId, rng);
     roads.push(...streets);
     place.roadIds.push(...streets.map((road) => road.id));
+    localStreets.set(placeId, streets);
     const generated = placeBuildings(
       anchor,
       place,
@@ -986,22 +1042,16 @@ export function generatePlaces(seed, worldSize, terrain, region, transport, regi
     places.push(place);
   }
 
-  // Ensure local streets physically meet the regional connector at each gate.
+  // Plug the regional connector into the local street at a gate, not a slash through the fabric.
   for (const place of places) {
     const access = place.accessPoints[0];
-    const local = nearestRoadPoint(
-      roads,
-      place.x,
-      place.y,
-      (road) => road.tags?.includes(`place:${place.id}`)
-    );
-    if (access && local && distance(access, local) > 2) {
+    const streets = localStreets.get(place.id) || [];
+    const street = primaryStreet(streets);
+    const stub = joinAccessToStreet(street, access);
+    if (stub) {
       const road = {
         id: nextRoadId(),
-        points: [
-          { x: access.x, y: access.y },
-          { x: local.x, y: local.y },
-        ],
+        points: stub.points,
         width: 8,
         surface: 'dirt',
         hierarchy: 'access',

@@ -4,7 +4,8 @@
  * Mouse: cursor = fly direction (always). Click = fire.
  * Keyboard: WASD = move, Space = fire, Shift = cycle target.
  * Gamepad: left stick = move, right stick = aim, A = fire, LB = cycle target.
- * Touch: left half = virtual joystick, tap right = fire, target-cycle button.
+ * Touch: left half = virtual joystick, tap right = fire.
+ * HUD MODE / EQUIP plates are tappable and block fire.
  */
 
 export class Input {
@@ -43,6 +44,9 @@ export class Input {
     this.equipment = false;
     this.pause = false;
     this.abandon = false;
+
+    // HUD chrome (equip / mode) should not fire the gun.
+    this.shouldBlockFire = () => false;
 
     // Settings
     this.autofire = false;
@@ -101,9 +105,15 @@ export class Input {
     c.addEventListener('mousedown', (e) => {
       e.preventDefault();
       this.pointerDown = true;
+      const rect = c.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      this.mouseX = x;
+      this.mouseY = y;
+      if (typeof this.shouldBlockFire === 'function' && this.shouldBlockFire(x, y)) return;
       if (this.clickToTarget) {
-        this.clickTargetX = e.clientX - c.getBoundingClientRect().left;
-        this.clickTargetY = e.clientY - c.getBoundingClientRect().top;
+        this.clickTargetX = x;
+        this.clickTargetY = y;
         this.clickTarget = true;
       } else {
         this.fireHeld = true;
@@ -145,6 +155,8 @@ export class Input {
       this.mouseOnScreen = true;
       this.pointerDown = true;
 
+      if (typeof this.shouldBlockFire === 'function' && this.shouldBlockFire(x, y)) continue;
+
       if (norm.x < 0.45) {
         // Left side = movement joystick
         this.joystickActive = true;
@@ -152,12 +164,6 @@ export class Input {
         this.joystickOrigin.y = y;
         this.joystickPos.x = x;
         this.joystickPos.y = y;
-      } else if (norm.y < 0.3) {
-        // Top-right = target cycle
-        this.cycleTarget = true;
-      } else if (norm.y < 0.42) {
-        // Below it = target MODE cycle (next to the fire button)
-        this.cycleMode = true;
       } else {
         this._fireTouchId = t.identifier;
         this.fireHeldTouch = true;

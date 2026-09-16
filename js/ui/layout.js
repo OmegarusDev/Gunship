@@ -377,6 +377,82 @@ export function drawPanel(ctx, x, y, w, h, { stroke = P.ui.border, fill = '#0d21
   drawCornerBrackets(ctx, x, y, w, h, P.ui.borderHi, 14, 2);
 }
 
+export const WINDOW_TITLE_H = 30;
+
+/**
+ * Phosphor desktop window: title bar, optional close box, scanlines.
+ * Caller is in CSS-pixel space.
+ */
+export function drawOsWindow(
+  ctx,
+  rect,
+  { title = '', close = true, danger = false, fill = '#0c1610' } = {}
+) {
+  const { x, y, w, h } = rect;
+  const barH = WINDOW_TITLE_H;
+  const stroke = danger ? '#aa5544' : P.ui.borderHi;
+  const barFill = danger ? 'rgba(72, 22, 16, 0.96)' : 'rgba(16, 40, 18, 0.96)';
+  ctx.fillStyle = fill;
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = 1.6;
+  ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+  drawCornerBrackets(ctx, x, y, w, h, danger ? '#ff8866' : 'rgba(170,255,136,0.55)', 12, 1.6);
+
+  ctx.fillStyle = barFill;
+  ctx.fillRect(x + 1, y + 1, w - 2, barH);
+  ctx.fillStyle = 'rgba(0,0,0,0.22)';
+  for (let row = 0; row < barH; row += 2) ctx.fillRect(x + 1, y + 1 + row, w - 2, 1);
+  ctx.strokeStyle = danger ? 'rgba(204,80,64,0.55)' : 'rgba(90,140,80,0.45)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x + 1, y + barH + 0.5);
+  ctx.lineTo(x + w - 1, y + barH + 0.5);
+  ctx.stroke();
+
+  const closeW = 22;
+  const closeH = 18;
+  const closeRect = close
+    ? {
+        x: x + w - closeW - 7,
+        y: y + Math.round((barH - closeH) / 2) + 1,
+        w: closeW,
+        h: closeH,
+      }
+    : null;
+  const titleMax = closeRect ? closeRect.x - x - 18 : w - 20;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x + 10, y + 1, Math.max(8, titleMax), barH);
+  ctx.clip();
+  ctx.fillStyle = danger ? '#ffb0a0' : P.ui.textBright;
+  ctx.font = 'bold 13px "Courier New", monospace';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(String(title).toUpperCase(), x + 12, y + 1 + barH / 2 + 0.5);
+  ctx.restore();
+
+  if (closeRect) {
+    const hit = menuHit(closeRect);
+    ctx.fillStyle = hit.hover || hit.pressed ? '#6a2420' : '#2c1412';
+    ctx.fillRect(closeRect.x, closeRect.y, closeRect.w, closeRect.h);
+    ctx.strokeStyle = hit.hover || hit.pressed ? '#ff9990' : '#cc6660';
+    ctx.lineWidth = 1.1;
+    ctx.strokeRect(closeRect.x + 0.5, closeRect.y + 0.5, closeRect.w - 1, closeRect.h - 1);
+    ctx.fillStyle = '#ffe8e4';
+    ctx.font = 'bold 13px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('X', closeRect.x + closeRect.w / 2, closeRect.y + closeRect.h / 2 + 0.5);
+  }
+
+  return {
+    close: closeRect,
+    body: { x: x + 1, y: y + barH + 1, w: w - 2, h: h - barH - 2 },
+    panel: rect,
+  };
+}
+
 export function drawMenuButton(
   ctx,
   rect,

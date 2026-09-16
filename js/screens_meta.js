@@ -14,7 +14,9 @@ import {
   drawHeaderDollars,
   drawCursorTooltip,
   footerNavRects,
+  drawOsWindow,
 } from './appBridge.js';
+import { hoverTipsActive } from './ui/settings.js';
 import { drawGunship } from './render/gunships.js';
 import { drawEnemy, drawBossSilhouette } from './render/entities.js';
 import { HANGAR_HOUR } from './sun.js';
@@ -99,11 +101,6 @@ function careerOrEmpty() {
 
 let hangarTime = 0;
 let hangarPinnedTip = null;
-
-function finePointerHover() {
-  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return true;
-  return window.matchMedia('(hover: hover) and (pointer: fine)').matches;
-}
 
 function fillHangarFrame(ctx, r) {
   ctx.fillStyle = 'rgba(8,16,10,0.92)';
@@ -301,7 +298,6 @@ function drawHangarUpgrades(ctx, area, career, gap) {
   const colW = (area.w - pad * 2 - gap * (cols - 1)) / cols;
   let hoverTip = null;
   const pointer = menuPointerPos();
-  const hoverOk = finePointerHover();
   const gunId = career.gunship;
   const noRacks = !gunshipHasMissiles(gunId);
 
@@ -403,7 +399,19 @@ function drawHangarUpgrades(ctx, area, career, gap) {
 
     hangarBuyBoxes.push({ ...inspectRect, kind: 'inspect', inspect: slot, tip: desc });
     menuHit(inspectRect, { quiet: true });
-    if (hoverOk && overCard) {
+    const info = { x: bx + bw - 28, y: by + 6, w: 20, h: 20 };
+    if (buyRect && !stacked) info.x = Math.min(info.x, buyRect.x - 24);
+    ctx.fillStyle = 'rgba(68,204,204,0.14)';
+    ctx.fillRect(info.x, info.y, info.w, info.h);
+    ctx.strokeStyle = '#44cccc';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(info.x + 0.5, info.y + 0.5, info.w - 1, info.h - 1);
+    ctx.fillStyle = '#88eeee';
+    ctx.font = 'bold 12px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('i', info.x + info.w / 2, info.y + info.h / 2 + 0.5);
+    if (hoverTipsActive() && overCard) {
       hoverTip = { text: desc, x: pointer.x, y: pointer.y };
     }
   }
@@ -532,7 +540,6 @@ export function handleHangarClick(px, py, dpr) {
     return true;
   }
   if (hit.kind === 'inspect') {
-    if (finePointerHover()) return true;
     if (hangarPinnedTip && hangarPinnedTip.inspect === hit.inspect) {
       hangarPinnedTip = null;
       return true;
@@ -558,6 +565,7 @@ export function handleHangarClick(px, py, dpr) {
 // ═════════════════════════════════════════════════════════════
 
 let skillHintId = null;
+let skillHintClose = null;
 let skillFlash = null;
 let skillToast = '';
 let skillToastUntil = 0;
@@ -672,24 +680,22 @@ export const pilotScreen = {
       ctx.font = 'bold 16px "Courier New", monospace';
       ctx.fillText(skill.name, rect.x + 14, rect.y + 12);
       const nameW = ctx.measureText(skill.name).width;
-      const hint = {
+      const hintChip = {
         x: Math.min(rect.x + 20 + nameW, rect.x + rect.w - 44),
         y: rect.y + 8,
         w: 32,
         h: 32,
-        id: skill.id,
-        kind: 'hint',
       };
-      const hintHit = menuHit(hint);
+      const hintHit = menuHit(hintChip);
       ctx.fillStyle = hintHit.hover ? 'rgba(68,204,204,0.28)' : 'rgba(68,204,204,0.12)';
-      ctx.fillRect(hint.x, hint.y, hint.w, hint.h);
+      ctx.fillRect(hintChip.x, hintChip.y, hintChip.w, hintChip.h);
       ctx.strokeStyle = hintHit.hover ? '#88eeee' : '#44cccc';
-      ctx.strokeRect(hint.x + 0.5, hint.y + 0.5, hint.w - 1, hint.h - 1);
+      ctx.strokeRect(hintChip.x + 0.5, hintChip.y + 0.5, hintChip.w - 1, hintChip.h - 1);
       ctx.fillStyle = '#88eeee';
       ctx.font = 'bold 16px "Courier New", monospace';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText('?', hint.x + hint.w / 2, hint.y + hint.h / 2 + 1);
+      ctx.fillText('?', hintChip.x + hintChip.w / 2, hintChip.y + hintChip.h / 2 + 1);
 
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
@@ -737,7 +743,26 @@ export const pilotScreen = {
         compact: false,
         blink: canUp,
       });
+      const hint = {
+        x: rect.x,
+        y: rect.y,
+        w: rect.w,
+        h: Math.max(40, btn.y - rect.y),
+        id: skill.id,
+        kind: 'hint',
+      };
       pilotNodeBoxes.push(hint, btn);
+    }
+
+    const pointer = menuPointerPos();
+    if (!skillHintId && hoverTipsActive() && pointer.inside) {
+      for (let i = 0; i < PILOT_SKILLS.length; i++) {
+        const rect = panels[i];
+        if (pointerInRect(pointer, rect) && PILOT_SKILLS[i].hint) {
+          drawCursorTooltip(ctx, PILOT_SKILLS[i].hint, pointer.x, pointer.y, L.content);
+          break;
+        }
+      }
     }
 
     if (skillToast && now < skillToastUntil) {
@@ -771,35 +796,17 @@ export const pilotScreen = {
       ctx.fillStyle = 'rgba(0,0,0,0.62)';
       ctx.fillRect(0, 0, w, h);
       const pw = Math.min(500, L.content.w);
-      const ph = Math.min(320, L.content.h);
+      const ph = Math.min(340, L.content.h);
       const px = (w - pw) / 2;
       const py = (h - L.footerH - ph) / 2;
-      ctx.fillStyle = '#0c1610';
-      ctx.fillRect(px, py, pw, ph);
-      ctx.strokeStyle = '#88aa66';
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(px + 0.5, py + 0.5, pw - 1, ph - 1);
-      drawCornerBrackets(ctx, px, py, pw, ph, 'rgba(204,136,51,0.7)', 14, 1.6);
-      const close = { x: px + pw - 44, y: py + 10, w: 34, h: 32, kind: 'hint-close' };
-      const closeHit = menuHit(close);
-      ctx.fillStyle = closeHit.hover ? '#5a2020' : '#2a1212';
-      ctx.fillRect(close.x, close.y, close.w, close.h);
-      ctx.strokeStyle = closeHit.hover ? '#ff8888' : '#cc6666';
-      ctx.strokeRect(close.x + 0.5, close.y + 0.5, close.w - 1, close.h - 1);
-      ctx.fillStyle = '#ffdddd';
-      ctx.font = 'bold 18px "Courier New", monospace';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('X', close.x + close.w / 2, close.y + close.h / 2 + 1);
+      const chrome = drawOsWindow(ctx, { x: px, y: py, w: pw, h: ph }, { title: def?.name || 'SKILL' });
+      skillHintClose = chrome.close;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
-      ctx.fillStyle = P.ui.textBright;
-      ctx.font = 'bold 20px "Courier New", monospace';
-      ctx.fillText(def?.name || 'SKILL', px + 22, py + 16);
       ctx.fillStyle = P.ui.text;
       ctx.font = '14px "Courier New", monospace';
       const lines = wrapHint(ctx, def?.hint || '', pw - 44);
-      let ly = py + 50;
+      let ly = chrome.body.y + 14;
       for (const line of lines) {
         ctx.fillText(line, px + 22, ly);
         ly += 20;
@@ -820,6 +827,8 @@ export const pilotScreen = {
         ctx.fillText(perk.desc, px + 22, ly);
         ly += 20;
       }
+    } else {
+      skillHintClose = null;
     }
     ctx.restore();
   },
@@ -832,6 +841,18 @@ export function handlePilotClick(px, py, dpr) {
   const career = metaState.career;
   if (!career) return false;
   if (skillHintId) {
+    if (skillHintClose) {
+      const c = skillHintClose;
+      const onClose =
+        px >= c.x * dpr &&
+        px <= (c.x + c.w) * dpr &&
+        py >= c.y * dpr &&
+        py <= (c.y + c.h) * dpr;
+      if (onClose) {
+        skillHintId = null;
+        return true;
+      }
+    }
     skillHintId = null;
     return true;
   }
@@ -1108,6 +1129,18 @@ export const dossiersScreen = {
     dossierNavBoxes = nav;
     for (const rect of nav) drawMenuButton(ctx, rect, { label: rect.label });
 
+    const pointer = menuPointerPos();
+    if (!dossierPopup && hoverTipsActive() && pointer.inside) {
+      for (const tile of dossierTileBoxes) {
+        if (!pointerInRect(pointer, tile)) continue;
+        const boss = BOSS_DOSSIERS[tile.className];
+        const def = ENEMY_CLASSES[tile.className];
+        const tip = boss?.blurb || def?.blurb;
+        if (tip) drawCursorTooltip(ctx, tip, pointer.x, pointer.y, L.content);
+        break;
+      }
+    }
+
     if (dossierPopup) {
       const boss = BOSS_DOSSIERS[dossierPopup];
       const def = ENEMY_CLASSES[dossierPopup];
@@ -1118,54 +1151,29 @@ export const dossiersScreen = {
       const px = (w - pw) / 2;
       const py = (h - L.footerH - ph) / 2 + 10;
       dossierPanelRect = { x: px, y: py, w: pw, h: ph };
-      ctx.fillStyle = boss ? '#160c0c' : '#0c1610';
-      ctx.fillRect(px, py, pw, ph);
-      ctx.strokeStyle = boss ? '#cc6666' : '#88aa66';
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(px + 0.5, py + 0.5, pw - 1, ph - 1);
-      drawCornerBrackets(
-        ctx,
-        px,
-        py,
-        pw,
-        ph,
-        boss ? 'rgba(204,80,80,0.75)' : 'rgba(204,136,51,0.7)',
-        14,
-        1.6
-      );
-
-      const close = { x: px + pw - 42, y: py + 10, w: 32, h: 28 };
-      dossierCloseBox = close;
-      const closeHit = menuHit(close);
-      ctx.fillStyle = closeHit.hover ? '#5a2020' : '#2a1212';
-      ctx.fillRect(close.x, close.y, close.w, close.h);
-      ctx.strokeStyle = closeHit.hover ? '#ff8888' : '#cc6666';
-      ctx.strokeRect(close.x + 0.5, close.y + 0.5, close.w - 1, close.h - 1);
-      ctx.fillStyle = '#ffdddd';
-      ctx.font = 'bold 16px "Courier New", monospace';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('X', close.x + close.w / 2, close.y + close.h / 2 + 1);
-
-      const kills = dossierKillCount(career, dossierPopup);
       const title = boss
         ? boss.name
         : ENEMY_CLASS_LABELS[dossierPopup] || dossierPopup.toUpperCase();
+      const chrome = drawOsWindow(
+        ctx,
+        dossierPanelRect,
+        { title, danger: Boolean(boss), fill: boss ? '#160c0c' : '#0c1610' }
+      );
+      dossierCloseBox = chrome.close;
+
+      const kills = dossierKillCount(career, dossierPopup);
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
-      ctx.fillStyle = boss ? '#ffcccc' : P.ui.textBright;
-      ctx.font = 'bold 18px "Courier New", monospace';
-      ctx.fillText(fitDossierLabel(ctx, title, pw - 80), px + 22, py + 16);
       ctx.fillStyle = '#ffcc44';
       ctx.font = 'bold 13px "Courier New", monospace';
-      ctx.fillText(`CONFIRMED KILLS  ${kills}`, px + 22, py + 42);
+      ctx.fillText(`CONFIRMED KILLS  ${kills}`, px + 22, chrome.body.y + 12);
 
       drawDossierPreview(ctx, dossierPopup, px + pw * 0.26, py + ph * 0.58, boss ? 4.2 : 5.0);
 
       ctx.font = '13px "Courier New", monospace';
       ctx.fillStyle = P.ui.text;
       const statsX = px + pw * 0.5;
-      let sy = py + 78;
+      let sy = chrome.body.y + 40;
       const lines = boss
         ? [
             `HUNTER    ACT ${boss.act}${boss.final ? '  FINAL' : ''}`,
@@ -1303,6 +1311,24 @@ export const achievementsScreen = {
     const nav = footerNavRects(L, ['◂ CAMPAIGN']);
     achievementNavBoxes = nav;
     drawMenuButton(ctx, nav[0], { label: nav[0].label });
+    const pointer = menuPointerPos();
+    if (hoverTipsActive() && pointer.inside) {
+      for (let i = 0; i < ACHIEVEMENTS.length; i++) {
+        const row = ACHIEVEMENTS[i];
+        const col = i % cols;
+        const r = Math.floor(i / cols);
+        const rect = {
+          x: L.content.x + col * (cardW + gap),
+          y: L.content.y + r * (cardH + gap),
+          w: cardW,
+          h: cardH,
+        };
+        if (!pointerInRect(pointer, rect)) continue;
+        const on = Boolean(unlocked[row.id]);
+        drawCursorTooltip(ctx, on ? row.desc : 'LOCKED', pointer.x, pointer.y, L.content);
+        break;
+      }
+    }
     ctx.restore();
   },
 };

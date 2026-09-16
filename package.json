@@ -1,6 +1,6 @@
 {
   "name": "gunship",
-  "version": "1.0.0",
+  "version": "0.7.0",
   "description": "Gunship: Freedom Protocol — browser helicopter roguelite (vanilla ES modules, zero runtime deps)",
   "type": "module",
   "private": true,

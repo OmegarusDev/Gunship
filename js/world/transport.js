@@ -9,6 +9,8 @@ import { mulberry32 } from '../rng.js';
 import {
   clamp,
   deriveSeed,
+  distance,
+  localToWorld,
   nearestPointOnPolyline as projectToPolyline,
   polylineLength,
   simplifyPolyline,
@@ -188,7 +190,7 @@ function leastCostPath(startPoint, endPoint, grid) {
   points.reverse();
   points[0] = { ...startPoint };
   points[points.length - 1] = { ...endPoint };
-  return simplifyPolyline(points, cell * 0.7, 0.09);
+  return simplifyPolyline(points, cell * 1.05, 0.13);
 }
 
 function pointsEqual(a, b) {
@@ -240,6 +242,31 @@ function boundaryPointForDirection(direction, worldSize, inset = 36) {
   const dy = Math.max(1e-6, Math.abs(direction.y));
   const multiplier = Math.min(half / dx, half / dy);
   return { x: direction.x * multiplier, y: direction.y * multiplier };
+}
+
+function townGates(town) {
+  const axis = Number.isFinite(town?.axis) ? town.axis : 0;
+  const scale = Math.max(80, town?.scale || 400);
+  return {
+    a: localToWorld(town, axis, -scale * 0.48, 0),
+    b: localToWorld(town, axis, scale * 0.48, 0),
+  };
+}
+
+function approachGate(anchor, toward) {
+  if (!anchor || !Number.isFinite(anchor.x) || !toward) return toward;
+  const axis = Number.isFinite(anchor.axis) ? anchor.axis : 0;
+  const scale = Math.max(80, anchor.scale || 160);
+  const dx = toward.x - anchor.x;
+  const dy = toward.y - anchor.y;
+  const c = Math.cos(axis);
+  const s = Math.sin(axis);
+  const along = dx * c + dy * s;
+  const across = -dx * s + dy * c;
+  if (Math.abs(along) >= Math.abs(across) * 0.72) {
+    return localToWorld(anchor, axis, (along >= 0 ? 1 : -1) * scale * 0.48, 0);
+  }
+  return localToWorld(anchor, axis, 0, (across >= 0 ? 1 : -1) * scale * 0.36);
 }
 
 /**
@@ -300,16 +327,18 @@ export function generateTransport(seed, worldSize, terrain, region) {
   }
 
   const town = anchors.find((anchor) => anchor.type === 'town') || anchors[0] || { x: 0, y: 0 };
+  const gates = townGates(town);
+  const inboundUsesA = distance(gateways[0], gates.a) <= distance(gateways[0], gates.b);
   const inbound = addRoad(
     gateways[0],
-    town,
+    inboundUsesA ? gates.a : gates.b,
     'highway',
     'paved',
     randomBetween(rng, 30, 38),
     ['regional', 'gateway', `gateway:${gateways[0].id}`, `anchor:${town.id || 'town'}`]
   );
   const outbound = addRoad(
-    town,
+    inboundUsesA ? gates.b : gates.a,
     gateways[1],
     'highway',
     'paved',
@@ -337,7 +366,7 @@ export function generateTransport(seed, worldSize, terrain, region) {
     }
     const branch = addRoad(
       gateways[2],
-      branchTarget,
+      approachGate(branchTarget, gateways[2]),
       'highway',
       'paved',
       randomBetween(rng, 25, 32),
@@ -384,7 +413,7 @@ export function generateTransport(seed, worldSize, terrain, region) {
         : anchor.type === 'checkpoint'
           ? randomBetween(rng, 13, 18)
           : randomBetween(rng, 9, 15);
-    const road = addRoad(anchor, target, hierarchy, surface, width, [
+    const road = addRoad(approachGate(anchor, target), target, hierarchy, surface, width, [
       'destination-connector',
       `anchor:${anchor.id}`,
       `destination:${anchor.type}`,
@@ -399,7 +428,7 @@ export function generateTransport(seed, worldSize, terrain, region) {
     if (!connections[anchor.id]?.length) {
       const nearest = nearestRoadPoint(roads, anchor.x, anchor.y);
       const target = nearest ? nearest : town;
-      const road = addRoad(anchor, target, 'access', 'track', 9, [
+      const road = addRoad(approachGate(anchor, target), target, 'access', 'track', 9, [
         'destination-connector',
         'connectivity-fallback',
         `anchor:${anchor.id}`,

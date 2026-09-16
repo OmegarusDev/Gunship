@@ -122,7 +122,7 @@ function metalSunOverlay(ctx, fill, x0, y0, x1, y1, kind = 'path') {
 
 const HALO = '#000000';
 /** Screen-pixel outline so hangar scale and in-world scale stay the same weight. */
-const HALO_PX = 2.35;
+const HALO_PX = 2.9;
 const INNER = 0.5;
 let _halo = false;
 
