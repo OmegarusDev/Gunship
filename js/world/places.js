@@ -22,14 +22,14 @@ import { nearestRoadPoint } from './transport.js';
 
 const BUILDING_TYPES = Object.freeze({
   courtyard_house: {
-    w: [32, 44],
-    d: [27, 38],
-    h: [9, 14],
+    w: [16, 22],
+    d: [14, 20],
+    h: [8, 12],
     col: '#a8895d',
     tags: ['civilian', 'residential', 'courtyard'],
   },
-  house: { w: [24, 34], d: [20, 28], h: [8, 12], col: '#b49363', tags: ['civilian', 'residential'] },
-  hut: { w: [18, 27], d: [14, 21], h: [6, 9], col: '#9f8057', tags: ['civilian', 'residential'] },
+  house: { w: [14, 22], d: [12, 20], h: [7, 11], col: '#b49363', tags: ['civilian', 'residential'] },
+  hut: { w: [12, 18], d: [10, 16], h: [6, 9], col: '#9f8057', tags: ['civilian', 'residential'] },
   shop: { w: [25, 36], d: [20, 28], h: [9, 13], col: '#ae8d5e', tags: ['civilian', 'commerce'] },
   market: { w: [40, 54], d: [30, 42], h: [9, 13], col: '#b29364', tags: ['civilian', 'commerce', 'landmark'] },
   mosque: { w: [36, 48], d: [30, 40], h: [13, 18], col: '#c1a574', tags: ['civilian', 'civic', 'sacred', 'landmark'] },
@@ -76,6 +76,34 @@ const BUILDING_TYPES = Object.freeze({
     h: [12, 18],
     col: '#77776a',
     tags: ['industrial', 'fuel', 'missionEligible', 'explosive'],
+  },
+  hangar: {
+    w: [54, 82],
+    d: [38, 56],
+    h: [14, 22],
+    col: '#7c7a66',
+    tags: ['industrial', 'vehicle', 'missionEligible', 'hangar'],
+  },
+  office: {
+    w: [28, 40],
+    d: [22, 32],
+    h: [10, 16],
+    col: '#8a846c',
+    tags: ['industrial', 'commerce', 'office'],
+  },
+  pumpjack: {
+    w: [16, 24],
+    d: [22, 34],
+    h: [14, 22],
+    col: '#6e6a58',
+    tags: ['industrial', 'fuel', 'oil', 'missionEligible'],
+  },
+  derrick: {
+    w: [18, 26],
+    d: [18, 26],
+    h: [32, 48],
+    col: '#74705c',
+    tags: ['industrial', 'fuel', 'oil', 'landmark', 'missionEligible'],
   },
   barracks: {
     w: [42, 62],
@@ -163,6 +191,7 @@ function placeName(anchor, index, rng, used) {
   if (anchor.type === 'farm') name = `${base} Farms`;
   else if (anchor.type === 'roadside_service') name = `${base} Services`;
   else if (anchor.type === 'fuel_depot') name = `${base} Fuel Yard`;
+  else if (anchor.type === 'oil_field') name = `${base} Oil Field`;
   else if (anchor.type === 'industrial_depot') name = `${base} Freight Yard`;
   else if (anchor.type === 'checkpoint') name = `${base} Checkpoint`;
   else if (anchor.type === 'camp') name = `Camp ${base}`;
@@ -331,7 +360,11 @@ function buildDistricts(anchor, placeId, nextDistrictId) {
       'commerce',
       'roadside',
     ]);
-  } else if (anchor.type === 'fuel_depot' || anchor.type === 'industrial_depot') {
+  } else if (
+    anchor.type === 'fuel_depot' ||
+    anchor.type === 'industrial_depot' ||
+    anchor.type === 'oil_field'
+  ) {
     add('secured_yard', 0, 0, anchor.scale * 0.82, anchor.scale * 0.68, [
       'industrial',
       'logistics',
@@ -390,10 +423,10 @@ function streetsForAnchor(anchor, placeId, nextRoadId, rng) {
     const spine = makeStreet(
       nextRoadId(),
       spinePts,
-      13,
+      8,
       'compacted',
       'local',
-      ['place-street', `place:${placeId}`, 'souk-spine', 'main-street']
+      ['place-street', `place:${placeId}`, 'souk-spine', 'main-street', 'organic-lane']
     );
     roads.push(spine);
     const spineLen = polylineLength(spine.points);
@@ -411,7 +444,7 @@ function streetsForAnchor(anchor, placeId, nextRoadId, rng) {
         8,
         'dirt',
         'alley',
-        ['place-street', `place:${placeId}`, 'back-street', 'block-street']
+        ['place-street', `place:${placeId}`, 'back-street', 'block-street', 'organic-lane']
       );
       roads.push(back);
       const backLen = polylineLength(back.points);
@@ -427,7 +460,7 @@ function streetsForAnchor(anchor, placeId, nextRoadId, rng) {
             7,
             'dirt',
             'alley',
-            ['place-street', `place:${placeId}`, 'cross-street', 't-junction']
+            ['place-street', `place:${placeId}`, 'cross-street', 't-junction', 'sikka']
           )
         );
       }
@@ -467,9 +500,14 @@ function streetsForAnchor(anchor, placeId, nextRoadId, rng) {
     );
   } else if (anchor.type === 'roadside_service') {
     add(a, anchor.scale * 0.82, 11, 'compacted', 'service', ['frontage-road', 'main-street']);
-  } else if (anchor.type === 'fuel_depot' || anchor.type === 'industrial_depot') {
-    add(a, anchor.scale * 0.76, 11, 'compacted', 'service', ['yard-spine', 'main-street']);
-    add(cross, anchor.scale * 0.56, 9, 'dirt', 'service', ['loading-lane']);
+  } else if (
+    anchor.type === 'fuel_depot' ||
+    anchor.type === 'industrial_depot' ||
+    anchor.type === 'oil_field'
+  ) {
+    add(a, anchor.scale * 0.76, 11, 'compacted', 'service', ['yard-spine', 'main-street', 'grid-street']);
+    add(cross, anchor.scale * 0.56, 9, 'dirt', 'service', ['loading-lane', 'grid-street']);
+    add(a, anchor.scale * 0.5, 8, 'dirt', 'service', ['pad-lane', 'grid-street'], 0, anchor.scale * 0.2);
   } else if (anchor.type === 'checkpoint') {
     const length = anchor.scale * 0.96;
     const origin = { x: anchor.x, y: anchor.y };
@@ -489,8 +527,9 @@ function streetsForAnchor(anchor, placeId, nextRoadId, rng) {
       )
     );
   } else if (anchor.type === 'camp') {
-    add(a, anchor.scale * 0.74, 10, 'dirt', 'local', ['parade-road', 'main-street']);
-    add(cross, anchor.scale * 0.58, 9, 'dirt', 'service', ['motor-pool-road']);
+    add(a, anchor.scale * 0.74, 10, 'dirt', 'local', ['parade-road', 'main-street', 'grid-street']);
+    add(cross, anchor.scale * 0.58, 9, 'dirt', 'service', ['motor-pool-road', 'grid-street']);
+    add(a, anchor.scale * 0.52, 8, 'dirt', 'service', ['barrack-lane', 'grid-street'], 0, anchor.scale * 0.22);
   } else {
     add(a, anchor.scale * 0.72, 8, 'dirt', 'service', ['battery-approach', 'main-street']);
     add(cross, anchor.scale * 0.4, 7, 'dirt', 'service', ['battery-pad'], anchor.scale * 0.12, 0);
@@ -505,10 +544,11 @@ function buildingPlan(type, count) {
     compound: ['courtyard_house', 'courtyard_house', 'shed', 'hut'],
     farm: ['farm_house', 'shed', 'shed', 'hut'],
     roadside_service: ['shop', 'garage', 'depot', 'house'],
-    fuel_depot: ['fuel', 'fuel', 'depot', 'garage', 'guard_post'],
-    industrial_depot: ['warehouse', 'depot', 'garage', 'guard_post'],
+    fuel_depot: ['fuel', 'fuel', 'depot', 'garage', 'office', 'guard_post'],
+    industrial_depot: ['warehouse', 'depot', 'garage', 'hangar', 'office', 'guard_post'],
+    oil_field: ['pumpjack', 'pumpjack', 'derrick', 'fuel', 'office', 'depot', 'guard_post'],
     checkpoint: ['guard_post', 'bunker', 'tower'],
-    camp: ['command', 'barracks', 'barracks', 'garage', 'bunker', 'tower'],
+    camp: ['command', 'barracks', 'barracks', 'garage', 'hangar', 'bunker', 'tower'],
     sam_site: ['radar', 'bunker', 'garage', 'guard_post', 'tower'],
   };
   const guaranteed = {
@@ -518,9 +558,10 @@ function buildingPlan(type, count) {
     farm: ['farm_house'],
     roadside_service: ['shop'],
     fuel_depot: ['fuel', 'depot'],
-    industrial_depot: ['warehouse', 'depot'],
+    industrial_depot: ['warehouse', 'depot', 'hangar'],
+    oil_field: ['derrick', 'pumpjack', 'office'],
     checkpoint: ['guard_post'],
-    camp: ['command', 'barracks'],
+    camp: ['command', 'barracks', 'hangar'],
     sam_site: ['radar', 'bunker'],
   }[type];
   const output = [...guaranteed];
@@ -538,11 +579,12 @@ function targetBuildingCount(anchor, rng) {
     roadside_service: [4, 7],
     fuel_depot: [7, 11],
     industrial_depot: [8, 13],
+    oil_field: [10, 16],
     checkpoint: [3, 5],
     camp: [9, 14],
     sam_site: [6, 10],
   };
-  const [min, max] = ranges[anchor.type];
+  const [min, max] = ranges[anchor.type] || [6, 10];
   return Math.round(between(rng, min, max));
 }
 
@@ -771,7 +813,11 @@ function perimeterFeatures(anchor, place, nextFeatureId) {
   const output = [];
   const military = place.category === 'military';
   const enclosed =
-    military || anchor.type === 'compound' || anchor.type === 'fuel_depot' || anchor.type === 'industrial_depot';
+    military ||
+    anchor.type === 'compound' ||
+    anchor.type === 'fuel_depot' ||
+    anchor.type === 'industrial_depot' ||
+    anchor.type === 'oil_field';
   if (!enclosed) return output;
   const kind = anchor.type === 'sam_site' ? 'berm' : military ? 'wall' : 'fence';
   const halfW = anchor.scale * 0.44;
@@ -855,7 +901,7 @@ function landmarkFeatures(anchor, place, buildings, nextFeatureId, rng) {
       });
     }
   }
-  if (anchor.type === 'fuel_depot') {
+  if (anchor.type === 'fuel_depot' || anchor.type === 'oil_field') {
     const tanks = buildings.filter((building) => building.placeId === place.id && building.type === 'fuel');
     for (const tank of tanks) {
       output.push({

@@ -424,6 +424,9 @@ export const hangarScreen = {
   enter() {
     hangarPinnedTip = null;
   },
+  exit() {
+    hangarPinnedTip = null;
+  },
   draw(ctx, cam, dt = 0) {
     hangarTime += dt || 0;
     const w = cam.screenW,
@@ -606,6 +609,14 @@ function wrapHint(ctx, text, maxW) {
 }
 
 export const pilotScreen = {
+  enter() {
+    skillHintId = null;
+    skillHintClose = null;
+  },
+  exit() {
+    skillHintId = null;
+    skillHintClose = null;
+  },
   draw(ctx, cam) {
     const w = cam.screenW,
       h = cam.screenH;

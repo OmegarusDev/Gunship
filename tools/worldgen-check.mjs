@@ -85,6 +85,8 @@ function canonical(world) {
 }
 
 const profiles = new Set();
+const kinds = new Set();
+const buildingTypes = new Set();
 const seeds = Array.from({ length: 48 }, (_, index) => 401 + index * 97);
 
 for (const seed of seeds) {
@@ -103,7 +105,7 @@ for (const seed of seeds) {
   ok(world.worldSize === worldSizeForAct(1), `${label}: act 1 operational area`);
   ok(!('sites' in world), `${label}: no legacy sites`);
   ok(canonical(world) === canonical(again), `${label}: deterministic canonical geometry`);
-  ok(world.places.length >= 12 && world.places.length <= 18, `${label}: 12–18 destinations`);
+  ok(world.places.length >= 24 && world.places.length <= 36, `${label}: 24–36 destinations`);
   ok(world.encounters.length >= 10 && world.encounters.length <= 14, `${label}: 10–14 contacts`);
   ok(
     world.places.some((place) => place.kind === 'town' && (place.scale || 0) >= 500),
@@ -116,10 +118,7 @@ for (const seed of seeds) {
     ...(world.convoys || []).flatMap((convoy) => convoy.composition || []),
   ];
   for (const className of spawned) {
-    ok(
-      classMinAct(className) <= 1,
-      `${label}: ${className} must not spawn in act 1`
-    );
+    ok(classMinAct(className) <= 1, `${label}: ${className} must not spawn in act 1`);
   }
   ok(
     world.places.some(
@@ -133,6 +132,8 @@ for (const seed of seeds) {
   const profile =
     world.region?.profile?.id || world.region?.profile || world.region?.id || 'unknown';
   profiles.add(profile);
+  for (const place of world.places) kinds.add(place.kind);
+  for (const building of world.buildings) buildingTypes.add(building.type);
 
   const roadIds = new Set(world.roads.map((road) => road.id));
   const parcelIds = new Set(world.parcels.map((parcel) => parcel.id));
@@ -169,6 +170,12 @@ for (const seed of seeds) {
       building.tags?.includes('residential') ? !building.tags.includes('missionTarget') : true,
       `${label}/${building.id}: homes excluded from mission targets`
     );
+    if (building.tags?.includes('residential')) {
+      ok(
+        building.w <= 22 && building.d <= 20,
+        `${label}/${building.id}: residential stays infantry-scale`
+      );
+    }
   }
   for (const place of world.places) {
     ok(
@@ -192,6 +199,21 @@ for (const seed of seeds) {
     if (place.kind === 'town') {
       const local = world.roads.filter((road) => road.tags?.includes(`place:${place.id}`));
       ok(local.length >= 5, `${label}/${place.id}: town street blocks`);
+      ok(
+        local.every((road) => road.width <= 8.5),
+        `${label}/${place.id}: town streets stay lane-scale`
+      );
+      ok(
+        local.some((road) => road.tags?.includes('organic-lane') || road.tags?.includes('sikka')),
+        `${label}/${place.id}: plotted lots with residual lanes`
+      );
+    }
+    if (place.kind === 'camp' || place.kind === 'industrial_depot') {
+      const local = world.roads.filter((road) => road.tags?.includes(`place:${place.id}`));
+      ok(
+        local.filter((road) => road.tags?.includes('grid-street')).length >= 3,
+        `${label}/${place.id}: orthogonal facility grid`
+      );
     }
   }
   for (const encounter of world.encounters) {
@@ -232,14 +254,21 @@ for (const seed of seeds) {
   if (contract.scenarioId === 'sabotage') {
     const sam = world.places.find((place) => place.kind === 'sam_site');
     const targetPlace = world.places.find((place) => place.id === world.objective?.targetPlaceId);
-    ok(
-      !sam || targetPlace?.kind === 'sam_site',
-      `${label}: sabotage prefers SAM over camp`
-    );
+    ok(!sam || targetPlace?.kind === 'sam_site', `${label}: sabotage prefers SAM over camp`);
   }
 }
 
-ok(profiles.size >= 3, `regional variety: saw ${profiles.size} profiles (${[...profiles].join(', ')})`);
+ok(
+  profiles.size >= 3,
+  `regional variety: saw ${profiles.size} profiles (${[...profiles].join(', ')})`
+);
+ok(kinds.has('oil_field'), 'oil fields placed across seeds');
+ok(
+  buildingTypes.has('hangar') && buildingTypes.has('warehouse'),
+  'military/industrial hangars and warehouses'
+);
+ok(buildingTypes.has('pumpjack') && buildingTypes.has('derrick'), 'oil pumps and derricks');
+ok(buildingTypes.has('office'), 'regular small facility offices');
 
 {
   const late = new Set();
@@ -265,7 +294,10 @@ ok(profiles.size >= 3, `regional variety: saw ${profiles.size} profiles (${[...p
     }
   }
   ok(late.has('manpads'), 'act 4 field roster includes MANPADS');
-  ok(late.has('twin23') || late.has('aaTruck') || late.has('shilka'), 'act 4 field roster includes mid/late AA');
+  ok(
+    late.has('twin23') || late.has('aaTruck') || late.has('shilka'),
+    'act 4 field roster includes mid/late AA'
+  );
   ok(
     late.has('shilka') || late.has('tank') || late.has('sam') || late.has('heavyAA'),
     `act 4 field roster includes heavy kit (${[...late].join(', ')})`

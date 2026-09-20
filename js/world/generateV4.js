@@ -282,7 +282,12 @@ function generateDecorations(seed, terrain, landUse, places) {
 
 function seedSupplyAndFuel(world, rng) {
   for (const place of world.places) {
-    if (place.kind !== 'fuel_depot' && place.kind !== 'industrial_depot') continue;
+    if (
+      place.kind !== 'fuel_depot' &&
+      place.kind !== 'industrial_depot' &&
+      place.kind !== 'oil_field'
+    )
+      continue;
     const tank = world.buildings.find((building) => building.placeId === place.id && building.type === 'fuel');
     const depot = {
       id: `depot-${place.id}`,
@@ -296,7 +301,11 @@ function seedSupplyAndFuel(world, rng) {
   }
 
   const cratePlaces = world.places.filter(
-    (place) => place.kind === 'industrial_depot' || place.kind === 'fuel_depot' || place.kind === 'camp'
+    (place) =>
+      place.kind === 'industrial_depot' ||
+      place.kind === 'fuel_depot' ||
+      place.kind === 'oil_field' ||
+      place.kind === 'camp'
   );
   const extra = (world.luck || 0) >= 10 ? 2 : (world.luck || 0) >= 5 ? 1 : 0;
   for (const place of cratePlaces.slice(0, 3 + extra)) {

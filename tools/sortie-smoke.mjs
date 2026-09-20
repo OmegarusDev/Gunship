@@ -105,7 +105,7 @@ for (const scenarioId of Object.keys(SCENARIOS)) {
     ok(world.worldGenVersion === 4, `[${scenarioId}/${seed}] uses WORLD_GEN v4`);
     ok(!('sites' in world), `[${scenarioId}/${seed}] has no legacy sites collection`);
     ok(
-      world.places.length >= 12 && world.places.length <= 18,
+      world.places.length >= 24 && world.places.length <= 36,
       `[${scenarioId}/${seed}] physical destination count in range`
     );
     ok(
@@ -220,7 +220,10 @@ for (const act of [1, 2, 3, 4]) {
       campaign: { act, sortie: 1 },
     },
   });
-  ok(world.worldSize === worldSizeForAct(act), `act ${act} operational area is ${worldSizeForAct(act)}`);
+  ok(
+    world.worldSize === worldSizeForAct(act),
+    `act ${act} operational area is ${worldSizeForAct(act)}`
+  );
 }
 ok(
   worldSizeForAct(4) > worldSizeForAct(3) &&
@@ -278,7 +281,10 @@ const c2 = createCareer(999);
 c2.pilot.skills.gunnery = 10;
 const m = aggregateModifiers(c2.pilot, c2.hangar);
 const mPlain = aggregateModifiers(createCareer(999).pilot, createCareer(999).hangar);
-ok(m.spreadMult < mPlain.spreadMult && m.dmgMult === mPlain.dmgMult, 'gunnery tightens spread without raising damage');
+ok(
+  m.spreadMult < mPlain.spreadMult && m.dmgMult === mPlain.dmgMult,
+  'gunnery tightens spread without raising damage'
+);
 
 const heliPlain = baseHeli();
 applyCareerToHeli(heliPlain, c2.pilot, c2.hangar);
@@ -290,10 +296,7 @@ ok(
 const heliNoSkill = baseHeli();
 const c3 = createCareer(999);
 applyCareerToHeli(heliNoSkill, c3.pilot, c3.hangar);
-ok(
-  heliPlain.spreadMult < heliNoSkill.spreadMult,
-  'gunnery tightens spread vs an untrained pilot'
-);
+ok(heliPlain.spreadMult < heliNoSkill.spreadMult, 'gunnery tightens spread vs an untrained pilot');
 
 // ── 3. Report ───────────────────────────────────────────────────────────────
 console.log(`\nSortie smoke test: ${pass} passed, ${fail} failed`);

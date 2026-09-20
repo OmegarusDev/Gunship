@@ -203,5 +203,11 @@ export function hunterClockRate(sortieState, activeContract) {
   const difficulty = getDifficultyProfile(activeContract?.difficultyId);
   const style = getStyle(activeContract?.styleId);
   const heatFactor = 0.72 + (sortieState.heat.value / 100) * 1.18;
-  return heatFactor * (difficulty.hunterEtaMultiplier ?? 1) * (style.hunterRateMultiplier || 1);
+  const fearFactor = 1 + Math.min(8, sortieState.fearLevel || 0) * 0.035;
+  return (
+    heatFactor *
+    fearFactor *
+    (difficulty.hunterEtaMultiplier ?? 1) *
+    (style.hunterRateMultiplier || 1)
+  );
 }

@@ -44,15 +44,19 @@ export function resolveLiveTarget(world, enemies, boss, target) {
   }
   if (target.state !== undefined) return isLockable(target) ? target : null;
   if (target.destructible !== undefined) {
-    const building = (world?.buildings || []).find((item) => item === target || item.id === target.id) || target;
+    const building =
+      (world?.buildings || []).find((item) => item === target || item.id === target.id) || target;
     return isLockable(building) ? building : null;
   }
   if (Array.isArray(target.route)) {
-    const convoy = (world?.convoys || []).find((item) => item === target || item.id === target.id) || target;
+    const convoy =
+      (world?.convoys || []).find((item) => item === target || item.id === target.id) || target;
     return isLockable(convoy) ? convoy : null;
   }
   if (target.collected !== undefined) {
-    const crate = (world?.supplyCrates || []).find((item) => item === target || item.id === target.id) || target;
+    const crate =
+      (world?.supplyCrates || []).find((item) => item === target || item.id === target.id) ||
+      target;
     return isLockable(crate) ? crate : null;
   }
   return isLockable(target) ? target : null;
@@ -115,7 +119,11 @@ export function collectAimables(world, enemies, boss, mode = 'closest') {
   }
   if (mode === 'infrastructure') {
     for (const building of world?.buildings || []) {
-      if (isLockable(building)) pushUnique(out, seen, building);
+      if (!isLockable(building)) continue;
+      if ((building.collateral || building.tags?.includes('civilian')) && !building.intelHolder) {
+        continue;
+      }
+      pushUnique(out, seen, building);
     }
   }
   if (mode === 'infrastructure' || mode === 'closest' || mode === 'strongest') {
@@ -187,7 +195,9 @@ export function pickClickedTarget(world, enemies, boss, worldPos, opts = {}) {
   }
   for (const convoy of world?.convoys || []) {
     if (convoy.destroyed) continue;
-    const members = convoyMembers ? convoyMembers(convoy) : [{ x: convoy.x, y: convoy.y, isVeh: true }];
+    const members = convoyMembers
+      ? convoyMembers(convoy)
+      : [{ x: convoy.x, y: convoy.y, isVeh: true }];
     for (const member of members) {
       const dist = Math.hypot(member.x - worldPos.x, member.y - worldPos.y);
       const radius = member.isVeh ? 26 : 20;

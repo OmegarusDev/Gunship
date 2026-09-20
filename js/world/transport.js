@@ -14,6 +14,7 @@ import {
   nearestPointOnPolyline as projectToPolyline,
   polylineLength,
   simplifyPolyline,
+  meanderPolyline,
 } from './geometry.js';
 
 const TERRAIN_COST = Object.freeze({
@@ -89,10 +90,7 @@ class MinHeap {
         const left = index * 2 + 1;
         const right = left + 1;
         let child = left;
-        if (
-          right < this.items.length &&
-          this.items[right].score < this.items[left].score
-        ) {
+        if (right < this.items.length && this.items[right].score < this.items[left].score) {
           child = right;
         }
         if (this.items[child].score >= last.score) break;
@@ -191,7 +189,7 @@ function leastCostPath(startPoint, endPoint, grid, buffers) {
   points.reverse();
   points[0] = { ...startPoint };
   points[points.length - 1] = { ...endPoint };
-  return simplifyPolyline(points, cell * 1.05, 0.13);
+  return simplifyPolyline(points, cell * 0.44, 0.048);
 }
 
 function pointsEqual(a, b) {
@@ -304,12 +302,9 @@ export function generateTransport(seed, worldSize, terrain, region) {
   const tradeDirection = region?.axes?.trade?.direction || { x: 1, y: 0 };
   const opposite = { x: -tradeDirection.x, y: -tradeDirection.y };
   const gateways = [
-    boundaryGateway(
-      'gateway-westbound',
-      boundaryPointForDirection(opposite, worldSize),
-      opposite,
-      ['regional-highway']
-    ),
+    boundaryGateway('gateway-westbound', boundaryPointForDirection(opposite, worldSize), opposite, [
+      'regional-highway',
+    ]),
     boundaryGateway(
       'gateway-eastbound',
       boundaryPointForDirection(tradeDirection, worldSize),
@@ -317,7 +312,7 @@ export function generateTransport(seed, worldSize, terrain, region) {
       ['regional-highway']
     ),
   ];
-  if (rng() < 0.72) {
+  if (rng() < 0.98) {
     const side = rng() < 0.5 ? -1 : 1;
     const branchDirection = {
       x: -tradeDirection.y * side,
@@ -341,7 +336,7 @@ export function generateTransport(seed, worldSize, terrain, region) {
     inboundUsesA ? gates.a : gates.b,
     'highway',
     'paved',
-    randomBetween(rng, 30, 38),
+    randomBetween(rng, 16, 21),
     ['regional', 'gateway', `gateway:${gateways[0].id}`, `anchor:${town.id || 'town'}`]
   );
   const outbound = addRoad(
@@ -349,7 +344,7 @@ export function generateTransport(seed, worldSize, terrain, region) {
     gateways[1],
     'highway',
     'paved',
-    randomBetween(rng, 30, 38),
+    randomBetween(rng, 16, 21),
     ['regional', 'gateway', `gateway:${gateways[1].id}`, `anchor:${town.id || 'town'}`]
   );
   if (town.id) connections[town.id] = [inbound.id, outbound.id];
@@ -376,13 +371,8 @@ export function generateTransport(seed, worldSize, terrain, region) {
       approachGate(branchTarget, gateways[2]),
       'highway',
       'paved',
-      randomBetween(rng, 25, 32),
-      [
-        'regional',
-        'freight',
-        `gateway:${gateways[2].id}`,
-        `anchor:${branchTarget.id || 'town'}`,
-      ]
+      randomBetween(rng, 14, 18),
+      ['regional', 'freight', `gateway:${gateways[2].id}`, `anchor:${branchTarget.id || 'town'}`]
     );
     if (branchTarget.id) {
       connections[branchTarget.id] = [...(connections[branchTarget.id] || []), branch.id];
@@ -409,17 +399,18 @@ export function generateTransport(seed, worldSize, terrain, region) {
       anchor.type === 'village' ||
       anchor.type === 'roadside_service' ||
       anchor.type === 'fuel_depot' ||
-      anchor.type === 'industrial_depot'
+      anchor.type === 'industrial_depot' ||
+      anchor.type === 'oil_field'
         ? 'paved'
         : anchor.category === 'agriculture'
           ? 'track'
           : 'dirt';
     const width =
       hierarchy === 'secondary'
-        ? randomBetween(rng, 16, 23)
+        ? randomBetween(rng, 9, 13)
         : anchor.type === 'checkpoint'
-          ? randomBetween(rng, 13, 18)
-          : randomBetween(rng, 9, 15);
+          ? randomBetween(rng, 8, 11)
+          : randomBetween(rng, 5.5, 8);
     const road = addRoad(approachGate(anchor, target), target, hierarchy, surface, width, [
       'destination-connector',
       `anchor:${anchor.id}`,
@@ -429,13 +420,73 @@ export function generateTransport(seed, worldSize, terrain, region) {
     connections[anchor.id] = [...(connections[anchor.id] || []), road.id];
   }
 
+  const localKinds = new Set(['town', 'village', 'compound', 'farm', 'roadside_service']);
+  const locals = anchors.filter((anchor) => localKinds.has(anchor.type));
+  const neighborEdges = [];
+  for (let i = 0; i < locals.length; i++) {
+    for (let j = i + 1; j < locals.length; j++) {
+      const a = locals[i];
+      const b = locals[j];
+      const span = Math.hypot(a.x - b.x, a.y - b.y);
+      if (span < 130 || span > 1680) continue;
+      neighborEdges.push({ a, b, span });
+    }
+  }
+  neighborEdges.sort((left, right) => left.span - right.span);
+  const linked = new Set();
+  let extraLinks = 0;
+  let countryLanes = 0;
+  for (const edge of neighborEdges) {
+    const key = [edge.a.id, edge.b.id].sort().join(':');
+    if (linked.has(key)) continue;
+    const near = edge.span <= 980;
+    if (near && extraLinks >= 24) continue;
+    if (!near && countryLanes >= 10) continue;
+    linked.add(key);
+    if (near) extraLinks++;
+    else countryLanes++;
+    const dirt = {
+      id: `road-${String(roadNumber++).padStart(3, '0')}`,
+      points: near
+        ? cleanPath(
+            meanderPolyline(
+              approachGate(edge.a, edge.b),
+              approachGate(edge.b, edge.a),
+              rng,
+              edge.span > 420 ? 3 : 2,
+              Math.min(88, edge.span * 0.14)
+            )
+          )
+        : cleanPath(
+            leastCostPath(
+              approachGate(edge.a, edge.b),
+              approachGate(edge.b, edge.a),
+              grid,
+              pathBuffers
+            )
+          ),
+      width: randomBetween(rng, near ? 4.2 : 5.2, near ? 6.6 : 8.4),
+      surface: edge.a.type === 'farm' || edge.b.type === 'farm' ? 'track' : 'dirt',
+      hierarchy: 'access',
+      tags: [
+        near ? 'local-connector' : 'country-lane',
+        `anchor:${edge.a.id}`,
+        `anchor:${edge.b.id}`,
+        'meander',
+      ],
+    };
+    roads.push(dirt);
+    connections[edge.a.id] = [...(connections[edge.a.id] || []), dirt.id];
+    connections[edge.b.id] = [...(connections[edge.b.id] || []), dirt.id];
+  }
+
   // Connectivity is an invariant, represented explicitly rather than inferred
   // from near-coincident rendered points.
   for (const anchor of anchors) {
     if (!connections[anchor.id]?.length) {
       const nearest = nearestRoadPoint(roads, anchor.x, anchor.y);
       const target = nearest ? nearest : town;
-      const road = addRoad(approachGate(anchor, target), target, 'access', 'track', 9, [
+      const road = addRoad(approachGate(anchor, target), target, 'access', 'track', 6, [
         'destination-connector',
         'connectivity-fallback',
         `anchor:${anchor.id}`,

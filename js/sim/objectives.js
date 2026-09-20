@@ -4,6 +4,7 @@
  */
 import { playableLimit } from '../config.js';
 import { isRosterStub, resolveLiveTarget, resolveObjectiveAim } from './targeting.js';
+import { placeKindLabel } from './flavor.js';
 
 export function isAlive(target) {
   if (!target) return false;
@@ -89,22 +90,76 @@ export function canExtract(world, heli, enemies = []) {
   return Math.abs(heli.x) >= lim || Math.abs(heli.y) >= lim;
 }
 
+function holderPlace(world, holder) {
+  if (!holder?.placeId) return null;
+  return (world?.places || []).find((place) => place.id === holder.placeId) || null;
+}
+
 export function getObjectiveFocus(world, boss, enemies, heli) {
   const intel = intelProgress(world);
   if (!intel.complete) {
-    const next = (world.objective?.intel?.holders || []).find(
+    const holders = (world.objective?.intel?.holders || []).filter(
       (h) => !h.destroyed && !h.intelTaken && h.state !== 'dead'
     );
-    if (next) return { x: next.x, y: next.y };
+    if (!holders.length) return null;
+    const hx = heli?.x || 0;
+    const hy = heli?.y || 0;
+    const withPlace = holders.map((holder) => ({ holder, place: holderPlace(world, holder) }));
+    const local = withPlace.filter((item) => item.place?.discovered);
+    const pool = local.length ? local : withPlace;
+    let best = null;
+    let bestD = Infinity;
+    for (const item of pool) {
+      const coarse = !item.place?.discovered;
+      const x = coarse ? (item.place?.x ?? item.holder.x) : item.holder.x;
+      const y = coarse ? (item.place?.y ?? item.holder.y) : item.holder.y;
+      const dist = Math.hypot(x - hx, y - hy);
+      if (dist < bestD) {
+        bestD = dist;
+        best = {
+          x,
+          y,
+          coarse,
+          label: coarse ? placeKindLabel(item.place) : 'INTEL',
+        };
+      }
+    }
+    return best;
   }
   const aim = resolveObjectiveAim(world, enemies, boss, heli);
   if (!aim || aim === boss) return null;
   if (aim.objectiveHidden) return null;
-  return { x: aim.x, y: aim.y };
+  return { x: aim.x, y: aim.y, coarse: false, label: null };
+}
+
+function snapToPlayableEdge(x, y, lim) {
+  const ax = Math.abs(x);
+  const ay = Math.abs(y);
+  if (ax < 1e-6 && ay < 1e-6) return { x: 0, y: -lim, card: 'N' };
+  if (ax >= ay) {
+    return {
+      x: x >= 0 ? lim : -lim,
+      y: (y / ax) * lim,
+      card: x >= 0 ? 'E' : 'W',
+    };
+  }
+  return {
+    x: (x / ay) * lim,
+    y: y >= 0 ? lim : -lim,
+    card: y >= 0 ? 'N' : 'S',
+  };
 }
 
 export function nearestExitPoint(heli, world) {
   const lim = playableLimit(world);
+  let best = null;
+  for (const gate of world?.gateways || []) {
+    if (!Number.isFinite(gate.x) || !Number.isFinite(gate.y)) continue;
+    const edge = snapToPlayableEdge(gate.x, gate.y, lim);
+    const d = Math.hypot(edge.x - heli.x, edge.y - heli.y);
+    if (!best || d < best.d) best = { ...edge, d, highway: true };
+  }
+  if (best) return { x: best.x, y: best.y, card: best.card, highway: true };
   const dL = heli.x + lim,
     dR = lim - heli.x;
   const dT = heli.y + lim,
@@ -117,15 +172,15 @@ export function nearestExitPoint(heli, world) {
   else if (m === dT) y = -lim;
   else y = lim;
   const card = m === dT ? 'N' : m === dR ? 'E' : m === dB ? 'S' : 'W';
-  return { x, y, card };
+  return { x, y, card, highway: false };
 }
 
 export function objectiveHudText(world, { objectiveComplete: done } = {}) {
   if (!world?.objective) return 'STANDBY';
-  if (done) return 'RTB — CROSS THE BORDER TO EXTRACT';
+  if (done) return 'RTB — HIGHWAY TO THE BORDER';
   const intel = intelProgress(world);
   if (!intel.complete) {
-    return `SECURE INTEL  ${intel.secured}/${intel.required}`;
+    return `RECON  ${intel.secured}/${intel.required}  ·  SEARCH MILITARY SITES`;
   }
   if (world.objective.type === 'strike')
     return `DESTROY ${world.objective.targetPlaceName || 'COMMAND TARGET'}`;

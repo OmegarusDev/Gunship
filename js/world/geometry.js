@@ -21,6 +21,27 @@ export function lerpPoint(a, b, t) {
   return { x: lerp(a.x, b.x, t), y: lerp(a.y, b.y, t) };
 }
 
+/** Winding dirt-lane between two points. Amplitude is world units. */
+export function meanderPolyline(a, b, rng, bends = 2, amplitude = 36) {
+  const points = [{ x: a.x, y: a.y }];
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const nx = -dy / len;
+  const ny = dx / len;
+  const count = Math.max(1, Math.floor(bends));
+  for (let i = 1; i <= count; i++) {
+    const t = i / (count + 1);
+    const offset = (rng() * 2 - 1) * amplitude * Math.sin(Math.PI * t);
+    points.push({
+      x: a.x + dx * t + nx * offset,
+      y: a.y + dy * t + ny * offset,
+    });
+  }
+  points.push({ x: b.x, y: b.y });
+  return points;
+}
+
 export function distanceSq(a, b) {
   const dx = b.x - a.x;
   const dy = b.y - a.y;
@@ -197,9 +218,7 @@ export function distancePointToSegment(point, a, b) {
   const dy = b.y - a.y;
   const lengthSq = dx * dx + dy * dy;
   const t =
-    lengthSq <= EPSILON
-      ? 0
-      : clamp(((point.x - a.x) * dx + (point.y - a.y) * dy) / lengthSq, 0, 1);
+    lengthSq <= EPSILON ? 0 : clamp(((point.x - a.x) * dx + (point.y - a.y) * dy) / lengthSq, 0, 1);
   const x = a.x + dx * t;
   const y = a.y + dy * t;
   return { x, y, t, distance: Math.hypot(point.x - x, point.y - y) };

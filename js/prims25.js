@@ -122,12 +122,28 @@ export function footprintPrism25(ctx, polygon, h, m) {
   }
   ctx.fillStyle = m.top;
   facePoly(ctx, top);
-  ctx.strokeStyle = withAlpha('#ffffff', 0.13);
-  ctx.lineWidth = 1;
+  ctx.strokeStyle = withAlpha('#1a140e', 0.38);
+  ctx.lineWidth = 1.15;
   ctx.beginPath();
   ctx.moveTo(top[0].x, top[0].y);
   for (let i = 1; i < top.length; i++) ctx.lineTo(top[i].x, top[i].y);
   ctx.closePath();
+  ctx.stroke();
+  let lightI = 0;
+  let lightY = top[0].y;
+  for (let i = 1; i < top.length; i++) {
+    if (top[i].y < lightY) {
+      lightY = top[i].y;
+      lightI = i;
+    }
+  }
+  const a = top[lightI];
+  const b = top[(lightI + 1) % top.length];
+  ctx.strokeStyle = withAlpha('#fff6d8', 0.22);
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(a.x, a.y);
+  ctx.lineTo(b.x, b.y);
   ctx.stroke();
 }
 

@@ -585,17 +585,20 @@ export function createSandboxCareer(source) {
   for (const id of GUNSHIP_ORDER) hangar[id] = emptyHangarTree();
   const skills = emptySkillMap();
   for (const skill of PILOT_SKILLS) skills[skill.id] = SKILL_MAX;
+  const srcParts = src.pilot?.nameParts;
   return {
     version: 1,
     sandbox: true,
     pilot: {
       name: 'RANGE PILOT',
-      nameParts: src.pilot?.nameParts || {
-        first: 'Range',
-        callsign: 'SAND',
-        last: 'Box',
-        culture: 'american',
-      },
+      nameParts: srcParts
+        ? { ...srcParts }
+        : {
+            first: 'Range',
+            callsign: 'SAND',
+            last: 'Box',
+            culture: 'american',
+          },
       level: 10,
       xp: 0,
       skillPoints: 0,
@@ -933,6 +936,10 @@ export function saveCareer(career) {
   try {
     const roster = loadRoster();
     let slot = roster.slots.find((s) => s.id === roster.activeId);
+    if (!slot && roster.slots.length) {
+      slot = roster.slots[0];
+      roster.activeId = slot.id;
+    }
     if (!slot) {
       const id = newSlotId();
       slot = { id, lastPlayed: Date.now(), career };

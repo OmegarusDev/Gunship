@@ -4,7 +4,7 @@
  * DPR-aware rendering.
  */
 
-import { CAMERA, RENDER } from './config.js';
+import { CAMERA, RENDER } from './config.js?v=18';
 import { lerp } from './rng.js';
 
 export class WorldCamera {

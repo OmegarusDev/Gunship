@@ -64,16 +64,16 @@ export function isDevUnlock() {
 
 export const CAMERA = {
   lerpSpeed: 0.08,
-  zoomMin: 0.5,
-  zoomMax: 2.0,
-  zoomDefault: 1.0,
-  zoomCombat: 1.4,
-  zoomExplore: 0.8,
-  zoomLerp: 0.04,
-  // Dynamic speed/combat zoom (sim tick)
-  zoomSpeedNear: 1.1, // stationary / slow
-  zoomSpeedFar: 0.75, // full speed
-  zoomCombatFloor: 0.95, // minimum while firing at a target
+  zoomMin: 0.55,
+  zoomMax: 1.7,
+  zoomDefault: 1.18,
+  zoomCombat: 1.28,
+  zoomExplore: 0.85,
+  zoomLerp: 0.06,
+  // Route-readable: heli is a marker, not the whole frame. Combat tightens a little.
+  zoomSpeedNear: 1.18, // hover / sortie start
+  zoomSpeedFar: 0.84, // full speed
+  zoomCombatFloor: 1.08,
 };
 
 /**

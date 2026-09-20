@@ -390,6 +390,26 @@ console.log('— practice sandbox —');
   saveCareer(sand);
   const still = loadCareer();
   ok(still && still.dollars === 77 && still.pilot.name === 'KEEP ME', 'sandbox save does not overwrite campaign');
+  campaign.pilot.nameParts.first = 'Alpha';
+  const sand2 = createSandboxCareer(campaign);
+  sand2.pilot.nameParts.first = 'Mutated';
+  ok(campaign.pilot.nameParts.first === 'Alpha', 'sandbox clones nameParts');
+}
+
+console.log('— roster slot reuse —');
+{
+  wipeAllSaves();
+  const c = createCareer(3);
+  saveCareer(c);
+  const raw = JSON.parse(localStorage.getItem('gunship_roster_v1'));
+  raw.activeId = 'missing';
+  localStorage.setItem('gunship_roster_v1', JSON.stringify(raw));
+  c.dollars = 50;
+  saveCareer(c);
+  const after = JSON.parse(localStorage.getItem('gunship_roster_v1'));
+  ok(after.slots.length === 1, 'stale activeId does not duplicate roster slots');
+  ok(after.activeId === raw.slots[0].id, 'stale activeId is repaired to the existing slot');
+  wipeAllSaves();
 }
 
 console.log('— achievements —');

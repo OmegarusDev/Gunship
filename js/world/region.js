@@ -12,6 +12,7 @@ import {
   deriveSeed,
   directionFromAngle,
   localToWorld,
+  meanderPolyline,
   nearestPointOnPolyline,
   orientedRectangle,
   regularPolygon,
@@ -79,6 +80,11 @@ const ANCHOR_META = Object.freeze({
     category: 'industrial',
     scale: [210, 340],
     tags: ['industrial', 'logistics', 'secured'],
+  },
+  oil_field: {
+    category: 'industrial',
+    scale: [280, 420],
+    tags: ['industrial', 'fuel-storage', 'oil', 'secured'],
   },
   checkpoint: {
     category: 'security',
@@ -149,7 +155,9 @@ function terrainSuitability(terrain, x, y) {
 
 function localRelief(terrain, x, y, centerElevation) {
   if (typeof terrain?.elevation !== 'function') return 0;
-  const center = Number.isFinite(centerElevation) ? centerElevation : terrainElevation(terrain, x, y);
+  const center = Number.isFinite(centerElevation)
+    ? centerElevation
+    : terrainElevation(terrain, x, y);
   const east = terrainElevation(terrain, x + 55, y);
   const north = terrainElevation(terrain, x, y + 55);
   return Math.max(Math.abs(center - east), Math.abs(center - north));
@@ -165,26 +173,59 @@ function nearestWadiAxis(terrain, x, y, fallback) {
 }
 
 function buildTypePlan(profileId, count, rng) {
-  const settlementCount = randomInt(rng, 2, 4);
+  const settlementCount = randomInt(rng, 5, 8);
   const plan = ['town'];
   for (let i = 0; i < settlementCount; i++) {
-    const compoundChance = profileId === 'wadi_piedmont' ? 0.45 : 0.22;
+    const compoundChance = profileId === 'wadi_piedmont' ? 0.46 : 0.22;
     plan.push(rng() < compoundChance ? 'compound' : 'village');
   }
 
   if (profileId === 'alluvial_palm') {
-    plan.push('farm', 'farm', 'farm', 'roadside_service');
+    plan.push(
+      'farm',
+      'farm',
+      'farm',
+      'farm',
+      'farm',
+      'farm',
+      'roadside_service',
+      'roadside_service',
+      'roadside_service'
+    );
   } else if (profileId === 'wadi_piedmont') {
-    plan.push('farm', 'farm', 'roadside_service');
+    plan.push('farm', 'farm', 'farm', 'farm', 'roadside_service', 'compound', 'compound');
   } else {
-    plan.push('farm', 'roadside_service', 'roadside_service', 'fuel_depot');
+    plan.push(
+      'farm',
+      'farm',
+      'farm',
+      'roadside_service',
+      'roadside_service',
+      'roadside_service',
+      'fuel_depot'
+    );
   }
-  plan.push('fuel_depot', 'industrial_depot', 'checkpoint', 'camp', 'sam_site', 'sam_site');
+  plan.push(
+    'fuel_depot',
+    'oil_field',
+    'industrial_depot',
+    'checkpoint',
+    'camp',
+    'sam_site',
+    'sam_site'
+  );
 
   const extras = {
-    alluvial_palm: ['farm', 'roadside_service', 'checkpoint', 'industrial_depot'],
-    wadi_piedmont: ['compound', 'checkpoint', 'camp', 'farm', 'roadside_service'],
-    desert_logistics: ['fuel_depot', 'industrial_depot', 'checkpoint', 'camp', 'sam_site'],
+    alluvial_palm: ['farm', 'village', 'roadside_service', 'compound', 'farm', 'village'],
+    wadi_piedmont: ['compound', 'village', 'farm', 'farm', 'roadside_service', 'village'],
+    desert_logistics: [
+      'roadside_service',
+      'farm',
+      'village',
+      'fuel_depot',
+      'oil_field',
+      'roadside_service',
+    ],
   }[profileId];
   while (plan.length < count) plan.push(randomPick(rng, extras));
   return plan.slice(0, count);
@@ -198,7 +239,8 @@ function rayToOperationalBoundary(direction, half, inset) {
 }
 
 function chooseCandidateSource(type, terrain, scale, axes, half, rng) {
-  const isWaterDriven = type === 'town' || type === 'village' || type === 'compound' || type === 'farm';
+  const isWaterDriven =
+    type === 'town' || type === 'village' || type === 'compound' || type === 'farm';
   const isHighGround = type === 'sam_site' || type === 'camp';
   const margin = scale * 0.58 + 80;
 
@@ -214,7 +256,7 @@ function chooseCandidateSource(type, terrain, scale, axes, half, rng) {
     };
   }
 
-  if (isWaterDriven && terrain?.oases?.length && rng() < 0.38) {
+  if (isWaterDriven && terrain?.oases?.length && rng() < 0.58) {
     const oasis = randomPick(rng, terrain.oases);
     const angle = rng() * TAU;
     const distance = oasis.radius * randomBetween(rng, 0.35, 1.05) + scale * 0.18;
@@ -247,6 +289,7 @@ function chooseCandidateSource(type, terrain, scale, axes, half, rng) {
     (type === 'roadside_service' ||
       type === 'fuel_depot' ||
       type === 'industrial_depot' ||
+      type === 'oil_field' ||
       type === 'checkpoint') &&
     rng() < 0.65
   ) {
@@ -293,9 +336,17 @@ function scoreCandidate(candidate, type, category, scale, terrain, axes, worldSi
   if (ground === 'wadi') return -Infinity;
 
   let nearestSpacing = Infinity;
+  const clustered =
+    type === 'farm' || type === 'village' || type === 'compound' || type === 'roadside_service';
   for (const anchor of placed) {
     const distance = Math.hypot(candidate.x - anchor.x, candidate.y - anchor.y);
-    const required = Math.max(340, (scale + anchor.scale) * 0.5);
+    const neighborClustered =
+      anchor.type === 'farm' ||
+      anchor.type === 'village' ||
+      anchor.type === 'compound' ||
+      anchor.type === 'roadside_service';
+    const tight = clustered && neighborClustered;
+    const required = Math.max(tight ? 148 : 230, (scale + anchor.scale) * (tight ? 0.26 : 0.4));
     if (distance < required) return -Infinity;
     nearestSpacing = Math.min(nearestSpacing, distance);
   }
@@ -330,7 +381,13 @@ function scoreCandidate(candidate, type, category, scale, terrain, axes, worldSi
     score -= Math.abs(radial - desired) / (worldSize * 0.16);
   }
   if (type === 'sam_site') score += elevation / 350;
-  if (nearestSpacing < Infinity) score += Math.min(nearestSpacing / 1800, 0.8);
+  if (nearestSpacing < Infinity) {
+    if (clustered) {
+      score += Math.exp(-Math.max(0, nearestSpacing - 200) / 360) * 2.2;
+    } else {
+      score += Math.min(nearestSpacing / 1800, 0.8);
+    }
+  }
   return score;
 }
 
@@ -341,7 +398,7 @@ function placeAnchor(type, index, profile, terrain, axes, worldSize, placed, rng
   let best = null;
   let bestScore = -Infinity;
 
-  for (let attempt = 0; attempt < 280; attempt++) {
+  for (let attempt = 0; attempt < 380; attempt++) {
     const candidate = chooseCandidateSource(type, terrain, scale, axes, worldSize * 0.5, rng);
     const score = scoreCandidate(
       candidate,
@@ -420,6 +477,33 @@ function makeArea(id, type, footprint, tags, anchorId = null) {
   };
 }
 
+function irregularPlot(center, axis, width, depth, rng) {
+  const points = [];
+  const sides = randomInt(rng, 7, 10);
+  for (let i = 0; i < sides; i++) {
+    const turn = (i / sides) * TAU + randomBetween(rng, -0.16, 0.16);
+    const along = Math.cos(turn) * width * 0.5 * randomBetween(rng, 0.72, 1.22);
+    const across = Math.sin(turn) * depth * 0.5 * randomBetween(rng, 0.72, 1.22);
+    points.push(localToWorld(center, axis, along, across));
+  }
+  return points;
+}
+
+function makeTrack(id, points, width, tags, anchorId = null) {
+  return {
+    id,
+    type: 'farm_track',
+    geometry: 'line',
+    x: points[Math.floor(points.length / 2)].x,
+    y: points[Math.floor(points.length / 2)].y,
+    points,
+    width,
+    bounds: boundsFromPoints(points),
+    anchorId,
+    tags,
+  };
+}
+
 function buildLandUse(profile, anchors, terrain, rng) {
   const landUse = [];
   let id = 1;
@@ -429,23 +513,67 @@ function buildLandUse(profile, anchors, terrain, rng) {
     if (anchor.type !== 'farm' && anchor.type !== 'village' && anchor.type !== 'compound') continue;
     const fieldCount =
       anchor.type === 'farm'
-        ? randomInt(rng, profile.id === 'alluvial_palm' ? 3 : 2, 5)
-        : randomInt(rng, 1, 2);
+        ? randomInt(rng, profile.id === 'alluvial_palm' ? 6 : 4, 10)
+        : randomInt(rng, 3, 6);
+    const fieldCenters = [];
     for (let field = 0; field < fieldCount; field++) {
       const side = field % 2 === 0 ? -1 : 1;
-      const along = (field - (fieldCount - 1) * 0.5) * anchor.scale * 0.24;
-      const across = side * anchor.scale * randomBetween(rng, 0.38, 0.62);
+      const along = (field - (fieldCount - 1) * 0.5) * anchor.scale * 0.2;
+      const across = side * anchor.scale * randomBetween(rng, 0.28, 0.78);
       const center = localToWorld(anchor, anchor.axis, along, across);
-      const width = anchor.scale * randomBetween(rng, 0.34, 0.58);
-      const depth = anchor.scale * randomBetween(rng, 0.22, 0.4);
+      fieldCenters.push(center);
+      const width = anchor.scale * randomBetween(rng, 0.26, 0.5);
+      const depth = anchor.scale * randomBetween(rng, 0.16, 0.38);
       const type =
-        profile.id === 'alluvial_palm' && (field === 0 || rng() < 0.38) ? 'palm_grove' : 'field';
-      landUse.push(
-        makeArea(nextId(), type, orientedRectangle(center.x, center.y, width, depth, anchor.axis), [
+        profile.id === 'alluvial_palm' && (field === 0 || rng() < 0.48)
+          ? 'palm_grove'
+          : rng() < 0.18
+            ? 'scrub'
+            : 'field';
+      const area = makeArea(
+        nextId(),
+        type,
+        irregularPlot(center, anchor.axis + randomBetween(rng, -0.22, 0.22), width, depth, rng),
+        [
           'productive-land',
-          type === 'palm_grove' ? 'date-palms' : 'irrigated-field',
+          type === 'palm_grove'
+            ? 'date-palms'
+            : type === 'scrub'
+              ? 'desert-scrub'
+              : 'irrigated-field',
           profile.id,
-        ], anchor.id)
+        ],
+        anchor.id
+      );
+      area.tint = randomBetween(rng, 0, 1);
+      area.angle = anchor.axis + randomBetween(rng, -0.22, 0.22);
+      landUse.push(area);
+      landUse.push(
+        makeTrack(
+          nextId(),
+          meanderPolyline(
+            { x: anchor.x, y: anchor.y },
+            center,
+            rng,
+            randomInt(rng, 2, 4),
+            randomBetween(rng, 14, 32)
+          ),
+          randomBetween(rng, 3.1, 4.8),
+          ['farm-track', 'dirt', profile.id],
+          anchor.id
+        )
+      );
+    }
+    for (let i = 0; i < fieldCenters.length - 1; i++) {
+      if (rng() > 0.62) continue;
+      landUse.push(
+        makeTrack(
+          nextId(),
+          meanderPolyline(fieldCenters[i], fieldCenters[i + 1], rng, 2, randomBetween(rng, 10, 22)),
+          randomBetween(rng, 2.8, 4.2),
+          ['farm-track', 'field-link', profile.id],
+          anchor.id
+        )
       );
     }
 
@@ -481,14 +609,105 @@ function buildLandUse(profile, anchors, terrain, rng) {
   if ((profile.id === 'alluvial_palm' || profile.id === 'desert_logistics') && terrain?.basin) {
     const basin = terrain.basin;
     const radius = Math.max(150, Math.min(410, basin.radius * 0.7));
-    const footprint = regularPolygon(basin.x, basin.y, radius, 14, rng() * 0.3).map((point, index) => {
-      const factor = index % 2 === 0 ? 1 : 0.82;
-      return {
-        x: basin.x + (point.x - basin.x) * factor,
-        y: basin.y + (point.y - basin.y) * factor * 0.62,
-      };
-    });
+    const footprint = regularPolygon(basin.x, basin.y, radius, 14, rng() * 0.3).map(
+      (point, index) => {
+        const factor = index % 2 === 0 ? 1 : 0.82;
+        return {
+          x: basin.x + (point.x - basin.x) * factor,
+          y: basin.y + (point.y - basin.y) * factor * 0.62,
+        };
+      }
+    );
     landUse.push(makeArea(nextId(), 'sabkha', footprint, ['saline-flat', 'seasonal-inundation']));
+  }
+
+  for (const wadi of terrain?.wadis || []) {
+    if (!wadi.points || wadi.points.length < 3) continue;
+    const groveCount = wadi.order === 1 ? randomInt(rng, 3, 6) : randomInt(rng, 2, 3);
+    for (let grove = 0; grove < groveCount; grove++) {
+      const index = randomInt(rng, 1, Math.max(1, wadi.points.length - 2));
+      const point = wadi.points[index];
+      const next = wadi.points[index + 1] || point;
+      const angle = Math.atan2(next.y - point.y, next.x - point.x);
+      const side = grove % 2 === 0 ? 1 : -1;
+      const center = {
+        x: point.x - Math.sin(angle) * (wadi.width * 0.45 + 28) * side,
+        y: point.y + Math.cos(angle) * (wadi.width * 0.45 + 28) * side,
+      };
+      const kind = profile.id === 'desert_logistics' && rng() < 0.55 ? 'scrub' : 'palm_grove';
+      const groveArea = makeArea(
+        nextId(),
+        kind,
+        irregularPlot(center, angle, randomBetween(rng, 78, 150), randomBetween(rng, 46, 88), rng),
+        [kind === 'scrub' ? 'wadi-scrub' : 'wadi-palms', profile.id]
+      );
+      groveArea.tint = randomBetween(rng, 0, 1);
+      landUse.push(groveArea);
+    }
+    if (wadi.order === 1 && wadi.points.length >= 4) {
+      const offsetPoints = [];
+      const step = Math.max(1, Math.floor(wadi.points.length / 7));
+      for (let i = 0; i < wadi.points.length; i += step) {
+        const point = wadi.points[i];
+        const next = wadi.points[Math.min(i + 1, wadi.points.length - 1)];
+        const angle = Math.atan2(next.y - point.y, next.x - point.x);
+        offsetPoints.push({
+          x: point.x - Math.sin(angle) * (wadi.width * 0.55 + 18),
+          y: point.y + Math.cos(angle) * (wadi.width * 0.55 + 18),
+        });
+      }
+      if (offsetPoints.length >= 2) {
+        landUse.push(
+          makeTrack(nextId(), offsetPoints, randomBetween(rng, 3.4, 5.2), [
+            'wadi-track',
+            'dirt',
+            profile.id,
+          ])
+        );
+      }
+    }
+  }
+
+  const civilians = anchors.filter(
+    (anchor) =>
+      anchor.type === 'farm' ||
+      anchor.type === 'village' ||
+      anchor.type === 'compound' ||
+      anchor.type === 'town'
+  );
+  let patches = 0;
+  for (let i = 0; i < civilians.length && patches < 16; i++) {
+    for (let j = i + 1; j < civilians.length && patches < 16; j++) {
+      const a = civilians[i];
+      const b = civilians[j];
+      const span = Math.hypot(a.x - b.x, a.y - b.y);
+      if (span < 180 || span > 620 || rng() > 0.42) continue;
+      const mid = {
+        x: (a.x + b.x) * 0.5,
+        y: (a.y + b.y) * 0.5,
+      };
+      const kind =
+        profile.id === 'desert_logistics' && rng() < 0.5
+          ? 'scrub'
+          : rng() < 0.55
+            ? 'palm_grove'
+            : 'field';
+      const patch = makeArea(
+        nextId(),
+        kind,
+        irregularPlot(
+          mid,
+          Math.atan2(b.y - a.y, b.x - a.x),
+          randomBetween(rng, 55, 110),
+          randomBetween(rng, 34, 68),
+          rng
+        ),
+        ['in-between', kind === 'field' ? 'irrigated-field' : kind, profile.id]
+      );
+      patch.tint = randomBetween(rng, 0, 1);
+      landUse.push(patch);
+      patches++;
+    }
   }
 
   for (const anchor of anchors.filter((item) => item.category === 'industrial')) {
@@ -497,13 +716,7 @@ function buildLandUse(profile, anchors, terrain, rng) {
       makeArea(
         nextId(),
         'service_yard',
-        orientedRectangle(
-          center.x,
-          center.y,
-          anchor.scale * 0.7,
-          anchor.scale * 0.32,
-          anchor.axis
-        ),
+        orientedRectangle(center.x, center.y, anchor.scale * 0.7, anchor.scale * 0.32, anchor.axis),
         ['graded-yard', 'freight-handling', profile.id],
         anchor.id
       )
@@ -539,11 +752,7 @@ export function generateRegion(seed, worldSize, terrain, act = 1) {
       id: 'axis-trade',
       angle: tradeAngle,
       direction: tradeDirection,
-      from: rayToOperationalBoundary(
-        { x: -tradeDirection.x, y: -tradeDirection.y },
-        half,
-        45
-      ),
+      from: rayToOperationalBoundary({ x: -tradeDirection.x, y: -tradeDirection.y }, half, 45),
       to: rayToOperationalBoundary(tradeDirection, half, 45),
       tags: ['regional-road-demand', profile.id],
     },
@@ -561,8 +770,8 @@ export function generateRegion(seed, worldSize, terrain, act = 1) {
     },
   };
 
-  const extra = Math.max(0, (Math.floor(act) || 1) - 1) * 2;
-  const targetCount = randomInt(rng, 14 + extra, 17 + extra);
+  const extra = Math.max(0, (Math.floor(act) || 1) - 1) * 3;
+  const targetCount = randomInt(rng, 26 + extra, 32 + extra);
   const typePlan = buildTypePlan(profile.id, targetCount, rng);
   const anchors = [];
   for (let index = 0; index < typePlan.length; index++) {

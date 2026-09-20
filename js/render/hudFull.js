@@ -33,9 +33,7 @@ function drawDamageVignette(ctx, layout, heli) {
   const hpPct = heli.hp / heli.maxHp;
   if (hpPct >= 0.35) return;
   const pulse = 0.75 + 0.25 * Math.sin(performance.now() / 160);
-  const a = heli.noFlinch
-    ? 0
-    : (1 - hpPct / 0.35) * 0.38 * pulse * (1 - (heli.redScreenRed || 0));
+  const a = heli.noFlinch ? 0 : (1 - hpPct / 0.35) * 0.38 * pulse * (1 - (heli.redScreenRed || 0));
   const vg = ctx.createRadialGradient(
     layout.W / 2,
     layout.H / 2,
@@ -74,7 +72,9 @@ function drawTopBand(ctx, layout, bag) {
       ctx.fillText(' · NO PAY', mission.x + padX + kw, mission.y + 6);
     }
 
-    ctx.font = layout.compact ? 'bold 11px "Courier New", monospace' : 'bold 12px "Courier New", monospace';
+    ctx.font = layout.compact
+      ? 'bold 11px "Courier New", monospace'
+      : 'bold 12px "Courier New", monospace';
     const done = sortieState.objectiveComplete;
     ctx.fillStyle = done ? '#44ddff' : '#ffcc44';
     const showIntel = intel && !intel.complete;
@@ -84,7 +84,7 @@ function drawTopBand(ctx, layout, bag) {
       ctx.fillText(ellipsize(ctx, line, maxW), mission.x + padX, ty);
       ty += 14;
     }
-    if (showIntel && !/INTEL/.test(objectiveText)) {
+    if (showIntel && !/RECON|INTEL/.test(objectiveText)) {
       ctx.font = 'bold 10px "Courier New", monospace';
       ctx.fillStyle = '#88eeff';
       ctx.fillText(`INTEL ${intel.secured}/${intel.required}`, mission.x + padX, ty);
@@ -161,8 +161,7 @@ function drawTopBand(ctx, layout, bag) {
     const fearThreshold = bag.fearThreshold || 10;
     hudAnim.fear +=
       (clamp(heli.fear / fearThreshold, 0, 1) - hudAnim.fear) * Math.min(1, 8 * (dt || 0.016));
-    hudAnim.heat +=
-      (sortieState.heat.value / 100 - hudAnim.heat) * Math.min(1, 8 * (dt || 0.016));
+    hudAnim.heat += (sortieState.heat.value / 100 - hudAnim.heat) * Math.min(1, 8 * (dt || 0.016));
     const padX = 10;
     const meterW = status.w - padX * 2;
     ctx.textAlign = 'left';
@@ -210,7 +209,9 @@ function drawTopBand(ctx, layout, bag) {
 function hunterEta(bag) {
   const { bossState, sortieState, contract } = bag;
   const strongholdClock = contract?.stronghold && sortieState.strongholdTimeRemaining > 0;
-  if (!(bossState.active && !bossState.defeated) && !strongholdClock) return null;
+  if (!strongholdClock && (!(bossState.active && !bossState.defeated) || bossState.spawned)) {
+    return null;
+  }
   const remaining = strongholdClock ? sortieState.strongholdTimeRemaining : bossState.timeRemaining;
   const secs = Math.max(0, Math.ceil(remaining));
   const mins = Math.floor(secs / 60);
@@ -438,6 +439,8 @@ function drawTacticalRadar(ctx, layout, bag) {
   if (intel && !intel.complete) {
     for (const h of holders) {
       if (h.destroyed || h.intelTaken) continue;
+      const place = world.places?.find((p) => p.id === h.placeId);
+      if (place && !place.discovered) continue;
       const pr = 3.2 + Math.sin(performance.now() / 180) * 1.1;
       ctx.strokeStyle = '#44ddff';
       ctx.lineWidth = 1.2;
@@ -582,7 +585,9 @@ function drawCompass(ctx, layout, bag) {
     ctx.fill();
   };
   const objFocusC = getObjectiveFocus();
-  if (objFocusC) bearingMarker(objFocusC.x, objFocusC.y, '#ffcc44');
+  if (objFocusC && !(bag.contract?.styleId === 'low_profile' && objFocusC.coarse)) {
+    bearingMarker(objFocusC.x, objFocusC.y, '#ffcc44');
+  }
   if (world?.extraction?.active) {
     const ep = nearestExitPoint();
     bearingMarker(ep.x, ep.y, '#44ddff');
@@ -609,11 +614,7 @@ function drawCompass(ctx, layout, bag) {
   ctx.fillStyle = P.ui.textDim;
   ctx.fillText(`${spdNow} SPD`, cx, readY);
   ctx.textAlign = 'right';
-  ctx.fillText(
-    `${tStr}  ${bag.sortieState.stats.kills}K`,
-    x + w - 8,
-    readY
-  );
+  ctx.fillText(`${tStr}  ${bag.sortieState.stats.kills}K`, x + w - 8, readY);
 }
 
 function drawActionCluster(ctx, layout, bag) {
@@ -665,7 +666,11 @@ function drawActionCluster(ctx, layout, bag) {
   ctx.font = 'bold 11px "Courier New", monospace';
   ctx.fillStyle = ready ? P.ui.textBright : P.ui.textDim;
   const kitName = ellipsize(ctx, eq ? eq.name : 'NO KIT', layout.equip.w - 12);
-  ctx.fillText(kitName, layout.equip.x + layout.equip.w / 2, layout.equip.y + layout.equip.h / 2 + 4);
+  ctx.fillText(
+    kitName,
+    layout.equip.x + layout.equip.w / 2,
+    layout.equip.y + layout.equip.h / 2 + 4
+  );
   if (heli.hasMissiles) {
     const mslReady = (heli.missileCooldown || 0) <= 0;
     ctx.font = 'bold 7px "Courier New", monospace';
@@ -676,12 +681,14 @@ function drawActionCluster(ctx, layout, bag) {
       layout.equip.y + layout.equip.h - 9
     );
   }
-  if (ready) pushHit(layout.equip, 'equipment');
+  pushHit(layout.equip, 'equipment');
 }
 
 function drawMarkers(ctx, layout, bag) {
   const focus = bag.getObjectiveFocus();
-  if (focus) {
+  const styleId = bag.contract?.styleId;
+  const hideCoarse = styleId === 'low_profile' && focus?.coarse;
+  if (focus && !hideCoarse) {
     const intel = bag.intel || { complete: true };
     drawOffscreenMarker(
       ctx,
@@ -692,7 +699,7 @@ function drawMarkers(ctx, layout, bag) {
       focus.y,
       intel.complete ? '#ff5544' : '#44ddff',
       intel.complete ? '#ff9966' : '#88eeff',
-      intel.complete ? null : 'INTEL',
+      intel.complete ? null : focus.label || 'SEARCH',
       bag.uiS,
       layout.markerMargins
     );
@@ -708,7 +715,7 @@ function drawMarkers(ctx, layout, bag) {
       ep.y,
       '#44ddff',
       '#88ddff',
-      `EXIT ${ep.card}`,
+      ep.highway ? `HWY ${ep.card}` : `EXIT ${ep.card}`,
       bag.uiS,
       layout.markerMargins
     );
@@ -721,7 +728,7 @@ function drawHints(ctx, layout, bag) {
     const MODE_HELP = {
       closest: 'nearest hostile in weapons range',
       strongest: 'hostile with highest damage per second',
-      infrastructure: 'buildings & convoys only',
+      infrastructure: 'structures you meant to hit — villages if you insist',
     };
     const alpha = Math.min(1, (bag.modeToastUntil - now) / 600);
     ctx.globalAlpha = alpha;
@@ -742,7 +749,9 @@ function drawHints(ctx, layout, bag) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
     ctx.fillText(
-      bag.isTouch ? 'JOYSTICK  ·  FIRE  ·  TGT  ·  EQUIP' : 'WASD  ·  AIM  ·  FIRE  ·  V  ·  E  ·  P',
+      bag.isTouch
+        ? 'JOYSTICK  ·  FIRE  ·  TGT  ·  EQUIP'
+        : 'WASD  ·  AIM  ·  FIRE  ·  V  ·  E  ·  P',
       layout.W / 2,
       layout.hintY
     );
@@ -762,7 +771,11 @@ function drawHints(ctx, layout, bag) {
     ctx.textBaseline = 'middle';
     ctx.fillText('! INCOMING HOSTILE !', layout.W / 2, layout.H / 2 - 24);
     ctx.font = '12px "Courier New", monospace';
-    ctx.fillText(`ARRIVING IN ${Math.ceil(bag.bossState.warningTimer)}s`, layout.W / 2, layout.H / 2);
+    ctx.fillText(
+      `ARRIVING IN ${Math.ceil(bag.bossState.warningTimer)}s`,
+      layout.W / 2,
+      layout.H / 2
+    );
   }
 }
 

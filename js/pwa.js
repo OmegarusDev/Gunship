@@ -82,9 +82,9 @@ export function refreshPwaChrome() {
   const fs = $('pwa-fullscreen');
   if (fs) {
     fs.textContent = isDomFullscreen() ? 'EXIT FULLSCREEN' : 'FULLSCREEN';
-    show(fs, onHub);
+    show(fs, onHub && !standalone);
   }
-  show($('pwa-update'), pendingUpdate);
+  show($('pwa-update'), pendingUpdate && onHub);
 }
 
 function showInstallHelp(on) {

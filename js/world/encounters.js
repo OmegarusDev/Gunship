@@ -273,8 +273,7 @@ function candidateForPlace(place, districts) {
 function roadPatrolCandidate(roads, index, rng) {
   const candidates = roads.filter(
     (road) =>
-      (road.hierarchy === 'highway' || road.hierarchy === 'secondary') &&
-      road.points.length >= 2
+      (road.hierarchy === 'highway' || road.hierarchy === 'secondary') && road.points.length >= 2
   );
   const road = candidates[index % candidates.length];
   if (!road) return null;
@@ -284,7 +283,15 @@ function roadPatrolCandidate(roads, index, rng) {
   return { road, point };
 }
 
-export function generateEncounters(seed, places, districts, buildings, roads, act = 1, worldSize = WORLD_SIZE) {
+export function generateEncounters(
+  seed,
+  places,
+  districts,
+  buildings,
+  roads,
+  act = 1,
+  worldSize = WORLD_SIZE
+) {
   const rng = mulberry32(deriveSeed(seed, 'encounters'));
   const extra = Math.max(0, (Math.floor(act) || 1) - 1) * 2;
   const targetCount = integer(rng, 10 + extra, 14 + extra);
@@ -297,18 +304,19 @@ export function generateEncounters(seed, places, districts, buildings, roads, ac
     .filter((place) => place.category === 'military' || place.category === 'industrial')
     .flatMap((place) => candidateForPlace(place, districts))
     .sort((a, b) => {
-      const rank = { sam_site: 4, camp: 3, checkpoint: 2, fuel_depot: 1 };
+      const rank = { sam_site: 4, camp: 3, checkpoint: 2, fuel_depot: 1, oil_field: 1 };
       return (rank[b.place.kind] || 0) - (rank[a.place.kind] || 0);
     });
   const civilian = places
     .filter(
       (place) =>
-        place.category === 'civilian' &&
-        place.kind !== 'farm' &&
-        place.kind !== 'roadside_service'
+        place.category === 'civilian' && place.kind !== 'farm' && place.kind !== 'roadside_service'
     )
     .flatMap((place) => candidateForPlace(place, districts))
-    .map((candidate) => ({ ...candidate, priority: candidate.place.kind === 'town' ? 75 : rng() * 55 }))
+    .map((candidate) => ({
+      ...candidate,
+      priority: candidate.place.kind === 'town' ? 75 : rng() * 55,
+    }))
     .sort((a, b) => b.priority - a.priority);
 
   const selected = [];

@@ -170,12 +170,12 @@ export const P = {
 /** Get material palette from a base color. Convenience wrapper. */
 export function mats(col) {
   return {
-    top: shade(col, 0.16),
-    topHi: shade(col, 0.28),
-    side: shade(col, -0.05),
-    sideDark: shade(col, -0.22),
-    sideDeep: shade(col, -0.36),
-    rim: shade(col, -0.42),
-    accent: shade(col, 0.06),
+    top: shade(col, 0.24),
+    topHi: shade(col, 0.36),
+    side: shade(col, -0.12),
+    sideDark: shade(col, -0.3),
+    sideDeep: shade(col, -0.42),
+    rim: shade(col, -0.48),
+    accent: shade(col, 0.08),
   };
 }
